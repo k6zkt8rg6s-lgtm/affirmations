@@ -1,0 +1,1973 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<!--
+  Политика безопасности. Скрипт и стили разрешены по контрольной сумме,
+  а не по источнику: подменить их нельзя, сумма не сойдётся.
+    default-src 'none'     — по умолчанию запрещено всё
+    media-src blob:        — звук только свой, созданный на этом устройстве;
+                             подгрузить запись с чужого адреса нельзя
+    worker-src 'self'      — офлайн-режим только из своего же файла
+    connect-src 'none'     — fetch, XHR, WebSocket заблокированы браузером
+    form-action 'none'     — формы никуда не отправляются
+    frame-ancestors 'none' — страницу нельзя встроить в чужой сайт
+  Данным физически некуда утечь.
+-->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               script-src 'sha256-YnnxB01yyBvKqsUvr8jkv/r7xKCmXBqnCA7nI3pgZ40=';
+               style-src 'sha256-wS3zVs6OFNLtils95t3NBUz2o6j1raUf22W4Wr2B4Fw=';
+               img-src 'self' data:;
+               media-src blob:;
+               worker-src 'self';
+               manifest-src 'self';
+               connect-src 'none';
+               form-action 'none';
+               base-uri 'none';
+               frame-ancestors 'none';
+               object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F4F3EF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Аффирмации">
+<title>Аффирмации</title>
+<!--
+  Манифест и иконка нужны для добавления на экран «Домой». iOS берёт
+  иконку только из apple-touch-icon и только в PNG: со ссылкой на SVG
+  он молча подставит вместо неё снимок страницы.
+  При открытии одиночного файла этих спутников рядом нет — ссылки просто
+  ни к чему не приведут и ничего не сломают.
+-->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>/* Аффирмации — оформление.
+   Один файл, никаких внешних шрифтов и картинок: всё, что грузится
+   из сети, — это лишний способ подсунуть код. Шрифты системные. */
+
+:root {
+  --paper: #F4F3EF;          /* тон бумаги с фотографии */
+  --dot: #C9C7C0;            /* точки на фоне */
+  --ink: #1C1B19;
+  --ink-soft: #6B6862;
+  --card-yellow: #E6C84C;    /* цвет карточки с фотографии */
+  --card-yellow-edge: #D4B63C;
+  --sheet: #FFFFFF;
+  --hair: rgba(0, 0, 0, .08);
+  --danger: #C0392B;
+  --heart: #E23B3B;
+  --radius-l: 22px;
+  --radius-m: 16px;
+  --tap: 44px;               /* минимальная зона нажатия по гайдлайнам Apple */
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overscroll-behavior-y: none;      /* без «резинки» при прокрутке */
+  -webkit-text-size-adjust: 100%;   /* iOS не масштабирует текст сам */
+}
+
+body {
+  font: 400 17px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Helvetica Neue", Arial, sans-serif;
+  color: var(--ink);
+  background-color: var(--paper);
+  /* Точечная сетка как на фотографии — рисуется градиентом, без картинки */
+  background-image: radial-gradient(var(--dot) 1.15px, transparent 1.15px);
+  background-size: 22px 22px;
+  background-position: 0 0;
+}
+
+.app {
+  min-height: 100%;
+  padding: max(12px, env(safe-area-inset-top)) 16px
+           max(16px, env(safe-area-inset-bottom)) 16px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* ---------- Шапка ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap);
+  margin-bottom: 6px;
+}
+.topbar h1 {
+  font: 700 30px/1.15 -apple-system, BlinkMacSystemFont, "SF Pro Display",
+        "Helvetica Neue", Arial, sans-serif;
+  margin: 0;
+  flex: 1;
+  letter-spacing: -.4px;
+}
+.topbar h1.small { font-size: 22px; }
+
+.iconbtn {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .05);
+  color: var(--ink);
+  font-size: 19px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.iconbtn:active { background: rgba(0, 0, 0, .12); }
+.iconbtn.ghost { background: transparent; }
+
+/* Сердечко: пустое — обычное, залитое — красное */
+.iconbtn.heart { background: transparent; font-size: 22px; color: var(--ink-soft); }
+.iconbtn.heart.on { color: var(--heart); }
+.mini-heart { color: var(--heart); font-size: 16px; flex: none; }
+.mini-audio { color: var(--ink-soft); font-size: 15px; flex: none; }
+
+/* Кнопка записи. Красная точка, во время записи пульсирует и рядом
+   идёт счётчик — иначе непонятно, пишется ли что-то вообще. */
+.iconbtn.rec {
+  background: transparent;
+  color: var(--heart);
+  font-size: 17px;
+  gap: 6px;
+  width: auto;
+  padding: 0 8px;
+}
+.iconbtn.rec.on { background: rgba(226, 59, 59, .12); animation: pulse 1.1s infinite; }
+.rec-time {
+  font-size: 13px;
+  color: var(--heart);
+  font-variant-numeric: tabular-nums;   /* цифры не прыгают по ширине */
+  min-width: 34px;
+}
+@keyframes pulse { 50% { opacity: .5; } }
+
+/* Пауза и стоп появляются рядом с кнопкой записи только во время записи */
+.rec-box { display: flex; align-items: center; gap: 2px; }
+.iconbtn.rec-ctl {
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  min-width: 34px;
+  min-height: var(--tap);
+}
+.iconbtn.rec-ctl:active { background: rgba(0, 0, 0, .10); }
+
+/* Знак паузы всегда один и тот же — меняется только плотность.
+   Идёт запись — приглушён; на паузе — наливается цветом и весом. */
+.iconbtn.rec-ctl.recording { opacity: .38; font-weight: 400; }
+.iconbtn.rec-ctl.paused {
+  opacity: 1;
+  font-weight: 800;
+  color: var(--heart);
+  transform: scale(1.12);
+}
+.iconbtn.rec-ctl { transition: opacity .18s ease, transform .18s ease; }
+
+/* Строка избранного: слева нажимаемая зона, справа отдельное сердечко */
+.mini-open {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  min-height: var(--tap);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  min-width: 0;
+}
+.mini-open:active { opacity: .6; }
+
+/* Полоска проигрывания внизу карточки */
+.audio-bar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.audio-bar:empty { display: none; }
+.audio-btn {
+  min-width: 40px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .14);
+  color: #2B2408;
+  font-size: 15px;
+  cursor: pointer;
+  flex: none;
+}
+.audio-btn:active { background: rgba(0, 0, 0, .24); }
+/* Время прослушивания — намеренно тихое: цифры не должны спорить
+   с текстом аффирмации, они справочные */
+.audio-label {
+  font-size: 12px;
+  color: rgba(43, 36, 8, .42);
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .2px;
+}
+.audio-del {
+  border: 0;
+  background: transparent;
+  color: rgba(43, 36, 8, .55);
+  font-size: 15px;
+  min-width: 32px;
+  min-height: 32px;
+  cursor: pointer;
+  flex: none;
+}
+
+/* ---------- Разделы и колоды ---------- */
+.section { margin: 22px 0 6px; }
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+.section-head h2 {
+  font: 600 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+/* Заголовок раздела — кнопка сворачивания на всю ширину */
+.section-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 8px 0;
+  min-height: var(--tap);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.section-toggle:active { opacity: .6; }
+.chev {
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform .18s ease;
+  transform: rotate(0deg);
+  flex: none;
+}
+.chev.closed { transform: rotate(-90deg); }
+.section-count { color: var(--ink-soft); font-size: 13px; margin-left: auto; }
+.section.collapsed { margin-bottom: 0; }
+
+/* Список избранного в окне управления не должен вытеснять кнопки */
+.card-list.scroll { max-height: 46vh; overflow-y: auto; }
+.mini.row { cursor: default; }
+.mini.row:active { background: var(--sheet); }
+
+.deck-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 10px;
+}
+@media (max-width: 380px) { .deck-grid { grid-template-columns: 1fr; } }
+
+/* Колода нарисована стопкой: два листа выглядывают из-под верхнего */
+.deck {
+  position: relative;
+  border: 0;
+  text-align: left;
+  border-radius: var(--radius-m);
+  padding: 16px 14px 14px;
+  min-height: 104px;
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+}
+.deck::before,
+.deck::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  border-radius: var(--radius-m);
+  background: inherit;
+  z-index: -1;
+}
+.deck::before { bottom: -5px; height: 20px; filter: brightness(.92); }
+.deck::after  { left: 15px; right: 15px; bottom: -9px; height: 20px; filter: brightness(.84); }
+.deck.single::before, .deck.single::after { display: none; }
+.deck:active { transform: scale(.985); }
+
+.deck-title {
+  font: 600 17px/1.25 -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 0;
+  word-break: break-word;
+}
+.deck-count { font-size: 13px; opacity: .85; margin-top: 8px; }
+
+/* ---------- Список карточек внутри колоды ---------- */
+.card-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+
+.mini {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--hair);
+  background: var(--sheet);
+  border-radius: var(--radius-m);
+  padding: 12px 14px;
+  min-height: var(--tap);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: 16px;
+  color: var(--ink);
+}
+.mini:active { background: #F7F6F3; }
+.mini-swatch {
+  width: 34px;
+  height: 44px;
+  border-radius: 6px;
+  background: var(--card-yellow);
+  border: 1px solid var(--card-yellow-edge);
+  flex: none;
+}
+.mini-text {
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+.mini-num { color: var(--ink-soft); font-size: 14px; flex: none; }
+
+/* ---------- Полноэкранная карточка ---------- */
+.reader {
+  position: fixed;
+  inset: 0;
+  background-color: var(--paper);
+  background-image: radial-gradient(var(--dot) 1.15px, transparent 1.15px);
+  background-size: 22px 22px;
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+  padding: max(8px, env(safe-area-inset-top)) 12px
+           max(12px, env(safe-area-inset-bottom)) 12px;
+}
+.reader-bar { display: flex; align-items: center; gap: 8px; min-height: var(--tap); }
+.reader-pos { flex: 1; text-align: center; color: var(--ink-soft); font-size: 14px; }
+
+.stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  touch-action: pan-y;
+}
+
+/* Карточка занимает 80% ширины и 80% доступной высоты — как просили */
+.bigcard {
+  width: 80%;
+  max-width: 520px;
+  height: 80%;
+  border-radius: 10px;
+  background-color: var(--card-yellow);
+  border: 1px solid var(--card-yellow-edge);
+  /* Карточку тянут пальцем — браузер не должен перехватывать жест
+     под свою прокрутку, иначе перелистывание срабатывает через раз */
+  touch-action: pan-y;
+  will-change: transform;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .16), 0 2px 4px rgba(0, 0, 0, .12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 24px;
+  position: relative;
+  /* Едва заметная волокнистость бумаги */
+  background-image:
+    repeating-linear-gradient(90deg, rgba(0,0,0,.018) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px 4px);
+}
+.bigcard-text {
+  font: 500 clamp(20px, 5.4vw, 30px)/1.35 -apple-system, BlinkMacSystemFont,
+        "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+  text-align: center;
+  color: #2B2408;
+  overflow-y: auto;
+  max-height: 100%;
+  width: 100%;
+  word-break: break-word;
+  white-space: pre-wrap;      /* переносы строк пользователя сохраняются */
+}
+/* Когда снизу есть плеер, освобождаем под него место, чтобы текст
+   не заезжал под кнопку */
+.bigcard:has(.audio-bar:not(:empty)) { padding-bottom: 72px; }
+.bigcard:active { cursor: grabbing; }
+.bigcard-text { user-select: text; -webkit-user-select: text; }
+
+/* Соседние карточки стопки выглядывают по краям */
+.bigcard.behind {
+  position: absolute;
+  transform: scale(.94) translateY(10px);
+  opacity: .45;
+  z-index: -1;
+  box-shadow: none;
+  touch-action: auto;
+  cursor: default;
+}
+
+.reader-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding-top: 10px;
+}
+
+/* ---------- Кнопки и формы ---------- */
+.btn {
+  border: 0;
+  border-radius: 12px;
+  padding: 12px 18px;
+  min-height: var(--tap);
+  font: 600 16px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--ink);
+  color: #fff;
+  cursor: pointer;
+}
+.btn.sec { background: rgba(0, 0, 0, .06); color: var(--ink); }
+.btn.danger { background: var(--danger); }
+.btn:active { opacity: .85; }
+
+.add-tile {
+  border: 1.5px dashed rgba(0, 0, 0, .22);
+  background: transparent;
+  border-radius: var(--radius-m);
+  min-height: 104px;
+  color: var(--ink-soft);
+  font: 500 15px/1.3 inherit;
+  cursor: pointer;
+}
+.add-tile:active { background: rgba(0, 0, 0, .04); }
+
+.empty { color: var(--ink-soft); padding: 28px 6px; text-align: center; }
+
+/* ---------- Модальное окно ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .38);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 40;
+}
+.sheet {
+  background: var(--sheet);
+  width: 100%;
+  max-width: 560px;
+  border-radius: 20px 20px 0 0;
+  padding: 18px 16px max(18px, env(safe-area-inset-bottom));
+}
+@media (min-width: 560px) {
+  .modal { align-items: center; }
+  .sheet { border-radius: 20px; }
+}
+.sheet h3 { margin: 0 0 14px; font-size: 19px; }
+.field { display: block; margin-bottom: 12px; }
+.field span { display: block; font-size: 13px; color: var(--ink-soft); margin-bottom: 6px; }
+.field input, .field textarea {
+  width: 100%;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  padding: 12px;
+  font: 400 17px/1.4 inherit;   /* 17px — иначе iOS зумит поле при фокусе */
+  background: #FCFCFB;
+  color: var(--ink);
+}
+.field textarea { min-height: 132px; resize: vertical; }
+.swatches { display: flex; gap: 10px; flex-wrap: wrap; }
+.swatch {
+  width: 38px; height: 38px; border-radius: 10px;
+  border: 2px solid transparent; cursor: pointer;
+}
+.swatch[aria-pressed="true"] { border-color: var(--ink); }
+.sheet-actions { display: flex; gap: 10px; margin-top: 16px; }
+.sheet-actions .btn { flex: 1; }
+
+.hint { font-size: 13px; color: var(--ink-soft); margin: 10px 2px 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* Отметка о последней синхронизации — справочная, не должна тянуть внимание */
+.sync-note {
+  margin: -2px 2px 4px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  opacity: .8;
+}
+</style>
+</head>
+<body>
+<main id="app" class="app"></main>
+<script>/* Аффирмации — логика приложения.
+ *
+ * ПРИНЦИПЫ БЕЗОПАСНОСТИ, заложенные в код:
+ *
+ * 1. Сети нет вообще. Ни fetch, ни XMLHttpRequest, ни WebSocket не
+ *    вызываются; в index.html политика CSP запрещает их на уровне браузера
+ *    (connect-src 'none'). Данные физически не могут утечь.
+ * 2. Текст пользователя НИКОГДА не попадает в innerHTML. Только
+ *    textContent и createElement. Это закрывает XSS: даже если вставить
+ *    в карточку <img onerror=...>, это останется видимым текстом.
+ * 3. Ничего не выполняется динамически: ни eval, ни new Function,
+ *    ни строковых обработчиков в разметке.
+ * 4. Всё, что читается из хранилища, проходит проверку типов и длин.
+ *    Испорченный или подменённый JSON не свалит приложение и не пролезет
+ *    в интерфейс неожиданным типом.
+ * 5. Импорт резервной копии проходит ту же проверку, что и хранилище.
+ */
+'use strict';
+
+(function () {
+  const STORE_KEY = 'affirmations.v1';
+
+  // Ограничения длины: защита и от случайной вставки книги, и от попытки
+  // раздуть хранилище до отказа
+  const LIMITS = {
+    sectionName: 60,
+    deckName: 60,
+    cardText: 2000,
+    sections: 50,
+    decksPerSection: 100,
+    cardsPerDeck: 500,
+  };
+
+  // Цвета плиток колод
+  const COLORS = ['#D9534F', '#7E8A6E', '#E8974A', '#8C93E0',
+                  '#7FBF7F', '#5E86C7', '#B87FBF', '#4F9E9E'];
+
+  // Цвета самой карточки — оттенки бумаги, а не яркая заливка:
+  // на них читается тёмный текст, и лист выглядит листом
+  const CARD_COLORS = ['#E6C84C', '#F2E6C9', '#F3C9C0', '#CFE0EE',
+                       '#CFE6D2', '#E8D7EE', '#FFFDF6', '#DCD6C8'];
+  const CARD_EDGE = {
+    '#E6C84C': '#D4B63C', '#F2E6C9': '#DFD0AF', '#F3C9C0': '#DFAFA6',
+    '#CFE0EE': '#B2C9DA', '#CFE6D2': '#B2D0B6', '#E8D7EE': '#CDB8D6',
+    '#FFFDF6': '#E6E2D6', '#DCD6C8': '#C4BCA9',
+  };
+
+  // ------------------------------------------------------------------
+  // Хранилище
+  // ------------------------------------------------------------------
+  function uid() {
+    // crypto.randomUUID есть в Safari 15.4+; запасной путь — тоже из
+    // криптографического генератора, а не из Math.random
+    if (self.crypto && typeof self.crypto.randomUUID === 'function') {
+      return self.crypto.randomUUID();
+    }
+    const a = new Uint8Array(16);
+    self.crypto.getRandomValues(a);
+    return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function clampStr(value, max) {
+    return typeof value === 'string' ? value.slice(0, max) : '';
+  }
+
+  /** Привести любой ввод к заведомо корректной структуре. */
+  function sanitizeState(raw) {
+    const out = { sections: [] };
+    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.sections)) {
+      return out;
+    }
+    if (typeof raw.syncedAt === 'number' && isFinite(raw.syncedAt)
+        && raw.syncedAt > 0) {
+      out.syncedAt = raw.syncedAt;
+    }
+    out.favCollapsed = raw.favCollapsed === true;
+    for (const s of raw.sections.slice(0, LIMITS.sections)) {
+      if (!s || typeof s !== 'object') continue;
+      const section = {
+        id: clampStr(s.id, 40) || uid(),
+        name: clampStr(s.name, LIMITS.sectionName) || 'Раздел',
+        collapsed: s.collapsed === true,   // строго булево
+        decks: [],
+      };
+      const decks = Array.isArray(s.decks) ? s.decks : [];
+      for (const d of decks.slice(0, LIMITS.decksPerSection)) {
+        if (!d || typeof d !== 'object') continue;
+        const deck = {
+          id: clampStr(d.id, 40) || uid(),
+          name: clampStr(d.name, LIMITS.deckName) || 'Колода',
+          color: COLORS.includes(d.color) ? d.color : COLORS[0],
+          cards: [],
+        };
+        const cards = Array.isArray(d.cards) ? d.cards : [];
+        for (const c of cards.slice(0, LIMITS.cardsPerDeck)) {
+          if (!c || typeof c !== 'object') continue;
+          const text = clampStr(c.text, LIMITS.cardText);
+          if (!text.trim()) continue;
+          deck.cards.push({
+            id: clampStr(c.id, 40) || uid(),
+            text: text,
+            // Цвет только из списка: иначе через файл копии можно было бы
+            // подсунуть в стиль произвольное значение
+            color: CARD_COLORS.includes(c.color) ? c.color : CARD_COLORS[0],
+            fav: c.fav === true,          // строго булево, не «похожее на правду»
+            audio: c.audio === true,      // сама запись лежит в IndexedDB
+            // Длину записи держим рядом с карточкой. Спрашивать её у
+            // самого файла ненадёжно: браузеры часто отдают Infinity для
+            // записей, сделанных на лету, и полоса времени ломается.
+            audioLen: (typeof c.audioLen === 'number' && isFinite(c.audioLen)
+                       && c.audioLen > 0) ? Math.min(c.audioLen, 3600) : 0,
+          });
+        }
+        section.decks.push(deck);
+      }
+      out.sections.push(section);
+    }
+    return out;
+  }
+
+  function load() {
+    let raw = null;
+    try {
+      raw = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+    } catch (e) {
+      // Битый JSON не должен ронять приложение — начинаем с примера
+      raw = null;
+    }
+    if (!raw) return seed();
+    return sanitizeState(raw);
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    } catch (e) {
+      // Хранилище переполнено или заблокировано в приватном режиме
+      alert('Не удалось сохранить: в браузере кончилось место для данных.');
+    }
+  }
+
+  function seed() {
+    return {
+      sections: [
+        {
+          id: uid(), name: 'Психология',
+          decks: [
+            { id: uid(), name: 'Опора на себя', color: COLORS[0], cards: [
+              { id: uid(), color: CARD_COLORS[0], fav: false,
+                text: 'Я справляюсь с тем, что от меня зависит,\nи отпускаю остальное.' },
+              { id: uid(), color: CARD_COLORS[1], fav: false,
+                text: 'Моё спокойствие не зависит\nот чужого настроения.' },
+            ]},
+            { id: uid(), name: 'Границы', color: COLORS[1], cards: [
+              { id: uid(), color: CARD_COLORS[3], fav: false,
+                text: 'Я имею право сказать «нет»\nбез объяснений.' },
+            ]},
+          ],
+        },
+        {
+          id: uid(), name: 'Страхи',
+          decks: [
+            { id: uid(), name: 'Перед выступлением', color: COLORS[2], cards: [
+              { id: uid(), color: CARD_COLORS[4], fav: false,
+                text: 'Волнение — это энергия.\nЯ направляю её в голос.' },
+            ]},
+          ],
+        },
+      ],
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Хранилище голосовых записей
+  //
+  // Отдельно от карточек и намеренно. В localStorage лежат только строки,
+  // и объём там около 5 МБ на весь сайт — одна минута записи в base64
+  // съела бы почти всё. Поэтому звук идёт в IndexedDB, где хранится
+  // двоичными объектами как есть, без раздувания.
+  //
+  // Никуда не отправляется: connect-src 'none' запрещает любые запросы,
+  // запись остаётся на устройстве.
+  // ------------------------------------------------------------------
+  const AudioStore = (function () {
+    const DB = 'affirmations-audio', STORE = 'clips';
+    let dbp = null;
+
+    function open() {
+      if (dbp) return dbp;
+      dbp = new Promise((resolve, reject) => {
+        if (!self.indexedDB) { reject(new Error('no-indexeddb')); return; }
+        const req = self.indexedDB.open(DB, 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      return dbp;
+    }
+
+    function tx(mode, fn) {
+      return open().then((db) => new Promise((resolve, reject) => {
+        const t = db.transaction(STORE, mode);
+        const req = fn(t.objectStore(STORE));
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      }));
+    }
+
+    return {
+      put: (id, blob) => tx('readwrite', (s) => s.put(blob, id)),
+      get: (id) => tx('readonly', (s) => s.get(id)),
+      del: (id) => tx('readwrite', (s) => s.delete(id)),
+      available: () => !!self.indexedDB,
+    };
+  })();
+
+  /** Можно ли вообще записывать здесь и сейчас. */
+  function recordingSupport() {
+    if (!self.isSecureContext) {
+      return { ok: false, why: 'context' };   // открыто как файл, не через сервер
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia
+        || typeof self.MediaRecorder === 'undefined') {
+      return { ok: false, why: 'unsupported' };
+    }
+    if (!AudioStore.available()) return { ok: false, why: 'storage' };
+    return { ok: true };
+  }
+
+  const RECORD_HELP = {
+    context: 'Запись звука недоступна, когда файл открыт напрямую: браузер '
+      + 'разрешает микрофон только на защищённой странице. Запустите '
+      + 'приложение через start.command — по адресу localhost запись '
+      + 'работает. На iPhone нужен тот же способ.',
+    unsupported: 'Этот браузер не умеет записывать звук. Попробуйте Safari '
+      + 'или Chrome посвежее.',
+    storage: 'Браузер не даёт сохранить запись. В приватном окне это '
+      + 'ограничение обычное — откройте обычное окно.',
+  };
+
+  // ------------------------------------------------------------------
+  // Утилиты DOM. Текст только через textContent — никакого innerHTML.
+  // ------------------------------------------------------------------
+  function el(tag, opts, children) {
+    const node = document.createElement(tag);
+    if (opts) {
+      if (opts.class) node.className = opts.class;
+      if (opts.text != null) node.textContent = String(opts.text);
+      if (opts.attrs) {
+        for (const k of Object.keys(opts.attrs)) {
+          node.setAttribute(k, String(opts.attrs[k]));
+        }
+      }
+      if (opts.style) {
+        for (const k of Object.keys(opts.style)) {
+          node.style.setProperty(k, String(opts.style[k]));
+        }
+      }
+      if (opts.on) {
+        for (const k of Object.keys(opts.on)) node.addEventListener(k, opts.on[k]);
+      }
+    }
+    if (children) {
+      for (const c of children) if (c) node.appendChild(c);
+    }
+    return node;
+  }
+
+  function clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  // ------------------------------------------------------------------
+  // Состояние навигации
+  // ------------------------------------------------------------------
+  let state = load();
+  let view = { name: 'home', sectionId: null, deckId: null, index: 0 };
+  const root = document.getElementById('app');
+
+  function findSection(id) { return state.sections.find((s) => s.id === id) || null; }
+  function findDeck(sectionId, deckId) {
+    const s = findSection(sectionId);
+    return s ? (s.decks.find((d) => d.id === deckId) || null) : null;
+  }
+
+  function go(next) {
+    view = Object.assign({ name: 'home', sectionId: null, deckId: null, index: 0 }, next);
+    render();
+  }
+
+  // ------------------------------------------------------------------
+  // Экран 1: разделы и колоды
+  // ------------------------------------------------------------------
+  function renderHome() {
+    const frag = document.createDocumentFragment();
+
+    frag.appendChild(el('div', { class: 'topbar' }, [
+      el('h1', { text: 'Аффирмации' }),
+      el('button', {
+        class: 'iconbtn', attrs: { 'aria-label': 'Синхронизация', type: 'button' },
+        text: '↻', on: { click: openSync },
+      }),
+      el('button', {
+        class: 'iconbtn', attrs: { 'aria-label': 'Настройки', type: 'button' },
+        text: '⋯', on: { click: openSettings },
+      }),
+    ]));
+
+    if (state.syncedAt) {
+      frag.appendChild(el('p', { class: 'sync-note',
+        text: 'Последняя синхронизация: ' + humanTime(state.syncedAt) }));
+    }
+
+    if (state.sections.length === 0) {
+      frag.appendChild(el('p', { class: 'empty', text: 'Пока пусто. Создайте первый раздел.' }));
+    }
+
+    // Избранное — не отдельная колода, а ссылки на настоящие карточки.
+    // Так удаление и правка всегда идут по одному живому объекту, и не
+    // возникает копии, которая рассинхронизируется с оригиналом.
+    const favs = collectFavourites();
+    if (favs.length > 0) {
+      const favHead = el('div', { class: 'section-head' }, [
+        el('button', {
+          class: 'section-toggle', attrs: {
+            type: 'button', 'aria-expanded': String(!state.favCollapsed) },
+          on: { click: () => { state.favCollapsed = !state.favCollapsed; save(); render(); } },
+        }, [
+          el('span', { class: 'chev' + (state.favCollapsed ? ' closed' : ''), text: '⌄' }),
+          el('h2', { text: 'Избранное' }),
+          el('span', { class: 'section-count', text: cardsLabel(favs.length) }),
+        ]),
+        el('button', {
+          class: 'iconbtn ghost',
+          attrs: { 'aria-label': 'Управление избранным', type: 'button' },
+          text: '✎', on: { click: manageFavourites },
+        }),
+      ]);
+
+      const favSection = el('div', { class: 'section' }, [favHead]);
+      if (!state.favCollapsed) {
+        const list = el('div', { class: 'card-list' });
+        favs.forEach((f) => {
+          const sw = el('span', { class: 'mini-swatch' });
+          sw.style.setProperty('background-color', f.card.color);
+          sw.style.setProperty('border-color', CARD_EDGE[f.card.color] || f.card.color);
+
+          // Строка — не кнопка, а контейнер: внутри две независимые зоны.
+          // Иначе нажатие на сердечко срабатывало бы и как открытие карточки.
+          const open = el('button', {
+            class: 'mini-open', attrs: { type: 'button' },
+            on: { click: () => go({ name: 'read', sectionId: f.sectionId,
+                                    deckId: f.deckId, index: f.index }) },
+          }, [
+            sw,
+            el('span', { class: 'mini-text', text: f.card.text }),
+            f.card.audio ? el('span', { class: 'mini-audio', text: '♪' }) : null,
+          ]);
+
+          const heart = el('button', {
+            class: 'iconbtn heart on', attrs: {
+              type: 'button', 'aria-pressed': 'true',
+              'aria-label': 'Убрать из избранного' },
+            text: '♥',
+            on: { click: () => { f.card.fav = false; save(); render(); } },
+          });
+
+          list.appendChild(el('div', { class: 'mini' }, [open, heart]));
+        });
+        favSection.appendChild(list);
+      }
+      frag.appendChild(favSection);
+    }
+
+    for (const section of state.sections) {
+      // Заголовок раздела — кнопка: нажатие сворачивает и разворачивает.
+      // Карандаш вынесен отдельной кнопкой рядом, иначе правка и
+      // сворачивание конфликтовали бы на одном нажатии.
+      const toggle = el('button', {
+        class: 'section-toggle', attrs: {
+          type: 'button',
+          'aria-expanded': String(!section.collapsed),
+        },
+        on: { click: () => { section.collapsed = !section.collapsed; save(); render(); } },
+      }, [
+        el('span', { class: 'chev' + (section.collapsed ? ' closed' : ''), text: '⌄' }),
+        el('h2', { text: section.name }),
+        el('span', { class: 'section-count', text: decksLabel(section.decks.length) }),
+      ]);
+
+      const head = el('div', { class: 'section-head' }, [
+        toggle,
+        el('button', {
+          class: 'iconbtn ghost', attrs: { 'aria-label': 'Изменить раздел', type: 'button' },
+          text: '✎', on: { click: () => editSection(section) },
+        }),
+      ]);
+
+      if (section.collapsed) {
+        frag.appendChild(el('div', { class: 'section collapsed' }, [head]));
+        continue;
+      }
+
+      const grid = el('div', { class: 'deck-grid' });
+      for (const deck of section.decks) {
+        const single = deck.cards.length <= 1;
+        grid.appendChild(el('button', {
+          class: 'deck' + (single ? ' single' : ''),
+          style: { background: deck.color },
+          attrs: { type: 'button' },
+          on: { click: () => go({ name: 'deck', sectionId: section.id, deckId: deck.id }) },
+        }, [
+          el('p', { class: 'deck-title', text: deck.name }),
+          el('span', { class: 'deck-count', text: cardsLabel(deck.cards.length) }),
+        ]));
+      }
+      grid.appendChild(el('button', {
+        class: 'add-tile', attrs: { type: 'button' },
+        text: '+ Колода',
+        on: { click: () => editDeck(section, null) },
+      }));
+
+      frag.appendChild(el('div', { class: 'section' }, [head, grid]));
+    }
+
+    frag.appendChild(el('div', { class: 'section' }, [
+      el('button', {
+        class: 'btn sec', attrs: { type: 'button' }, text: '+ Новый раздел',
+        on: { click: () => editSection(null) },
+      }),
+    ]));
+
+    return frag;
+  }
+
+  /** Список избранного с возможностью убрать по одной или все сразу. */
+  function manageFavourites() {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const sheet = el('div', { class: 'sheet' });
+
+    // Окно перерисовывается на месте: после снятия сердечка список
+    // должен обновиться сразу, не закрываясь
+    function draw() {
+      clear(sheet);
+      const favs = collectFavourites();
+      sheet.appendChild(el('h3', { text: 'Избранное — ' + cardsLabel(favs.length) }));
+
+      if (favs.length === 0) {
+        sheet.appendChild(el('p', { class: 'empty', text: 'Список пуст.' }));
+      } else {
+        const list = el('div', { class: 'card-list scroll' });
+        favs.forEach((f) => {
+          const sw = el('span', { class: 'mini-swatch' });
+          sw.style.setProperty('background-color', f.card.color);
+          sw.style.setProperty('border-color', CARD_EDGE[f.card.color] || f.card.color);
+          list.appendChild(el('div', { class: 'mini row' }, [
+            sw,
+            el('span', { class: 'mini-text', text: f.card.text }),
+            el('button', {
+              class: 'iconbtn heart on',
+              attrs: { type: 'button', 'aria-label': 'Убрать из избранного' },
+              text: '♥',
+              on: { click: () => { f.card.fav = false; save(); draw(); render(); } },
+            }),
+          ]));
+        });
+        sheet.appendChild(list);
+        sheet.appendChild(el('button', {
+          class: 'btn danger', attrs: { type: 'button' },
+          style: { width: '100%', 'margin-top': '12px' },
+          text: 'Убрать все из избранного',
+          on: {
+            click: () => {
+              if (!confirm('Убрать все карточки из избранного? Сами карточки останутся.')) return;
+              collectFavourites().forEach((x) => { x.card.fav = false; });
+              save(); draw(); render();
+            },
+          },
+        }));
+      }
+
+      sheet.appendChild(el('p', { class: 'hint', text:
+        'Сердечко убирает карточку из избранного. Сама карточка остаётся '
+        + 'в своей колоде.' }));
+      sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn', attrs: { type: 'button' }, text: 'Готово',
+                       on: { click: close } }),
+      ]));
+    }
+
+    draw();
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+  }
+
+  function decksLabel(n) {
+    const mod10 = n % 10, mod100 = n % 100;
+    let word = 'колод';
+    if (mod10 === 1 && mod100 !== 11) word = 'колода';
+    else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) word = 'колоды';
+    return n + ' ' + word;
+  }
+
+  function collectFavourites() {
+    const out = [];
+    for (const s of state.sections) {
+      for (const d of s.decks) {
+        d.cards.forEach((c, idx) => {
+          if (c.fav) out.push({ sectionId: s.id, deckId: d.id, index: idx, card: c });
+        });
+      }
+    }
+    return out;
+  }
+
+  function cardsLabel(n) {
+    const mod10 = n % 10, mod100 = n % 100;
+    let word = 'карточек';
+    if (mod10 === 1 && mod100 !== 11) word = 'карточка';
+    else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) word = 'карточки';
+    return n + ' ' + word;
+  }
+
+  // ------------------------------------------------------------------
+  // Экран 2: карточки колоды
+  // ------------------------------------------------------------------
+  function renderDeck() {
+    const section = findSection(view.sectionId);
+    const deck = findDeck(view.sectionId, view.deckId);
+    if (!section || !deck) return renderHome();
+
+    const frag = document.createDocumentFragment();
+    frag.appendChild(el('div', { class: 'topbar' }, [
+      el('button', {
+        class: 'iconbtn', attrs: { 'aria-label': 'Назад', type: 'button' },
+        text: '‹', on: { click: () => go({ name: 'home' }) },
+      }),
+      el('h1', { class: 'small', text: deck.name }),
+      el('button', {
+        class: 'iconbtn ghost', attrs: { 'aria-label': 'Изменить колоду', type: 'button' },
+        text: '✎', on: { click: () => editDeck(section, deck) },
+      }),
+    ]));
+
+    const list = el('div', { class: 'card-list' });
+    if (deck.cards.length === 0) {
+      list.appendChild(el('p', { class: 'empty', text: 'В колоде пока нет карточек.' }));
+    }
+    deck.cards.forEach((card, i) => {
+      const swatch = el('span', { class: 'mini-swatch' });
+      swatch.style.setProperty('background-color', card.color);
+      swatch.style.setProperty('border-color', CARD_EDGE[card.color] || card.color);
+      list.appendChild(el('button', {
+        class: 'mini', attrs: { type: 'button' },
+        on: { click: () => go({ name: 'read', sectionId: section.id, deckId: deck.id, index: i }) },
+      }, [
+        el('span', { class: 'mini-num', text: String(i + 1) }),
+        swatch,
+        el('span', { class: 'mini-text', text: card.text }),
+        card.audio ? el('span', { class: 'mini-audio', text: '♪' }) : null,
+        card.fav ? el('span', { class: 'mini-heart', text: '♥' }) : null,
+      ]));
+    });
+    frag.appendChild(list);
+
+    frag.appendChild(el('div', { class: 'section' }, [
+      el('button', {
+        class: 'btn', attrs: { type: 'button' }, text: '+ Карточка',
+        on: { click: () => editCard(deck, null) },
+      }),
+    ]));
+    return frag;
+  }
+
+  // ------------------------------------------------------------------
+  // Экран 3: полноэкранная карточка со свайпом
+  // ------------------------------------------------------------------
+  function renderReader() {
+    const deck = findDeck(view.sectionId, view.deckId);
+    if (!deck || deck.cards.length === 0) return renderDeck();
+
+    const total = deck.cards.length;
+    const i = Math.min(Math.max(view.index, 0), total - 1);
+    const card = deck.cards[i];
+
+    const paint = (node, colour) => {
+      node.style.setProperty('background-color', colour);
+      node.style.setProperty('border-color', CARD_EDGE[colour] || colour);
+    };
+
+    const stage = el('div', { class: 'stage' });
+    if (total > 1) {
+      const behind = el('div', { class: 'bigcard behind' });
+      paint(behind, (deck.cards[i + 1] || deck.cards[i - 1] || card).color);
+      stage.appendChild(behind);
+    }
+    // Полоска проигрывания внизу карточки — появляется, только если
+    // к карточке действительно прикреплена запись
+    const audioBar = el('div', { class: 'audio-bar' });
+    const big = el('div', { class: 'bigcard' }, [
+      el('div', { class: 'bigcard-text', text: card.text }),
+      audioBar,
+    ]);
+    paint(big, card.color);
+    stage.appendChild(big);
+    if (card.audio) buildPlayer(audioBar, card);
+
+    // Въезд новой карточки с противоположной стороны. Ставим сдвиг сразу,
+    // а снимаем на следующем кадре: если сделать это в одном кадре,
+    // браузер не увидит промежуточного состояния и анимации не будет.
+    if (enterFrom !== 0) {
+      const dir = enterFrom;
+      enterFrom = 0;
+      const w = big.offsetWidth || 360;
+      big.style.setProperty('transition', 'none');
+      big.style.setProperty('transform',
+        'translateX(' + (dir > 0 ? w * 1.15 : -w * 1.15) + 'px) rotate('
+        + (dir > 0 ? 4 : -4) + 'deg)');
+      big.style.setProperty('opacity', '0');
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          big.style.setProperty('transition',
+            'transform ' + SLIDE_MS + 'ms ' + SLIDE_EASE
+            + ', opacity ' + Math.round(SLIDE_MS * 0.6) + 'ms linear');
+          big.style.setProperty('transform', 'translateX(0) rotate(0deg)');
+          big.style.setProperty('opacity', '1');
+        });
+      });
+    }
+
+    // Карточка не подменяется мгновенно: старая уезжает за край, новая
+    // въезжает с другой стороны. Кривая и длительность взяты близкими
+    // к системным переходам iOS — резкая смена читается как «сломалось».
+    function step(delta) {
+      const next = i + delta;
+      if (next < 0 || next >= total || sliding) return;
+      sliding = true;
+
+      const width = stage.clientWidth || big.offsetWidth || 360;
+      big.style.setProperty('transition',
+        'transform ' + SLIDE_MS + 'ms ' + SLIDE_EASE + ', opacity ' + SLIDE_MS + 'ms linear');
+      big.style.setProperty('transform',
+        'translateX(' + (delta > 0 ? -width * 1.15 : width * 1.15) + 'px) rotate('
+        + (delta > 0 ? -4 : 4) + 'deg)');
+      big.style.setProperty('opacity', '0');
+
+      // Переключаем чуть раньше конца анимации: к моменту, когда старая
+      // карточка почти ушла, новая уже начинает въезжать — без паузы
+      // между ними, как это выглядит в системе
+      setTimeout(() => {
+        enterFrom = delta;
+        sliding = false;
+        go({ name: 'read', sectionId: view.sectionId, deckId: view.deckId, index: next });
+      }, Math.round(SLIDE_MS * 0.62));
+    }
+
+    // Перетаскивание карточки. Через Pointer Events, а не touch: так один
+    // и тот же код работает и пальцем на iPhone, и мышью на компьютере.
+    // Карточка едет за пальцем — без этого непонятно, поймался ли жест.
+    let dragId = null, x0 = 0, y0 = 0, dx = 0, locked = null;
+    const THRESHOLD = 60;   // столько пикселей нужно, чтобы перелистнуть
+
+    big.addEventListener('pointerdown', (ev) => {
+      if (!ev.isPrimary) return;
+      dragId = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
+      dx = 0; locked = null;
+      big.style.setProperty('transition', 'none');
+    });
+
+    big.addEventListener('pointermove', (ev) => {
+      if (ev.pointerId !== dragId) return;
+      const mx = ev.clientX - x0, my = ev.clientY - y0;
+      // Пока не решили, жест горизонтальный или вертикальный, ничего не
+      // двигаем: иначе перелистывание сработает при обычной прокрутке
+      if (locked === null) {
+        if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+        locked = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+        if (locked === 'x') big.setPointerCapture(dragId);
+      }
+      if (locked !== 'x') return;
+      ev.preventDefault();
+      // У края стопки карточка идёт туго — видно, что дальше некуда
+      const edge = (mx > 0 && i === 0) || (mx < 0 && i === total - 1);
+      dx = edge ? mx * 0.25 : mx;
+      big.style.setProperty('transform',
+        'translateX(' + dx.toFixed(1) + 'px) rotate(' + (dx * 0.02).toFixed(2) + 'deg)');
+    });
+
+    const endDrag = (ev) => {
+      if (ev.pointerId !== dragId) return;
+      dragId = null;
+      if (locked === 'x' && Math.abs(dx) > THRESHOLD) {
+        // Свайп ВЛЕВО — следующая, ВПРАВО — предыдущая.
+        // Карточка не возвращается на место, а продолжает движение
+        // с того места, где её отпустили
+        step(dx < 0 ? 1 : -1);
+        return;
+      }
+      // Не дотянули до порога — мягко возвращаем на место
+      big.style.setProperty('transition',
+        'transform ' + Math.round(SLIDE_MS * 0.7) + 'ms ' + SLIDE_EASE);
+      big.style.setProperty('transform', 'translateX(0) rotate(0deg)');
+    };
+    big.addEventListener('pointerup', endDrag);
+    big.addEventListener('pointercancel', endDrag);
+
+    // Свайп двумя пальцами по трекпаду MacBook. Это НЕ перетаскивание:
+    // система шлёт события колеса с горизонтальной составляющей, а
+    // pointermove при этом не приходит вовсе — именно поэтому жест
+    // раньше не работал на ноутбуке.
+    //
+    // Две сложности, которые приходится учитывать:
+    //  * событий приходит десятки подряд, поэтому копим сумму сдвига;
+    //  * после отрыва пальцев macOS ещё долго досылает «инерцию»,
+    //    поэтому после срабатывания ставим паузу, иначе один жест
+    //    перелистнёт сразу несколько карточек.
+    let wheelAcc = 0, wheelUntil = 0, wheelTimer = null;
+    const WHEEL_TRIGGER = 90;
+    const WHEEL_COOLDOWN = 550;
+
+    stage.addEventListener('wheel', (ev) => {
+      if (Math.abs(ev.deltaX) <= Math.abs(ev.deltaY)) return;  // это вертикальная прокрутка
+      ev.preventDefault();
+      const now = Date.now();
+      if (now < wheelUntil) return;                            // ещё идёт инерция
+
+      wheelAcc += ev.deltaX;
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => { wheelAcc = 0; }, 180);   // пауза — начинаем заново
+
+      if (Math.abs(wheelAcc) < WHEEL_TRIGGER) {
+        // Пока порог не набран, показываем сдвиг: видно, что жест ловится
+        const peek = Math.max(-70, Math.min(70, -wheelAcc));
+        big.style.setProperty('transition', 'none');
+        big.style.setProperty('transform', 'translateX(' + peek.toFixed(1) + 'px)');
+        return;
+      }
+
+      // Пальцы влево по трекпаду дают deltaX > 0 — это «вперёд»
+      const dir = wheelAcc > 0 ? 1 : -1;
+      wheelAcc = 0;
+      wheelUntil = now + WHEEL_COOLDOWN;
+      big.style.setProperty('transition', 'transform .18s ease-out');
+      big.style.setProperty('transform', 'translateX(0)');
+      step(dir);
+    }, { passive: false });
+
+    stage.addEventListener('pointerleave', () => {
+      if (dragId === null) {
+        big.style.setProperty('transition', 'transform .2s ease-out');
+        big.style.setProperty('transform', 'translateX(0)');
+      }
+    });
+
+    const reader = el('div', { class: 'reader' }, [
+      el('div', { class: 'reader-bar' }, [
+        el('button', {
+          class: 'iconbtn', attrs: { 'aria-label': 'Закрыть', type: 'button' },
+          text: '✕',
+          on: { click: () => go({ name: 'deck', sectionId: view.sectionId, deckId: view.deckId }) },
+        }),
+        el('span', { class: 'reader-pos', text: (i + 1) + ' / ' + total }),
+        makeRecordControls(card, audioBar),
+        el('button', {
+          class: 'iconbtn heart' + (card.fav ? ' on' : ''),
+          attrs: {
+            type: 'button',
+            'aria-pressed': String(!!card.fav),
+            'aria-label': card.fav ? 'Убрать из избранного' : 'В избранное',
+          },
+          text: card.fav ? '♥' : '♡',
+          on: { click: () => { card.fav = !card.fav; save(); render(); } },
+        }),
+        el('button', {
+          class: 'iconbtn ghost', attrs: { 'aria-label': 'Изменить', type: 'button' },
+          text: '✎', on: { click: () => editCard(deck, card) },
+        }),
+      ]),
+      stage,
+      el('div', { class: 'reader-actions' }, [
+        el('button', {
+          class: 'btn sec', attrs: { type: 'button', 'aria-label': 'Предыдущая' },
+          text: '‹ Назад', on: { click: () => step(-1) },
+        }),
+        el('button', {
+          class: 'btn sec', attrs: { type: 'button', 'aria-label': 'Следующая' },
+          text: 'Вперёд ›', on: { click: () => step(1) },
+        }),
+      ]),
+    ]);
+
+    // Клавиатура — чтобы удобно проверять на компьютере
+    const onKey = (ev) => {
+      if (ev.key === 'ArrowLeft') step(-1);
+      else if (ev.key === 'ArrowRight') step(1);
+      else if (ev.key === 'Escape') {
+        go({ name: 'deck', sectionId: view.sectionId, deckId: view.deckId });
+      }
+    };
+    // Снимается в render() перед следующей отрисовкой. Событий вида
+    // DOMNodeRemoved намеренно избегаем: они устарели и в части браузеров
+    // не срабатывают, обработчик остался бы висеть навсегда.
+    document.addEventListener('keydown', onKey);
+    readerKeyHandler = onKey;
+
+    return reader;
+  }
+
+  let readerKeyHandler = null;
+
+  // Параметры перелистывания. Кривая — та же, что в системных переходах
+  // iOS: быстрый старт и долгое мягкое торможение в конце.
+  const SLIDE_MS = 456;   // было 380; замедлено на 20% по просьбе
+  const SLIDE_EASE = 'cubic-bezier(.32,.72,0,1)';
+  let enterFrom = 0;      // с какой стороны въезжает новая карточка
+  let sliding = false;    // идёт анимация — новые жесты игнорируем
+
+  // ------------------------------------------------------------------
+  // Запись и проигрывание голоса
+  // ------------------------------------------------------------------
+  let activeRecorder = null;     // чтобы не начать вторую запись поверх первой
+
+  function mmss(sec) {
+    const s = Math.max(0, Math.floor(sec));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  /** Блок записи: одна кнопка до старта, три во время. */
+  function makeRecordControls(card, audioBar) {
+    const box = el('div', { class: 'rec-box' });
+
+    const startBtn = el('button', {
+      class: 'iconbtn rec', attrs: { type: 'button', 'aria-label': 'Записать голос' },
+      text: '●',
+    });
+    const pauseBtn = el('button', {
+      class: 'iconbtn rec-ctl', attrs: { type: 'button', 'aria-label': 'Пауза' },
+      text: '❚❚',
+    });
+    const stopBtn = el('button', {
+      class: 'iconbtn rec-ctl', attrs: { type: 'button', 'aria-label': 'Завершить запись' },
+      text: '■',
+    });
+    const timer = el('span', { class: 'rec-time' });
+
+    // До старта видна только круглая кнопка. Пауза и стоп появляются
+    // рядом с ней уже во время записи.
+    const idle = () => {
+      clear(box);
+      box.appendChild(startBtn);
+      startBtn.classList.remove('on');
+      startBtn.textContent = '●';
+      startBtn.setAttribute('aria-label', 'Записать голос');
+      timer.textContent = '';
+    };
+    const live = () => {
+      clear(box);
+      box.appendChild(startBtn);
+      if (canPause()) box.appendChild(pauseBtn);
+      box.appendChild(stopBtn);
+      box.appendChild(timer);
+      markPaused(false);
+    };
+
+    function canPause() {
+      return typeof self.MediaRecorder !== 'undefined'
+        && typeof self.MediaRecorder.prototype.pause === 'function';
+    }
+
+    startBtn.addEventListener('click', () => {
+      if (activeRecorder) return;                 // уже пишем
+      const sup = recordingSupport();
+      if (!sup.ok) { alert(RECORD_HELP[sup.why]); return; }
+      startRecording(card, audioBar, { timer, live, idle, pauseBtn });
+    });
+
+    // Значок паузы не меняется никогда — меняется только его плотность.
+    // Идёт запись — знак приглушён; поставили на паузу — наливается
+    // цветом. Подмена значка на кружок сбивала с толку: он становился
+    // похож на кнопку старта, хотя делает совсем другое.
+    const markPaused = (paused) => {
+      pauseBtn.classList.toggle('paused', paused);
+      pauseBtn.classList.toggle('recording', !paused);
+      pauseBtn.setAttribute('aria-label', paused ? 'Продолжить запись' : 'Пауза');
+      startBtn.classList.toggle('on', !paused);   // пульсация только при записи
+    };
+
+    pauseBtn.addEventListener('click', () => {
+      const r = activeRecorder;
+      if (!r) return;
+      if (r.state === 'recording') { r.pause(); markPaused(true); }
+      else if (r.state === 'paused') { r.resume(); markPaused(false); }
+    });
+
+    stopBtn.addEventListener('click', stopRecording);
+
+    idle();
+    return box;
+  }
+
+  function startRecording(card, audioBar, ui) {
+    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+      // Safari отдаёт mp4, Chrome — webm. Не навязываем формат: пусть
+      // браузер выберет свой, иначе на одном из них запись не стартует.
+      let rec;
+      try { rec = new self.MediaRecorder(stream); }
+      catch (e) {
+        stream.getTracks().forEach((t) => t.stop());
+        alert('Не удалось начать запись.'); return;
+      }
+
+      const chunks = [];
+      // Время считаем сами и с учётом пауз: длительность самого файла
+      // браузеры отдают ненадёжно, а на паузе счётчик обязан замереть
+      let elapsed = 0, since = Date.now();
+      const tick = setInterval(() => {
+        const now = rec.state === 'recording' ? elapsed + (Date.now() - since) / 1000 : elapsed;
+        ui.timer.textContent = mmss(now);
+        if (now >= 300) stopRecording();          // потолок 5 минут на карточку
+      }, 200);
+
+      rec.onpause = () => { elapsed += (Date.now() - since) / 1000; };
+      rec.onresume = () => { since = Date.now(); };
+      rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+      rec.onstop = () => {
+        clearInterval(tick);
+        if (rec.state !== 'paused') elapsed += (Date.now() - since) / 1000;
+        // Микрофон отпускаем сразу: иначе индикатор записи в системе
+        // продолжает гореть, и это выглядит так, будто нас подслушивают
+        stream.getTracks().forEach((t) => t.stop());
+        activeRecorder = null;
+        ui.idle();
+        ui.pauseBtn.classList.remove('paused', 'recording');
+
+        const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+        if (!blob.size) return;
+        AudioStore.put(card.id, blob).then(() => {
+          card.audio = true;
+          card.audioLen = Math.max(1, Math.round(elapsed));
+          save();
+          clear(audioBar); buildPlayer(audioBar, card);
+        }).catch(() => alert('Не удалось сохранить запись.'));
+      };
+
+      activeRecorder = rec;
+      ui.live();
+      rec.start();
+    }).catch((err) => {
+      const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+      alert(denied
+        ? 'Доступ к микрофону запрещён. Разрешите его для этой страницы в настройках браузера.'
+        : 'Микрофон недоступен.');
+    });
+  }
+
+  function stopRecording() {
+    if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop();
+  }
+
+  /** Кнопка проигрывания внизу карточки со счётчиком времени. */
+  function buildPlayer(bar, card) {
+    const play = el('button', {
+      class: 'audio-btn', attrs: { type: 'button', 'aria-label': 'Прослушать запись' },
+      text: '▶',
+    });
+    const total = card.audioLen || 0;
+    const label = el('span', {
+      class: 'audio-label',
+      text: total ? '0:00 / ' + mmss(total) : 'Запись',
+    });
+    const setTime = (cur) => {
+      // Общую длину берём из карточки: у записей «на лету» браузер
+      // нередко отдаёт Infinity, и без запаса получилось бы «0:03 / NaN»
+      const dur = (audio && isFinite(audio.duration) && audio.duration > 0)
+        ? audio.duration : total;
+      label.textContent = dur ? mmss(cur) + ' / ' + mmss(dur) : mmss(cur);
+    };
+    const del = el('button', {
+      class: 'audio-del', attrs: { type: 'button', 'aria-label': 'Удалить запись' },
+      text: '✕',
+      on: {
+        click: () => {
+          if (!confirm('Удалить голосовую запись с этой карточки?')) return;
+          AudioStore.del(card.id).catch(() => {});
+          card.audio = false; card.audioLen = 0; save(); clear(bar);
+        },
+      },
+    });
+
+    let audio = null, url = null;
+    play.addEventListener('click', () => {
+      if (audio && !audio.paused) { audio.pause(); play.textContent = '▶'; return; }
+      if (audio) { audio.play(); play.textContent = '❚❚'; return; }
+      AudioStore.get(card.id).then((blob) => {
+        if (!blob) { label.textContent = 'Запись не найдена'; return; }
+        url = URL.createObjectURL(blob);
+        audio = new Audio(url);
+        audio.ontimeupdate = () => setTime(audio.currentTime);
+        audio.onloadedmetadata = () => setTime(0);
+        audio.onended = () => { play.textContent = '▶'; setTime(0); };
+        audio.onerror = () => { label.textContent = 'Не удалось воспроизвести'; };
+        audio.play();
+        play.textContent = '❚❚';
+      }).catch(() => { label.textContent = 'Не удалось открыть запись'; });
+    });
+
+    // Ссылку на объект надо освободить, иначе память держится до
+    // перезагрузки страницы
+    audioCleanup.push(() => {
+      if (audio) { audio.pause(); }
+      if (url) URL.revokeObjectURL(url);
+    });
+
+    bar.appendChild(play);
+    bar.appendChild(label);
+    bar.appendChild(del);
+  }
+
+  let audioCleanup = [];
+
+  // ------------------------------------------------------------------
+  // Модальные окна
+  // ------------------------------------------------------------------
+  function modal(title, fields, onSave, onDelete) {
+    const wrap = el('div', { class: 'modal' });
+    const inputs = {};
+
+    const sheet = el('div', { class: 'sheet' }, [el('h3', { text: title })]);
+
+    for (const f of fields) {
+      if (f.type === 'colors') {
+        const row = el('div', { class: 'swatches' });
+        const palette = f.palette || COLORS;
+        let chosen = palette.includes(f.value) ? f.value : palette[0];
+        palette.forEach((c) => {
+          const b = el('button', {
+            class: 'swatch', style: { background: c },
+            attrs: { type: 'button', 'aria-pressed': String(c === chosen),
+                     'aria-label': 'Цвет' },
+          });
+          b.addEventListener('click', () => {
+            chosen = c;
+            row.querySelectorAll('.swatch').forEach((n) => n.setAttribute('aria-pressed', 'false'));
+            b.setAttribute('aria-pressed', 'true');
+          });
+          row.appendChild(b);
+        });
+        inputs[f.key] = { get value() { return chosen; } };
+        sheet.appendChild(el('label', { class: 'field' }, [
+          el('span', { text: f.label }), row,
+        ]));
+        continue;
+      }
+      const input = f.type === 'textarea'
+        ? el('textarea', { attrs: { maxlength: String(f.max), rows: '6' } })
+        : el('input', { attrs: { type: 'text', maxlength: String(f.max),
+                                 autocapitalize: 'sentences', spellcheck: 'false' } });
+      input.value = f.value || '';
+      inputs[f.key] = input;
+      sheet.appendChild(el('label', { class: 'field' }, [
+        el('span', { text: f.label }), input,
+      ]));
+    }
+
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+
+    const actions = el('div', { class: 'sheet-actions' }, [
+      el('button', { class: 'btn sec', attrs: { type: 'button' }, text: 'Отмена',
+                     on: { click: close } }),
+      el('button', {
+        class: 'btn', attrs: { type: 'button' }, text: 'Сохранить',
+        on: {
+          click: () => {
+            const values = {};
+            for (const k of Object.keys(inputs)) values[k] = inputs[k].value;
+            if (onSave(values) !== false) { close(); save(); render(); }
+          },
+        },
+      }),
+    ]);
+    sheet.appendChild(actions);
+
+    if (onDelete) {
+      sheet.appendChild(el('button', {
+        class: 'btn danger', attrs: { type: 'button' },
+        style: { width: '100%', 'margin-top': '10px' },
+        text: 'Удалить',
+        on: {
+          click: () => {
+            if (!confirm('Удалить без возможности вернуть?')) return;
+            onDelete(); close(); save(); render();
+          },
+        },
+      }));
+    }
+
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+    const first = sheet.querySelector('input, textarea');
+    if (first) first.focus();
+  }
+
+  function editSection(section) {
+    modal(section ? 'Раздел' : 'Новый раздел',
+      [{ key: 'name', label: 'Название', value: section ? section.name : '',
+         max: LIMITS.sectionName }],
+      (v) => {
+        const name = v.name.trim();
+        if (!name) return false;
+        if (section) section.name = name;
+        else {
+          if (state.sections.length >= LIMITS.sections) {
+            alert('Достигнут предел разделов.'); return false;
+          }
+          state.sections.push({ id: uid(), name: name, decks: [] });
+        }
+      },
+      section ? () => {
+        state.sections = state.sections.filter((s) => s.id !== section.id);
+        go({ name: 'home' });
+      } : null);
+  }
+
+  function editDeck(section, deck) {
+    modal(deck ? 'Колода' : 'Новая колода', [
+      { key: 'name', label: 'Название', value: deck ? deck.name : '', max: LIMITS.deckName },
+      { key: 'color', label: 'Цвет', type: 'colors', value: deck ? deck.color : COLORS[0] },
+    ], (v) => {
+      const name = v.name.trim();
+      if (!name) return false;
+      if (deck) { deck.name = name; deck.color = v.color; }
+      else {
+        if (section.decks.length >= LIMITS.decksPerSection) {
+          alert('Достигнут предел колод в разделе.'); return false;
+        }
+        section.decks.push({ id: uid(), name: name, color: v.color, cards: [] });
+      }
+    }, deck ? () => {
+      section.decks = section.decks.filter((d) => d.id !== deck.id);
+      go({ name: 'home' });
+    } : null);
+  }
+
+  function editCard(deck, card) {
+    modal(card ? 'Карточка' : 'Новая карточка', [
+      { key: 'text', label: 'Текст аффирмации', type: 'textarea',
+        value: card ? card.text : '', max: LIMITS.cardText },
+      { key: 'color', label: 'Цвет карточки', type: 'colors',
+        palette: CARD_COLORS, value: card ? card.color : CARD_COLORS[0] },
+    ],
+      (v) => {
+        const text = v.text.trim();
+        if (!text) return false;
+        if (card) { card.text = text; card.color = v.color; }
+        else {
+          if (deck.cards.length >= LIMITS.cardsPerDeck) {
+            alert('Достигнут предел карточек в колоде.'); return false;
+          }
+          deck.cards.push({ id: uid(), text: text, color: v.color, fav: false });
+        }
+      },
+      card ? () => {
+        const idx = deck.cards.findIndex((c) => c.id === card.id);
+        // Вместе с карточкой убираем и её запись, иначе звук останется
+        // висеть в хранилище навсегда — никто уже на него не сошлётся
+        if (card.audio) AudioStore.del(card.id).catch(() => {});
+        deck.cards = deck.cards.filter((c) => c.id !== card.id);
+        if (view.name === 'read') {
+          if (deck.cards.length === 0) {
+            go({ name: 'deck', sectionId: view.sectionId, deckId: view.deckId });
+          } else {
+            view.index = Math.max(0, Math.min(idx, deck.cards.length - 1));
+          }
+        }
+      } : null);
+  }
+
+  // ------------------------------------------------------------------
+  // Настройки: резервная копия
+  // ------------------------------------------------------------------
+  function openSettings() {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+
+    const fileInput = el('input', {
+      attrs: { type: 'file', accept: 'application/json' },
+      style: { display: 'none' },
+    });
+    fileInput.addEventListener('change', () => {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      if (f.size > 5 * 1024 * 1024) { alert('Файл слишком большой.'); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        let parsed = null;
+        try { parsed = JSON.parse(String(reader.result)); }
+        catch (e) { alert('Это не похоже на файл резервной копии.'); return; }
+        // Тот же разбор, что и для хранилища: чужой файл не должен
+        // протащить в приложение ничего, кроме текста
+        const clean = sanitizeState(parsed);
+        if (clean.sections.length === 0) { alert('В файле нет разделов.'); return; }
+        if (!confirm('Заменить всё содержимое данными из файла?')) return;
+        state = clean; save(); close(); go({ name: 'home' });
+      };
+      reader.readAsText(f);
+    });
+
+    const sheet = el('div', { class: 'sheet' }, [
+      el('h3', { text: 'Настройки' }),
+      el('p', { class: 'hint', text:
+        'Все карточки хранятся только на этом устройстве. Приложение не '
+        + 'обращается в интернет и никуда ничего не отправляет.' }),
+      el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Сохранить копию', on: { click: exportBackup } }),
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Загрузить копию', on: { click: () => fileInput.click() } }),
+      ]),
+      el('p', { class: 'hint', text:
+        'Копия — обычный файл на вашем компьютере. Пригодится, если очистить '
+        + 'данные браузера: без копии карточки восстановить будет нельзя.' }),
+      el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn', attrs: { type: 'button' }, text: 'Закрыть',
+                       on: { click: close } }),
+      ]),
+      fileInput,
+    ]);
+
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+  }
+
+  function humanTime(ts) {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '—';
+    const pad = (n) => String(n).padStart(2, '0');
+    return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear()
+      + ', ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  /**
+   * Синхронизация через файл в iCloud Drive.
+   *
+   * Почему так, а не «по-настоящему». У браузера нет доступа к iCloud —
+   * такого интерфейса не существует ни в Safari, ни где-либо ещё. Зато
+   * системное окно выбора файла на iPhone показывает iCloud Drive как
+   * обычную папку, а окно «Поделиться» умеет туда сохранять. Этого
+   * достаточно, чтобы переносить карточки между устройствами через ту же
+   * облачную папку, без сервера и без учётной записи.
+   */
+  function openSync() {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const sheet = el('div', { class: 'sheet' });
+    const status = el('p', { class: 'hint' });
+
+    const fileInput = el('input', {
+      attrs: { type: 'file', accept: 'application/json,.json' },
+      style: { display: 'none' },
+    });
+    fileInput.addEventListener('change', () => {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      if (f.size > 5 * 1024 * 1024) { status.textContent = 'Файл слишком большой.'; return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        let parsed = null;
+        try { parsed = JSON.parse(String(reader.result)); }
+        catch (e) { status.textContent = 'Это не файл синхронизации.'; return; }
+        const clean = sanitizeState(parsed);
+        if (clean.sections.length === 0) { status.textContent = 'В файле нет разделов.'; return; }
+        const added = mergeState(clean);
+        state.syncedAt = Date.now();
+        save(); render();
+        status.textContent = added
+          ? 'Добавлено новых карточек: ' + added
+          : 'Всё уже было на месте, нового нет.';
+      };
+      reader.readAsText(f);
+    });
+
+    const payload = () => JSON.stringify(
+      Object.assign({}, state, { syncedAt: Date.now() }), null, 2);
+
+    function sendOut() {
+      const blob = new Blob([payload()], { type: 'application/json' });
+      const file = new File([blob], 'affirmations-sync.json',
+                            { type: 'application/json' });
+      // Через системное «Поделиться» файл кладётся прямо в iCloud Drive.
+      // Если браузер этого не умеет — обычное скачивание, а дальше
+      // пользователь сам перекладывает файл в облачную папку.
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: 'Аффирмации' })
+          .then(() => { state.syncedAt = Date.now(); save(); render();
+                        status.textContent = 'Отправлено.'; })
+          .catch(() => { /* пользователь отменил — это не ошибка */ });
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = el('a', { attrs: { href: url, download: 'affirmations-sync.json' } });
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      state.syncedAt = Date.now(); save(); render();
+      status.textContent = 'Файл сохранён. Положите его в папку iCloud Drive.';
+    }
+
+    clear(sheet);
+    sheet.appendChild(el('h3', { text: 'Синхронизация' }));
+    sheet.appendChild(el('p', { class: 'hint', text:
+      'Перенос карточек между MacBook и iPhone через файл в iCloud Drive. '
+      + 'Загрузка не стирает ваши карточки — добавляются только те, '
+      + 'которых ещё нет.' }));
+    sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+      el('button', { class: 'btn', attrs: { type: 'button' },
+                     text: 'Выгрузить', on: { click: sendOut } }),
+      el('button', { class: 'btn sec', attrs: { type: 'button' },
+                     text: 'Загрузить', on: { click: () => fileInput.click() } }),
+    ]));
+    sheet.appendChild(status);
+    if (state.syncedAt) {
+      sheet.appendChild(el('p', { class: 'hint',
+        text: 'Последний раз: ' + humanTime(state.syncedAt) }));
+    }
+    sheet.appendChild(el('p', { class: 'hint', text:
+      'Голосовые записи через файл не переносятся — они слишком тяжёлые '
+      + 'для текстового формата и остаются на своём устройстве.' }));
+    sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+      el('button', { class: 'btn sec', attrs: { type: 'button' }, text: 'Закрыть',
+                     on: { click: close } }),
+    ]));
+    sheet.appendChild(fileInput);
+
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+  }
+
+  /**
+   * Слить входящие данные с текущими: добавить недостающее, ничего не
+   * потерять. Замена «всё на всё» при синхронизации между двумя
+   * устройствами гарантированно однажды сотрёт то, что было сделано
+   * на другом, — поэтому только добавление, по совпадению текста.
+   */
+  function mergeState(incoming) {
+    let added = 0;
+    for (const inSec of incoming.sections) {
+      let sec = state.sections.find((s) => s.name === inSec.name);
+      if (!sec) {
+        sec = { id: uid(), name: inSec.name, collapsed: false, decks: [] };
+        state.sections.push(sec);
+      }
+      for (const inDeck of inSec.decks) {
+        let deck = sec.decks.find((d) => d.name === inDeck.name);
+        if (!deck) {
+          deck = { id: uid(), name: inDeck.name, color: inDeck.color, cards: [] };
+          sec.decks.push(deck);
+        }
+        const seen = new Set(deck.cards.map((c) => c.text.trim()));
+        for (const inCard of inDeck.cards) {
+          if (seen.has(inCard.text.trim())) continue;
+          if (deck.cards.length >= LIMITS.cardsPerDeck) break;
+          deck.cards.push({ id: uid(), text: inCard.text, color: inCard.color,
+                            fav: inCard.fav, audio: false, audioLen: 0 });
+          seen.add(inCard.text.trim());
+          added++;
+        }
+      }
+    }
+    return added;
+  }
+
+  function exportBackup() {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { attrs: { href: url, download: 'affirmations-backup.json' } });
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ------------------------------------------------------------------
+  function render() {
+    if (readerKeyHandler) {
+      document.removeEventListener('keydown', readerKeyHandler);
+      readerKeyHandler = null;
+    }
+    // Останавливаем звук и освобождаем ссылки прошлого экрана: без этого
+    // запись продолжала бы играть после перехода на другую карточку
+    stopRecording();
+    audioCleanup.forEach((fn) => { try { fn(); } catch (e) { /* уже убрано */ } });
+    audioCleanup = [];
+    clear(root);
+    let content;
+    if (view.name === 'read') content = renderReader();
+    else if (view.name === 'deck') content = renderDeck();
+    else content = renderHome();
+    root.appendChild(content);
+    window.scrollTo(0, 0);
+  }
+
+  // ------------------------------------------------------------------
+  // Работа без интернета — только для версии, размещённой по https.
+  //
+  // Проверка протокола обязательна: при открытии файла двойным щелчком
+  // рядом нет никакого sw.js, и попытка его зарегистрировать закончилась
+  // бы ошибкой в консоли на пустом месте. Обработчик кеша живёт в
+  // отдельном файле sw.js рядом с index.html.
+  // ------------------------------------------------------------------
+  if (location.protocol === 'https:' && 'serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {
+        // Не зарегистрировался — приложение всё равно работает,
+        // просто не откроется без сети
+      });
+    });
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
