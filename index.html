@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-9Av/yZu9weW3u60yF/eS9pfh3C2fEuxJj6KFjKwQ730=';
+               script-src 'sha256-6vcwklGc0o0sVuVBsrQlnu3OyArplEJaJ+1EhqJ4mVI=';
                style-src 'sha256-eMgpSu6pc0VINF2+L6lITsbIxRzViZFSHxWY6DTLpgY=';
                img-src 'self' data:;
                media-src blob:;
@@ -1692,17 +1692,34 @@ body {
     paint(big, card.color);
 
     /**
-     * Соседняя карточка. Только цвет и текст: плеер и кнопки ей не нужны,
-     * она лишь показывает, что подъезжает. Место под плеер всё равно
-     * оставляем — иначе в момент подмены текст прыгнул бы вверх.
+     * Соседняя карточка: цвет, текст и дорожка звука, если запись есть.
+     * Живого плеера ей не нужно — играть на подъезжающей карточке нельзя,
+     * но выглядеть она должна точь-в-точь как настоящая.
      */
+    const dress = [];        // чьи дорожки дорисовать следующим кадром
     const neighbour = (c) => {
+      const bar = el('div', { class: 'audio-bar' });
       const g = el('div', {
         class: 'bigcard side' + (c.audio ? ' with-audio' : ''),
         attrs: { 'aria-hidden': 'true' },
-      }, [el('div', { class: 'bigcard-text', text: c.text })]);
+      }, [
+        el('div', { class: 'bigcard-text', text: c.text }),
+        bar,
+      ]);
       paint(g, c.color);
+      if (c.audio) dress.push({ bar: bar, card: c });
       return g;
+    };
+
+    // Дорожка — это почти двести столбиков громкости на каждую карточку.
+    // Рисуем их следующим кадром, а не сразу: в тот кадр, когда карточка
+    // подменяется после свайпа, каждая лишняя работа видна как рывок.
+    // Соседки в это время всё равно за краем экрана.
+    const dressSides = () => {
+      while (dress.length) {
+        const it = dress.pop();
+        stillPlayer(it.bar, it.card);
+      }
     };
 
     // Все три карточки лежат в одной каретке, и двигается только она.
@@ -1784,8 +1801,9 @@ body {
     place(0, 0);
     // Пока карточка не вставлена в страницу, её ширина неизвестна и просвет
     // посчитан на глазок. Со следующего кадра размеры настоящие — ставим
-    // соседок точно, до того как человек успеет коснуться экрана.
-    requestAnimationFrame(seat);
+    // соседок точно и дорисовываем им дорожки, до того как человек успеет
+    // коснуться экрана.
+    requestAnimationFrame(() => { seat(); dressSides(); });
 
     // Перелистывание — сдвиг всей каретки ровно на один шаг. Соседняя
     // карточка приезжает точно в середину, поэтому подменять содержимое
@@ -1801,6 +1819,7 @@ body {
       const next = i + delta;
       if (next < 0 || next >= total || sliding) return;
       sliding = true;
+      dressSides();            // кнопками и клавишами тоже листают
       place(-delta * measure(), SLIDE_MS);
 
       let settled = false;
@@ -1830,6 +1849,9 @@ body {
       dragId = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
       dx = 0; raw = 0; locked = null; speed = 0;
       tPrev = Date.now(); xPrev = ev.clientX;
+      // Если кадр с дорисовкой почему-то не успел пройти, дорисовываем
+      // сейчас: соседка обязана выехать уже со своей дорожкой
+      dressSides();
       // Переход снимаем сразу, ещё до первого движения: если сделать это
       // на первом же pointermove, палец успевает уйти, а карточка секунду
       // догоняет его по прежней кривой — отсюда ощущение рывка в начале
@@ -2276,17 +2298,42 @@ body {
     if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop();
   }
 
-  /** Плеер внизу карточки: кнопка, дорожка волны, время до сотых. */
-  function buildPlayer(bar, card) {
+  /**
+   * Столбики громкости в сосуде. Возвращает их списком: по нему потом
+   * подсвечивается уже прозвучавшая часть.
+   */
+  function drawBars(barBox, peaks) {
+    clear(barBox);
+    const bars = [];
+    const src = (peaks && peaks.length) ? peaks : null;
+    for (let i = 0; i < PEAK_COUNT; i++) {
+      // Пока формы волны нет — ровная тонкая линия, а не пустота:
+      // так видно, что дорожка есть и по ней можно перематывать
+      const v = src ? src[Math.floor(i * src.length / PEAK_COUNT)] : 8;
+      const b = el('i');
+      b.style.setProperty('height', Math.max(6, v) + '%');
+      barBox.appendChild(b);
+      bars.push(b);
+    }
+    return bars;
+  }
+
+  /**
+   * Внешний вид дорожки, без поведения: кнопка, сосуд со столбиками,
+   * подпись времени.
+   *
+   * Отдельно от плеера, потому что тот же самый вид нужен соседним
+   * карточкам в читалке. Там дорожка только показывается — но выглядеть
+   * должна в точности так же, иначе в момент подмены она бы дёрнулась.
+   */
+  function playerFace(card) {
     const play = el('button', {
       class: 'audio-btn', attrs: { type: 'button', 'aria-label': 'Прослушать запись' },
       text: '▶',
     });
-    const total = card.audioLen || 0;
-
     // Дорожка сделана как сосуд: пустая полоса, которая по мере
-    // проигрывания наполняется зелёным слева направо. Столбики громкости
-    // лежат поверх заливки, чтобы было видно, где голос, а где тишина.
+    // проигрывания наполняется слева направо. Столбики громкости лежат
+    // поверх заливки, чтобы было видно, где голос, а где тишина.
     const wave = el('div', { class: 'wave', attrs: { 'aria-hidden': 'true' } });
     const fill = el('span', { class: 'wave-fill' });
     const barBox = el('div', { class: 'wave-bars' });
@@ -2295,26 +2342,46 @@ body {
     wave.appendChild(barBox);
     wave.appendChild(head);
 
-    const bars = [];
-    const drawBars = (peaks) => {
-      clear(barBox);
-      bars.length = 0;
-      const src = (peaks && peaks.length) ? peaks : null;
-      for (let i = 0; i < PEAK_COUNT; i++) {
-        // Пока формы волны нет — ровная тонкая линия, а не пустота:
-        // так видно, что дорожка есть и по ней можно перематывать
-        const v = src ? src[Math.floor(i * src.length / PEAK_COUNT)] : 8;
-        const b = el('i');
-        b.style.setProperty('height', Math.max(6, v) + '%');
-        barBox.appendChild(b);
-        bars.push(b);
-      }
-    };
-
+    const total = card.audioLen || 0;
     const label = el('span', {
       class: 'audio-label',
       text: total ? '00:00,00 / ' + mmsscc(total) : 'Запись',
     });
+
+    return { play, wave, fill, barBox, head, label, total,
+             bars: drawBars(barBox, card.peaks) };
+  }
+
+  /**
+   * Дорожка на соседней карточке в читалке: тот же вид, но неживой.
+   *
+   * Нужна, чтобы подъезжающая при свайпе карточка приходила уже со своей
+   * дорожкой. Раньше соседка была без неё, и плеер появлялся отдельным
+   * рывком уже после того, как карточка встала на место.
+   *
+   * Кнопки на месте, но выключены: карточка помечена aria-hidden, и в
+   * обход по Tab они попадать не должны. Кнопку удаления рисуем тоже —
+   * без неё сосуд оказался бы шире, и при подмене он бы сжался.
+   */
+  function stillPlayer(bar, card) {
+    const face = playerFace(card);
+    face.play.setAttribute('tabindex', '-1');
+    const del = el('button', {
+      class: 'audio-del',
+      attrs: { type: 'button', 'aria-label': 'Удалить запись', tabindex: '-1' },
+      text: '✕',
+    });
+    bar.appendChild(el('div', { class: 'audio-row' }, [face.play, face.wave, del]));
+    bar.appendChild(face.label);
+  }
+
+  /** Плеер внизу карточки: кнопка, дорожка волны, время до сотых. */
+  function buildPlayer(bar, card) {
+    const face = playerFace(card);
+    const play = face.play, wave = face.wave, fill = face.fill;
+    const barBox = face.barBox, head = face.head, label = face.label;
+    const total = face.total;
+    let bars = face.bars;
 
     const duration = () => (audio && isFinite(audio.duration) && audio.duration > 0)
       ? audio.duration : total;
@@ -2416,7 +2483,9 @@ body {
         if (!card.peaks || card.peaks.length === 0) {
           computePeaks(blob).then((peaks) => {
             if (peaks && peaks.length) {
-              card.peaks = peaks; save(); drawBars(peaks); setTime(audio ? audio.currentTime : 0);
+              card.peaks = peaks; save();
+              bars = drawBars(barBox, peaks);
+              setTime(audio ? audio.currentTime : 0);
             }
           }).catch(() => {});
         }
@@ -2458,7 +2527,6 @@ body {
     wave.addEventListener('pointerup', () => { seeking = false; });
     wave.addEventListener('pointercancel', () => { seeking = false; });
 
-    drawBars(card.peaks);
     if (total) setTime(0);   // без длины подпись остаётся «Запись»
 
     // Ссылку на объект надо освободить, иначе память держится до
