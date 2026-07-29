@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-IXXAbYGhsCLYajX1IFSxfbjgdQJ/7aMBPirfsjHNhj0=';
-               style-src 'sha256-MX4FGolYSzIhOlhCSkkXL/qktDpEzzFmmToLAvJLUco=';
+               script-src 'sha256-Wj0VJQv6gxikd+32O/wI4p7B0t+m54NnJO4cclju+Eg=';
+               style-src 'sha256-Tbu2kZPsybzrJgC+5UbFr3HUxS6Q1b5kOVlsjeg0jDI=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -612,6 +612,28 @@ body {
   color: #8A2A20;
 }
 .sync-status.wait { color: var(--ink-soft); padding: 4px 2px; }
+
+/* Запасной способ загрузки, если окно выбора файла не даёт нажать файл */
+.fallback { margin-top: 14px; border-top: 1px solid var(--hair); padding-top: 10px; }
+.fallback summary {
+  font-size: 14px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+.paste-box {
+  width: 100%;
+  font: 400 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-m);
+  padding: 10px 12px;
+  background: var(--sheet);
+  color: var(--ink);
+  resize: vertical;
+  margin-bottom: 10px;
+}
 </style>
 </head>
 <body>
@@ -678,6 +700,15 @@ body {
   }
 
   const PEAK_COUNT = 190;   // столько столбиков рисуем в дорожке
+
+  // Имя файла обмена между устройствами.
+  //
+  // Расширение .txt выбрано намеренно. iPhone в окне выбора файла делает
+  // серым и неактивным всё, что система не умеет открыть сама, — .json
+  // как раз из таких: файл виден, но нажать на него нельзя. Обычный текст
+  // выбирается без препятствий. Содержимое от этого не меняется: внутри
+  // тот же JSON, и он же проверяется при чтении.
+  const SYNC_FILE = 'affirmations-sync.txt';
 
   function clampStr(value, max) {
     return typeof value === 'string' ? value.slice(0, max) : '';
@@ -2127,7 +2158,10 @@ body {
     const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
 
     const fileInput = el('input', {
-      attrs: { type: 'file', accept: 'application/json' },
+      // Фильтра по типу нет намеренно — по той же причине, что и в
+      // окне синхронизации: с ним iPhone гасит нужный файл. Что внутри,
+      // проверяем по содержимому.
+      attrs: { type: 'file' },
       style: { display: 'none' },
     });
     fileInput.addEventListener('change', () => {
@@ -2199,14 +2233,49 @@ body {
     const sheet = el('div', { class: 'sheet' });
     const status = el('div', { class: 'sync-status' });
 
-    // Без accept намеренно. С фильтром по типу файл, пришедший с iPhone
-    // через «Поделиться», в окне выбора оказывался серым и не нажимался:
-    // система помечает его не тем типом, который мы ожидали. Проверяем
-    // не расширение, а содержимое — это и надёжнее, и безопаснее.
+    // Без accept намеренно. Фильтр по типу тут только вредит: iPhone
+    // тогда гасит нужный файл в окне выбора. Что за файл — решаем по
+    // содержимому, а не по имени: так и надёжнее, и безопаснее.
     const fileInput = el('input', {
       attrs: { type: 'file' },
       style: { display: 'none' },
     });
+
+    /**
+     * Разобрать текст файла обмена.
+     *
+     * Возвращает разобранный объект или null. Убираем невидимую метку
+     * кодировки в начале (её добавляют многие редакторы и облачные
+     * папки) — из-за одного такого символа разбор падал бы на файле,
+     * с которым на самом деле всё в порядке.
+     */
+    function parseSync(raw) {
+      const text = String(raw == null ? '' : raw).replace(/^\uFEFF/, '').trim();
+      if (!text) return null;
+      try { return JSON.parse(text); } catch (e) { return null; }
+    }
+
+    /** Общий путь для файла и для вставленного текста. */
+    function takeText(raw, whatChosen) {
+      const parsed = parseSync(raw);
+      if (!parsed) {
+        report('Это не похоже на данные синхронизации.\nВыбрано: '
+               + whatChosen
+               + '\nНужен файл ' + SYNC_FILE + ' (или прежний '
+               + 'affirmations-sync.json), сохранённый кнопкой '
+               + '«Сохранить в файл».', 'bad');
+        return;
+      }
+      const clean = sanitizeState(parsed);
+      if (clean.sections.length === 0) {
+        report('В данных нет разделов — загружать нечего.', 'bad'); return;
+      }
+      // Ничего не меняем сразу: сперва показываем, что внутри, и ждём
+      // подтверждения. Раньше выбор файла молча всё применял, и было
+      // непонятно, сработало вообще или нет.
+      showPreview(parsed, clean, whatChosen);
+    }
+
     fileInput.addEventListener('change', () => {
       const f = fileInput.files && fileInput.files[0];
       if (!f) return;
@@ -2218,24 +2287,7 @@ body {
       report('Читаю файл…', 'wait');
       const reader = new FileReader();
       reader.onerror = () => report('Файл не читается', 'bad');
-      reader.onload = () => {
-        let parsed = null;
-        try { parsed = JSON.parse(String(reader.result)); }
-        catch (e) {
-          report('Это не файл синхронизации.\nВыбран: ' + (f.name || 'без имени')
-                 + '. Нужен файл affirmations-sync.json, сохранённый '
-                 + 'кнопкой «Сохранить в файл».', 'bad');
-          return;
-        }
-        const clean = sanitizeState(parsed);
-        if (clean.sections.length === 0) {
-          report('В файле нет разделов — загружать нечего.', 'bad'); return;
-        }
-        // Ничего не меняем сразу: сперва показываем, что внутри, и ждём
-        // подтверждения. Раньше выбор файла молча всё применял, и было
-        // непонятно, сработало вообще или нет.
-        showPreview(f, parsed, clean);
-      };
+      reader.onload = () => takeText(reader.result, f.name || 'файл без имени');
       reader.readAsText(f);
     });
 
@@ -2293,10 +2345,16 @@ body {
 
     function deliver(text) {
       if (typeof self.__capture === 'function') self.__capture(text);
-      const blob = new Blob([text], { type: 'application/json' });
+      // Тип и расширение — обычный текст, а НЕ json.
+      //
+      // Это не мелочь оформления, а обход поведения iOS: в окне выбора
+      // файла система гасит всё, что не умеет открыть сама, и .json туда
+      // попадает — файл видно, но нажать нельзя, и никакой accept этого
+      // не меняет. Простой текст iOS открывать умеет, поэтому такой файл
+      // выбирается свободно. Внутри лежит тот же самый JSON.
+      const blob = new Blob([text], { type: 'text/plain' });
       const mb = blob.size / 1048576;
-      const file = new File([blob], 'affirmations-sync.json',
-                            { type: 'application/json' });
+      const file = new File([blob], SYNC_FILE, { type: 'text/plain' });
       // Через системное «Поделиться» файл кладётся прямо в iCloud Drive.
       // Если браузер этого не умеет — обычное скачивание, а дальше
       // пользователь сам перекладывает файл в облачную папку.
@@ -2313,11 +2371,12 @@ body {
         return;
       }
       const url = URL.createObjectURL(blob);
-      const a = el('a', { attrs: { href: url, download: 'affirmations-sync.json' } });
+      const a = el('a', { attrs: { href: url, download: SYNC_FILE } });
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       state.syncedAt = Date.now(); save(); render();
-      report('Файл сохранён (' + size + ').\nПоложите его в папку iCloud Drive.', 'ok');
+      report('Файл сохранён: ' + SYNC_FILE + ' (' + size + ').\n'
+             + 'Положите его в папку iCloud Drive.', 'ok');
     }
 
     /** Крупное заметное сообщение вместо мелкой серой строчки. */
@@ -2328,7 +2387,7 @@ body {
     }
 
     /** Показать, что внутри файла, и дождаться подтверждения. */
-    function showPreview(file, parsed, clean) {
+    function showPreview(parsed, clean, source) {
       let cards = 0, decks = 0;
       for (const s of clean.sections) {
         decks += s.decks.length;
@@ -2343,7 +2402,7 @@ body {
       clear(sheet);
       sheet.appendChild(el('h3', { text: 'Что в файле' }));
       sheet.appendChild(el('p', { class: 'hint',
-        text: (file.name || 'файл') + ' · ' + when }));
+        text: (source || 'данные') + ' · ' + when }));
       sheet.appendChild(el('div', { class: 'sync-status ok' }, [
         el('div', { text: 'Разделов: ' + clean.sections.length }),
         el('div', { text: 'Колод: ' + decks }),
@@ -2422,6 +2481,31 @@ body {
       el('p', { class: 'hint', text:
         'Из файла — сюда. Делайте на втором устройстве. Ваши карточки '
         + 'не стираются, добавляются только недостающие.' }),
+    ]));
+
+    // Запасной путь на случай, если окно выбора файла опять заупрямится.
+    // Голос так не переносится — он слишком тяжёлый, чтобы держать его
+    // в буфере обмена; об этом сказано прямо, чтобы не было сюрприза.
+    const paste = el('textarea', {
+      class: 'paste-box',
+      attrs: { rows: '3', placeholder: 'Или вставьте сюда текст файла',
+               autocomplete: 'off', autocorrect: 'off', spellcheck: 'false' },
+    });
+    sheet.appendChild(el('details', { class: 'fallback' }, [
+      el('summary', { text: 'Не получается выбрать файл?' }),
+      el('p', { class: 'hint', text:
+        'Откройте файл на другом устройстве, скопируйте всё содержимое '
+        + 'и вставьте сюда. Тексты и цвета перенесутся, голосовые '
+        + 'записи — нет.' }),
+      paste,
+      el('button', {
+        class: 'btn sec', attrs: { type: 'button' }, text: 'Загрузить из текста',
+        on: { click: () => {
+          const v = paste.value || '';
+          if (!v.trim()) { report('Поле пустое — вставьте текст.', 'bad'); return; }
+          takeText(v, 'вставленный текст');
+        } },
+      }),
     ]));
     sheet.appendChild(status);
     if (state.syncedAt) {
@@ -2533,9 +2617,11 @@ body {
   }
 
   function exportBackup() {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    // Тот же расчёт, что и у файла обмена: обычный текст iPhone даёт
+    // выбрать, а .json — нет
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
-    const a = el('a', { attrs: { href: url, download: 'affirmations-backup.json' } });
+    const a = el('a', { attrs: { href: url, download: 'affirmations-backup.txt' } });
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
