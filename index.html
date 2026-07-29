@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-hnC+Q7DjyewaHFf0ncbKYOaeqWEGgY8uB/hfgQEcTeY=';
-               style-src 'sha256-GWITpubSwDvmKsAFDmQxn13MQmWL96KtIE97MJRHGFE=';
+               script-src 'sha256-WCNGAWI4lHtdv9621w6FUpN8UjTLf6ooVOeITh9czFI=';
+               style-src 'sha256-TAAt6C61QGysX9CDxlLkUqrwfOTmdrWipi8XrelSnrk=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -541,6 +541,31 @@ body {
 .sync-row { margin: 14px 0; }
 .sync-row .btn { width: 100%; }
 .sync-row .hint { margin: 6px 2px 0; }
+
+/* Результат синхронизации. Раньше это была мелкая серая строчка, и её
+   попросту не замечали — человек не понимал, сработало или нет. */
+.sync-status { margin: 12px 0; }
+.sync-status:empty { display: none; }
+.sync-status > div {
+  font-size: 16px;
+  line-height: 1.5;
+  white-space: pre-line;
+  padding: 2px 0;
+}
+.sync-status.ok {
+  background: #EFF6EF;
+  border: 1px solid #CBE3CB;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.sync-status.bad {
+  background: #FBEFEE;
+  border: 1px solid #EDC9C5;
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: #8A2A20;
+}
+.sync-status.wait { color: var(--ink-soft); padding: 4px 2px; }
 </style>
 </head>
 <body>
@@ -1933,7 +1958,7 @@ body {
     const wrap = el('div', { class: 'modal' });
     const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
     const sheet = el('div', { class: 'sheet' });
-    const status = el('p', { class: 'hint' });
+    const status = el('div', { class: 'sync-status' });
 
     // Без accept намеренно. С фильтром по типу файл, пришедший с iPhone
     // через «Поделиться», в окне выбора оказывался серым и не нажимался:
@@ -1949,26 +1974,28 @@ body {
       // Потолок поднят: теперь в файл входят и голосовые записи,
       // а они весят куда больше текста
       if (f.size > 200 * 1024 * 1024) {
-        status.textContent = 'Файл слишком большой.'; return;
+        report('Файл слишком большой', 'bad'); return;
       }
-      status.textContent = 'Читаю файл…';
+      report('Читаю файл…', 'wait');
       const reader = new FileReader();
+      reader.onerror = () => report('Файл не читается', 'bad');
       reader.onload = () => {
         let parsed = null;
         try { parsed = JSON.parse(String(reader.result)); }
-        catch (e) { status.textContent = 'Это не файл синхронизации.'; return; }
+        catch (e) {
+          report('Это не файл синхронизации.\nВыбран: ' + (f.name || 'без имени')
+                 + '. Нужен файл affirmations-sync.json, сохранённый '
+                 + 'кнопкой «Сохранить в файл».', 'bad');
+          return;
+        }
         const clean = sanitizeState(parsed);
-        if (clean.sections.length === 0) { status.textContent = 'В файле нет разделов.'; return; }
-
-        const res = mergeState(clean);
-        state.syncedAt = Date.now();
-        save(); render();
-
-        // Записи кладём после слияния: их надо привязать к тем карточкам,
-        // которые только что появились, а у них новые идентификаторы
-        const clips = (parsed && typeof parsed.clips === 'object' && parsed.clips)
-          ? parsed.clips : {};
-        importClips(res.audioLinks, clips, status, res.added);
+        if (clean.sections.length === 0) {
+          report('В файле нет разделов — загружать нечего.', 'bad'); return;
+        }
+        // Ничего не меняем сразу: сперва показываем, что внутри, и ждём
+        // подтверждения. Раньше выбор файла молча всё применял, и было
+        // непонятно, сработало вообще или нет.
+        showPreview(f, parsed, clean);
       };
       reader.readAsText(f);
     });
@@ -1993,7 +2020,7 @@ body {
           Object.assign({}, state, { syncedAt: Date.now() }), null, 2));
       }
 
-      status.textContent = 'Собираю записи: 0 из ' + withAudio.length + '…';
+      report('Собираю записи: 0 из ' + withAudio.length + '…', 'wait');
       const clips = {};
       let done = 0;
 
@@ -2006,14 +2033,14 @@ body {
           .catch(() => { /* запись потерялась — переносим карточку без неё */ })
           .then(() => {
             done++;
-            status.textContent = 'Собираю записи: ' + done + ' из '
-              + withAudio.length + '…';
+            report('Собираю записи: ' + done + ' из '
+              + withAudio.length + '…', 'wait');
             return next(i + 1);
           });
       };
 
       return next(0).then(() => {
-        status.textContent = '';
+        clear(status);
         return JSON.stringify(
           Object.assign({}, state, { syncedAt: Date.now(), clips: clips }), null, 2);
       });
@@ -2021,11 +2048,12 @@ body {
 
     function sendOut() {
       buildPayload().then(deliver).catch(() => {
-        status.textContent = 'Не удалось собрать файл.';
+        report('Не удалось собрать файл.', 'bad');
       });
     }
 
     function deliver(text) {
+      if (typeof self.__capture === 'function') self.__capture(text);
       const blob = new Blob([text], { type: 'application/json' });
       const mb = blob.size / 1048576;
       const file = new File([blob], 'affirmations-sync.json',
@@ -2041,7 +2069,7 @@ body {
         // оказывается два файла вместо одного.
         navigator.share({ files: [file] })
           .then(() => { state.syncedAt = Date.now(); save(); render();
-                        status.textContent = 'Файл сохранён, ' + size + '.'; })
+                        report('Файл сохранён, ' + size + '.', 'ok'); })
           .catch(() => { /* пользователь отменил — это не ошибка */ });
         return;
       }
@@ -2050,10 +2078,90 @@ body {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       state.syncedAt = Date.now(); save(); render();
-      status.textContent = 'Файл сохранён (' + size
-        + '). Положите его в папку iCloud Drive.';
+      report('Файл сохранён (' + size + ').\nПоложите его в папку iCloud Drive.', 'ok');
     }
 
+    /** Крупное заметное сообщение вместо мелкой серой строчки. */
+    function report(text, kind) {
+      clear(status);
+      status.className = 'sync-status ' + (kind || '');
+      status.appendChild(el('div', { text: text }));
+    }
+
+    /** Показать, что внутри файла, и дождаться подтверждения. */
+    function showPreview(file, parsed, clean) {
+      let cards = 0, decks = 0;
+      for (const s of clean.sections) {
+        decks += s.decks.length;
+        for (const d of s.decks) cards += d.cards.length;
+      }
+      const clips = (parsed && typeof parsed.clips === 'object' && parsed.clips)
+        ? parsed.clips : {};
+      const clipCount = Object.keys(clips).length;
+      const when = (typeof parsed.syncedAt === 'number')
+        ? humanTime(parsed.syncedAt) : 'дата неизвестна';
+
+      clear(sheet);
+      sheet.appendChild(el('h3', { text: 'Что в файле' }));
+      sheet.appendChild(el('p', { class: 'hint',
+        text: (file.name || 'файл') + ' · ' + when }));
+      sheet.appendChild(el('div', { class: 'sync-status ok' }, [
+        el('div', { text: 'Разделов: ' + clean.sections.length }),
+        el('div', { text: 'Колод: ' + decks }),
+        el('div', { text: 'Карточек: ' + cards }),
+        el('div', { text: 'Голосовых записей: ' + clipCount }),
+      ]));
+      sheet.appendChild(el('p', { class: 'hint', text:
+        'Ваши карточки не пострадают: добавится только то, чего здесь ещё '
+        + 'нет. Совпадающие пропускаются.' }));
+      sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Отмена', on: { click: drawMain } }),
+        el('button', {
+          class: 'btn', attrs: { type: 'button' },
+          text: 'Загрузить в приложение',
+          on: { click: () => applyImport(parsed, clean) },
+        }),
+      ]));
+    }
+
+    /** Здесь и только здесь данные действительно попадают в приложение. */
+    function applyImport(parsed, clean) {
+      clear(sheet);
+      sheet.appendChild(el('h3', { text: 'Загрузка' }));
+      sheet.appendChild(status);
+      report('Переношу…', 'wait');
+
+      const res = mergeState(clean);
+      state.syncedAt = Date.now();
+      save(); render();
+
+      // Записи кладём после слияния: их надо привязать к тем карточкам,
+      // которые только что появились, а у них новые идентификаторы
+      const clips = (parsed && typeof parsed.clips === 'object' && parsed.clips)
+        ? parsed.clips : {};
+      importClips(res.audioLinks, clips, {
+        set text(v) { report(v, 'wait'); },
+      }, res.added, (cards, clipsDone) => {
+        clear(sheet);
+        sheet.appendChild(el('h3', { text: 'Готово' }));
+        const lines = [];
+        lines.push('Добавлено карточек: ' + cards);
+        lines.push('Перенесено записей: ' + clipsDone);
+        if (cards === 0 && clipsDone === 0) {
+          lines.push('');
+          lines.push('Нового не оказалось — всё это уже есть на устройстве.');
+        }
+        sheet.appendChild(el('div', { class: 'sync-status ok' },
+          lines.map((x) => el('div', { text: x }))));
+        sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+          el('button', { class: 'btn', attrs: { type: 'button' }, text: 'Закрыть',
+                         on: { click: () => { close(); render(); } } }),
+        ]));
+      });
+    }
+
+    function drawMain() {
     clear(sheet);
     sheet.appendChild(el('h3', { text: 'Синхронизация' }));
     sheet.appendChild(el('p', { class: 'hint', text:
@@ -2090,7 +2198,9 @@ body {
                      on: { click: close } }),
     ]));
     sheet.appendChild(fileInput);
+    }
 
+    drawMain();
     wrap.appendChild(sheet);
     wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
     document.body.appendChild(wrap);
@@ -2147,20 +2257,20 @@ body {
   }
 
   /** Разложить голосовые записи из файла по карточкам. */
-  function importClips(links, clips, status, addedCards) {
+  function importClips(links, clips, status, addedCards, onDone) {
     const todo = links.filter((l) => typeof clips[l.from] === 'string');
     const finish = (n) => {
+      save(); render();
+      if (typeof onDone === 'function') { onDone(addedCards, n); return; }
       const parts = [];
       parts.push(addedCards ? 'Добавлено карточек: ' + addedCards
                             : 'Новых карточек нет');
       if (n) parts.push('записей: ' + n);
-      else if (links.length) parts.push('записи в файле не найдены');
-      status.textContent = parts.join(', ') + '.';
-      save(); render();
+      status.text = parts.join(', ') + '.';
     };
 
     if (todo.length === 0) { finish(0); return; }
-    status.textContent = 'Переношу записи: 0 из ' + todo.length + '…';
+    status.text = 'Переношу записи: 0 из ' + todo.length + '…';
 
     let ok = 0;
     const step = (i) => {
@@ -2168,7 +2278,7 @@ body {
       const link = todo[i];
       const blob = AudioStore.fromText(clips[link.from]);
       const cont = () => {
-        status.textContent = 'Переношу записи: ' + (i + 1) + ' из '
+        status.text = 'Переношу записи: ' + (i + 1) + ' из '
           + todo.length + '…';
         step(i + 1);
       };
