@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-/DSzi5Z+N/GthfEhXP0V3C1PEw9+gWz6+MY7AhQ0RUc=';
+               script-src 'sha256-XNMaTMKroOM7337uHjmWtWp01+W6IHYqCXaDDnx1MKg=';
                style-src 'sha256-xrqrc3mLjztRbGnkLvuV6yX1h1v4OC1WP1wb3QlqVsE=';
                img-src 'self' data:;
                media-src blob:;
@@ -2617,8 +2617,10 @@ body {
         }
       }
       if (withAudio.length === 0) {
-        return Promise.resolve(JSON.stringify(
-          Object.assign({}, state, { syncedAt: Date.now() }), null, 2));
+        return Promise.resolve(JSON.stringify(Object.assign({}, state, {
+          kind: 'sync', syncedAt: Date.now(),
+          clipCount: 0, clipsExpected: 0, clips: {},
+        }), null, 2));
       }
 
       report('Собираю записи: 0 из ' + withAudio.length + '…', 'wait');
@@ -2642,8 +2644,15 @@ body {
 
       return next(0).then(() => {
         clear(status);
-        return JSON.stringify(
-          Object.assign({}, state, { syncedAt: Date.now(), clips: clips }), null, 2);
+        // Помечаем файл: что это и сколько записей внутри. Иначе
+        // резервную копию (только текст) не отличить от файла обмена —
+        // оба лежат на рабочем столе с расширением .txt.
+        return JSON.stringify(Object.assign({}, state, {
+          kind: 'sync', syncedAt: Date.now(),
+          clipCount: Object.keys(clips).length,
+          clipsExpected: withAudio.length,
+          clips: clips,
+        }), null, 2);
       });
     }
 
@@ -2670,13 +2679,26 @@ body {
       // пользователь сам перекладывает файл в облачную папку.
       const size = mb < 1 ? Math.round(blob.size / 1024) + ' КБ'
                           : mb.toFixed(1) + ' МБ';
+      // Если часть записей не удалось положить в файл — сказать сразу,
+      // а не выяснять это уже на втором устройстве
+      let warn = '';
+      try {
+        const meta = JSON.parse(text);
+        const got = meta.clipCount || 0, want = meta.clipsExpected || 0;
+        if (want > got) {
+          warn = '\nВНИМАНИЕ: в файл вошло записей ' + got + ' из ' + want + '.';
+        } else if (got) {
+          warn = '\nЗаписей внутри: ' + got + '.';
+        }
+      } catch (e) { /* не смогли заглянуть — не страшно */ }
+
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         // Передаём ТОЛЬКО файл. Если добавить title или text, iOS
         // сохраняет их отдельным текстовым файлом рядом — и на диске
         // оказывается два файла вместо одного.
         navigator.share({ files: [file] })
           .then(() => { state.syncedAt = Date.now(); save(); render();
-                        report('Файл сохранён, ' + size + '.', 'ok'); })
+                        report('Файл сохранён, ' + size + '.' + warn, 'ok'); })
           .catch(() => { /* пользователь отменил — это не ошибка */ });
         return;
       }
@@ -2685,8 +2707,8 @@ body {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       state.syncedAt = Date.now(); save(); render();
-      report('Файл сохранён: ' + SYNC_FILE + ' (' + size + ').\n'
-             + 'Положите его в папку iCloud Drive.', 'ok');
+      report('Файл сохранён: ' + SYNC_FILE + ' (' + size + ').' + warn
+             + '\nПоложите его в папку iCloud Drive.', 'ok');
     }
 
     /** Крупное заметное сообщение вместо мелкой серой строчки. */
@@ -2719,13 +2741,37 @@ body {
         el('div', { text: 'Карточек: ' + cards }),
         el('div', { text: 'Голосовых записей: ' + clipCount }),
       ]));
-      sheet.appendChild(el('p', { class: 'hint', text:
-        clipCount
-          ? 'Голосовые записи лежат внутри этого же файла и разойдутся по '
-            + 'своим карточкам. Ваши карточки не пострадают: добавится '
-            + 'только то, чего здесь ещё нет.'
-          : 'Ваши карточки не пострадают: добавится только то, чего здесь '
-            + 'ещё нет. Совпадающие пропускаются.' }));
+      // Сколько карточек в файле заявляют звук — если записей при этом
+      // нет, значит выбран не тот файл, и молчать об этом нельзя
+      let claimAudio = 0;
+      for (const sec of clean.sections) {
+        for (const d of sec.decks) {
+          for (const c of d.cards) if (c.audio) claimAudio++;
+        }
+      }
+      const isBackup = parsed && parsed.kind === 'backup';
+
+      if (clipCount) {
+        sheet.appendChild(el('p', { class: 'hint', text:
+          'Голосовые записи лежат внутри этого же файла и разойдутся по '
+          + 'своим карточкам. Ваши карточки не пострадают: добавится '
+          + 'только то, чего здесь ещё нет.' }));
+      } else if (isBackup || claimAudio) {
+        sheet.appendChild(el('div', { class: 'sync-status bad' }, [
+          el('div', { text: 'В этом файле нет голосовых записей.' }),
+          el('div', { text: isBackup
+            ? 'Это резервная копия — в неё звук не входит.'
+            : 'Карточки говорят про звук (' + claimAudio + '), но самих '
+              + 'записей в файле нет.' }),
+          el('div', { text: 'Нужен файл, сохранённый кнопкой '
+            + '«↑ Сохранить в файл» в этом окне. Он называется '
+            + SYNC_FILE + '.' }),
+        ]));
+      } else {
+        sheet.appendChild(el('p', { class: 'hint', text:
+          'Ваши карточки не пострадают: добавится только то, чего здесь '
+          + 'ещё нет. Совпадающие пропускаются.' }));
+      }
       sheet.appendChild(el('div', { class: 'sheet-actions' }, [
         el('button', { class: 'btn sec', attrs: { type: 'button' },
                        text: 'Отмена', on: { click: drawMain } }),
@@ -3007,9 +3053,11 @@ body {
   function exportBackup() {
     // Тот же расчёт, что и у файла обмена: обычный текст iPhone даёт
     // выбрать, а .json — нет
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'text/plain' });
+    const blob = new Blob([JSON.stringify(
+      Object.assign({}, state, { kind: 'backup' }), null, 2)],
+      { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
-    const a = el('a', { attrs: { href: url, download: 'affirmations-backup.txt' } });
+    const a = el('a', { attrs: { href: url, download: 'affirmations-только-текст.txt' } });
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
