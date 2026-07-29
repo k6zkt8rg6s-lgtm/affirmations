@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-WCNGAWI4lHtdv9621w6FUpN8UjTLf6ooVOeITh9czFI=';
-               style-src 'sha256-TAAt6C61QGysX9CDxlLkUqrwfOTmdrWipi8XrelSnrk=';
+               script-src 'sha256-IXXAbYGhsCLYajX1IFSxfbjgdQJ/7aMBPirfsjHNhj0=';
+               style-src 'sha256-MX4FGolYSzIhOlhCSkkXL/qktDpEzzFmmToLAvJLUco=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -196,14 +196,12 @@ body {
 /* Полоска проигрывания внизу карточки */
 .audio-bar {
   position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  left: 14px;
+  right: 14px;
+  bottom: 12px;
 }
 .audio-bar:empty { display: none; }
+.audio-row { display: flex; align-items: center; gap: 10px; }
 .audio-btn {
   min-width: 40px;
   min-height: 40px;
@@ -219,11 +217,57 @@ body {
 /* Время прослушивания — намеренно тихое: цифры не должны спорить
    с текстом аффирмации, они справочные */
 .audio-label {
-  font-size: 12px;
-  color: rgba(43, 36, 8, .42);
+  display: block;
+  text-align: center;
+  margin-top: 6px;
+  font-size: 13px;
+  color: rgba(43, 36, 8, .5);
+  font-variant-numeric: tabular-nums;   /* сотые не дёргают ширину */
+  letter-spacing: .3px;
+}
+
+/* Дорожка звука: столбики громкости и тонкая линия текущего места.
+   Столбики рисуются обычными элементами, а не картинкой, — так их
+   можно подсвечивать по мере проигрывания без перерисовки. */
+.wave {
+  position: relative;
   flex: 1;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: .2px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  cursor: pointer;
+  touch-action: none;      /* дорожка перематывает, а не листает карточку */
+  min-width: 0;
+}
+.wave i {
+  flex: 1;
+  min-width: 0;
+  background: rgba(43, 36, 8, .28);
+  border-radius: 1px;
+  transition: background .12s linear;
+}
+.wave i.played { background: rgba(43, 36, 8, .72); }
+.wave-head {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #2B2408;
+  border-radius: 1px;
+  pointer-events: none;
+}
+.wave-head::after {
+  content: "";
+  position: absolute;
+  left: -3px;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2B2408;
 }
 .audio-del {
   border: 0;
@@ -431,7 +475,9 @@ body {
 }
 /* Когда снизу есть плеер, освобождаем под него место, чтобы текст
    не заезжал под кнопку */
-.bigcard:has(.audio-bar:not(:empty)) { padding-bottom: 72px; }
+/* Дорожка со временем занимает больше места, чем прежняя строчка:
+   40 px сама дорожка плюс подпись под ней */
+.bigcard:has(.audio-bar:not(:empty)) { padding-bottom: 96px; }
 .bigcard:active { cursor: grabbing; }
 .bigcard-text { user-select: text; -webkit-user-select: text; }
 
@@ -631,8 +677,70 @@ body {
     return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
   }
 
+  const PEAK_COUNT = 190;   // столько столбиков рисуем в дорожке
+
   function clampStr(value, max) {
     return typeof value === 'string' ? value.slice(0, max) : '';
+  }
+
+  /** Форма волны из файла или хранилища — только целые 0–100. */
+  function sanitizePeaks(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const v of value.slice(0, 400)) {
+      const n = Math.round(Number(v));
+      out.push(isFinite(n) ? Math.max(0, Math.min(100, n)) : 0);
+    }
+    return out;
+  }
+
+  /**
+   * Посчитать форму волны из записи.
+   *
+   * Звук раскодируется целиком и делится на PEAK_COUNT отрезков; для
+   * каждого берём максимум громкости. Максимум, а не среднее: на среднем
+   * тихая речь превращается в ровную полоску, и ориентироваться по ней
+   * невозможно.
+   */
+  function computePeaks(blob) {
+    const Ctx = self.AudioContext || self.webkitAudioContext;
+    if (!Ctx || !blob) return Promise.resolve([]);
+    return blob.arrayBuffer().then((buf) => new Promise((resolve) => {
+      const ctx = new Ctx();
+      const done = (peaks) => {
+        try { ctx.close(); } catch (e) { /* уже закрыт */ }
+        resolve(peaks);
+      };
+      const onOk = (audio) => {
+        try {
+          const data = audio.getChannelData(0);
+          const step = Math.max(1, Math.floor(data.length / PEAK_COUNT));
+          const raw = [];
+          let top = 0;
+          for (let i = 0; i < PEAK_COUNT; i++) {
+            let peak = 0;
+            const start = i * step;
+            const end = Math.min(data.length, start + step);
+            // По каждому четвёртому отсчёту: на слух разницы нет,
+            // а на пятиминутной записи это в разы быстрее
+            for (let j = start; j < end; j += 4) {
+              const v = data[j] < 0 ? -data[j] : data[j];
+              if (v > peak) peak = v;
+            }
+            raw.push(peak);
+            if (peak > top) top = peak;
+          }
+          // Нормируем по самому громкому месту, иначе тихая запись
+          // выглядит пустой полосой
+          const k = top > 0.001 ? 100 / top : 0;
+          done(raw.map((v) => Math.round(v * k)));
+        } catch (e) { done([]); }
+      };
+      try {
+        const p = ctx.decodeAudioData(buf, onOk, () => done([]));
+        if (p && typeof p.then === 'function') p.then(onOk).catch(() => done([]));
+      } catch (e) { done([]); }
+    })).catch(() => []);
   }
 
   /** Привести любой ввод к заведомо корректной структуре. */
@@ -681,6 +789,11 @@ body {
             // записей, сделанных на лету, и полоса времени ломается.
             audioLen: (typeof c.audioLen === 'number' && isFinite(c.audioLen)
                        && c.audioLen > 0) ? Math.min(c.audioLen, 3600) : 0,
+            // Форма волны: столбики громкости, целые числа 0–100.
+            // Считается один раз при записи и хранится рядом с карточкой,
+            // иначе при каждом открытии пришлось бы заново раскодировать
+            // весь звук — на телефоне это заметная задержка.
+            peaks: sanitizePeaks(c.peaks),
           });
         }
         section.decks.push(deck);
@@ -1529,6 +1642,24 @@ body {
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }
 
+  /**
+   * 00:02,25 — минуты, секунды и сотые, как в «Диктофоне».
+   *
+   * Сотые именно отбрасываются, а не округляются: пока секунда не
+   * наступила, показывать её нельзя. Но сначала подчищаем до тысячных —
+   * дробные числа хранятся неточно, и, скажем, 125,07 внутри лежит как
+   * 125,06999…, отчего на экране появлялось бы «,06».
+   */
+  function mmsscc(sec) {
+    const cc100 = Math.floor(Math.round(Math.max(0, sec) * 1000) / 10);
+    const cc = cc100 % 100;
+    const whole = (cc100 - cc) / 100;
+    const m = Math.floor(whole / 60);
+    const s = whole % 60;
+    return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+      + ',' + String(cc).padStart(2, '0');
+  }
+
   /** Блок записи: одна кнопка до старта, три во время. */
   function makeRecordControls(card, audioBar) {
     const box = el('div', { class: 'rec-box' });
@@ -1641,8 +1772,16 @@ body {
         AudioStore.put(card.id, blob).then(() => {
           card.audio = true;
           card.audioLen = Math.max(1, Math.round(elapsed));
+          card.peaks = [];
           save();
           clear(audioBar); buildPlayer(audioBar, card);
+          // Форму волны считаем сразу после сохранения: к моменту, когда
+          // человек нажмёт «играть», дорожка уже будет нарисована
+          computePeaks(blob).then((peaks) => {
+            if (!peaks || !peaks.length) return;
+            card.peaks = peaks; save();
+            clear(audioBar); buildPlayer(audioBar, card);
+          }).catch(() => {});
         }).catch(() => alert('Не удалось сохранить запись.'));
       };
 
@@ -1661,63 +1800,163 @@ body {
     if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop();
   }
 
-  /** Кнопка проигрывания внизу карточки со счётчиком времени. */
+  /** Плеер внизу карточки: кнопка, дорожка волны, время до сотых. */
   function buildPlayer(bar, card) {
     const play = el('button', {
       class: 'audio-btn', attrs: { type: 'button', 'aria-label': 'Прослушать запись' },
       text: '▶',
     });
     const total = card.audioLen || 0;
+
+    // Дорожка: столбики громкости плюс тонкая линия текущего места
+    const wave = el('div', { class: 'wave', attrs: { 'aria-hidden': 'true' } });
+    const bars = [];
+    const drawBars = (peaks) => {
+      clear(wave);
+      bars.length = 0;
+      const src = (peaks && peaks.length) ? peaks : null;
+      for (let i = 0; i < PEAK_COUNT; i++) {
+        // Пока формы волны нет — ровная тонкая линия, а не пустота:
+        // так видно, что дорожка есть и по ней можно перематывать
+        const v = src ? src[Math.floor(i * src.length / PEAK_COUNT)] : 8;
+        const b = el('i');
+        b.style.setProperty('height', Math.max(6, v) + '%');
+        wave.appendChild(b);
+        bars.push(b);
+      }
+      wave.appendChild(head);
+    };
+    const head = el('span', { class: 'wave-head' });
+
     const label = el('span', {
       class: 'audio-label',
-      text: total ? '0:00 / ' + mmss(total) : 'Запись',
+      text: total ? '00:00,00 / ' + mmsscc(total) : 'Запись',
     });
+
+    const duration = () => (audio && isFinite(audio.duration) && audio.duration > 0)
+      ? audio.duration : total;
+
     const setTime = (cur) => {
+      const dur = duration();
       // Общую длину берём из карточки: у записей «на лету» браузер
       // нередко отдаёт Infinity, и без запаса получилось бы «0:03 / NaN»
-      const dur = (audio && isFinite(audio.duration) && audio.duration > 0)
-        ? audio.duration : total;
-      label.textContent = dur ? mmss(cur) + ' / ' + mmss(dur) : mmss(cur);
+      label.textContent = dur
+        ? mmsscc(cur) + ' / ' + mmsscc(dur)
+        : mmsscc(cur);
+      const p = dur ? Math.max(0, Math.min(1, cur / dur)) : 0;
+      head.style.setProperty('left', (p * 100).toFixed(2) + '%');
+      // Пройденная часть подсвечивается — видно, где вы сейчас
+      const upto = Math.round(p * bars.length);
+      for (let i = 0; i < bars.length; i++) {
+        bars[i].className = i < upto ? 'played' : '';
+      }
     };
+
+    // Линия должна ехать плавно. Событие timeupdate приходит редко,
+    // раза четыре в секунду, и линия дёргалась бы рывками — поэтому
+    // во время проигрывания обновляем покадрово.
+    let raf = 0;
+    const follow = () => {
+      if (!audio || audio.paused) { raf = 0; return; }
+      setTime(audio.currentTime);
+      raf = requestAnimationFrame(follow);
+    };
+    const stopFollow = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
     const del = el('button', {
       class: 'audio-del', attrs: { type: 'button', 'aria-label': 'Удалить запись' },
       text: '✕',
       on: {
         click: () => {
           if (!confirm('Удалить голосовую запись с этой карточки?')) return;
+          stopFollow();
+          if (audio) audio.pause();
           AudioStore.del(card.id).catch(() => {});
-          card.audio = false; card.audioLen = 0; save(); clear(bar);
+          card.audio = false; card.audioLen = 0; card.peaks = [];
+          save(); clear(bar);
         },
       },
     });
 
-    let audio = null, url = null;
-    play.addEventListener('click', () => {
-      if (audio && !audio.paused) { audio.pause(); play.textContent = '▶'; return; }
-      if (audio) { audio.play(); play.textContent = '❚❚'; return; }
-      AudioStore.get(card.id).then((blob) => {
-        if (!blob) { label.textContent = 'Запись не найдена'; return; }
+    let audio = null, url = null, loading = false;
+
+    /** Достать запись и подготовить проигрывание. */
+    function ensureAudio() {
+      if (audio) return Promise.resolve(audio);
+      if (loading) return Promise.reject(new Error('busy'));
+      loading = true;
+      return AudioStore.get(card.id).then((blob) => {
+        loading = false;
+        if (!blob) { label.textContent = 'Запись не найдена'; return null; }
         url = URL.createObjectURL(blob);
         audio = new Audio(url);
-        audio.ontimeupdate = () => setTime(audio.currentTime);
-        audio.onloadedmetadata = () => setTime(0);
-        audio.onended = () => { play.textContent = '▶'; setTime(0); };
+        audio.preload = 'metadata';
+        audio.ontimeupdate = () => { if (audio.paused) setTime(audio.currentTime); };
+        audio.onloadedmetadata = () => setTime(audio.currentTime || 0);
+        audio.onplay = () => { play.textContent = '❚❚'; stopFollow(); follow(); };
+        audio.onpause = () => { play.textContent = '▶'; stopFollow(); };
+        audio.onended = () => { play.textContent = '▶'; stopFollow(); setTime(0); };
         audio.onerror = () => { label.textContent = 'Не удалось воспроизвести'; };
-        audio.play();
-        play.textContent = '❚❚';
-      }).catch(() => { label.textContent = 'Не удалось открыть запись'; });
+
+        // У старых записей формы волны нет — считаем сейчас и запоминаем,
+        // чтобы в следующий раз она появилась сразу
+        if (!card.peaks || card.peaks.length === 0) {
+          computePeaks(blob).then((peaks) => {
+            if (peaks && peaks.length) {
+              card.peaks = peaks; save(); drawBars(peaks); setTime(audio ? audio.currentTime : 0);
+            }
+          }).catch(() => {});
+        }
+        return audio;
+      }).catch(() => {
+        loading = false;
+        label.textContent = 'Не удалось открыть запись';
+        return null;
+      });
+    }
+
+    play.addEventListener('click', () => {
+      if (audio && !audio.paused) { audio.pause(); return; }
+      ensureAudio().then((a) => { if (a) a.play(); }).catch(() => {});
     });
+
+    // Перемотка нажатием и протягиванием по дорожке
+    const seekTo = (clientX) => {
+      const box = wave.getBoundingClientRect ? wave.getBoundingClientRect() : null;
+      if (!box || !box.width) return;
+      const p = Math.max(0, Math.min(1, (clientX - box.left) / box.width));
+      const dur = duration();
+      if (!dur) return;
+      setTime(p * dur);
+      ensureAudio().then((a) => { if (a) a.currentTime = p * dur; }).catch(() => {});
+    };
+    let seeking = false;
+    wave.addEventListener('pointerdown', (ev) => {
+      seeking = true;
+      if (wave.setPointerCapture) wave.setPointerCapture(ev.pointerId);
+      seekTo(ev.clientX);
+      ev.stopPropagation();     // не отдаём жест перелистыванию карточки
+    });
+    wave.addEventListener('pointermove', (ev) => {
+      if (!seeking) return;
+      seekTo(ev.clientX);
+      ev.stopPropagation();
+    });
+    wave.addEventListener('pointerup', () => { seeking = false; });
+    wave.addEventListener('pointercancel', () => { seeking = false; });
+
+    drawBars(card.peaks);
+    if (total) setTime(0);   // без длины подпись остаётся «Запись»
 
     // Ссылку на объект надо освободить, иначе память держится до
     // перезагрузки страницы
     audioCleanup.push(() => {
+      stopFollow();
       if (audio) { audio.pause(); }
       if (url) URL.revokeObjectURL(url);
     });
 
-    bar.appendChild(play);
+    bar.appendChild(el('div', { class: 'audio-row' }, [play, wave, del]));
     bar.appendChild(label);
-    bar.appendChild(del);
   }
 
   let audioCleanup = [];
