@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-/iWjSo/2pAVoWOcvkurDQJgwzbpMbCvtdVzmCpgC/A8=';
-               style-src 'sha256-EjfsqU6uMCFNnrUHUjd5HL0uZZB8SUBBVLAW9PCBiWI=';
+               script-src 'sha256-U1zwlepbW04G6C4KKtfOYMtpi1T3MoHmnVQArx4a5OE=';
+               style-src 'sha256-xrqrc3mLjztRbGnkLvuV6yX1h1v4OC1WP1wb3QlqVsE=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -226,23 +226,30 @@ body {
   letter-spacing: .3px;
 }
 
-/* Дорожка звука — «сосуд», который наполняется зелёным.
-   Пустая часть светлая, пройденная заливается полупрозрачной зеленью;
-   к концу записи полоса зелёная целиком. Столбики громкости остаются
-   поверх заливки тёмным силуэтом — по ним видно, где голос, где тишина. */
+/* Дорожка звука — «сосуд», который наполняется.
+   Пустая часть светлая и прозрачная; пройденная заливается плотным
+   непрозрачным тоном, так что наполнение видно именно по плотности,
+   а не по цвету. Столбики громкости лежат поверх: на пустой части они
+   тёмные, на залитой — светлые, поэтому видны на любом фоне. */
 .wave {
   position: relative;
   flex: 1;
   height: 34px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, .55);
-  box-shadow: inset 0 0 0 1px rgba(43, 36, 8, .10);
+  background: rgba(255, 255, 255, .42);
+  box-shadow: inset 0 0 0 1px rgba(43, 36, 8, .12);
   overflow: hidden;
   cursor: pointer;
   touch-action: none;      /* дорожка перематывает, а не листает карточку */
   min-width: 0;
+  transition: background .18s ease, box-shadow .18s ease;
 }
-/* Собственно «жидкость». Ширина задаётся из кода на каждом кадре,
+/* Пока играет, сама дорожка чуть выделяется — видно, что она живая */
+.wave.playing {
+  background: rgba(255, 255, 255, .60);
+  box-shadow: inset 0 0 0 1px rgba(43, 36, 8, .22);
+}
+/* Собственно наполнение. Ширина задаётся из кода на каждом кадре,
    поэтому никакого перехода тут нет — иначе заливка отставала бы. */
 .wave-fill {
   position: absolute;
@@ -250,10 +257,10 @@ body {
   top: 0;
   bottom: 0;
   width: 0;
-  background: rgba(76, 175, 80, .55);
+  background: #57534A;     /* плотный тёплый серый, без прозрачности */
   pointer-events: none;
 }
-/* Столбики лежат поверх заливки и не мешают ей: между ними видно цвет */
+/* Столбики лежат поверх заливки и не мешают ей: между ними видно фон */
 .wave-bars {
   position: absolute;
   inset: 0;
@@ -266,10 +273,14 @@ body {
 .wave-bars i {
   flex: 1;
   min-width: 0;
-  background: rgba(43, 36, 8, .26);
+  background: rgba(43, 36, 8, .30);
   border-radius: 1px;
+  transition: background .1s linear;
 }
-/* Край жидкости — тонкая тёмно-зелёная черта: видно точное место */
+/* На залитой части фон тёмный — столбики становятся светлыми,
+   иначе на сером они бы просто пропали */
+.wave-bars i.played { background: rgba(255, 255, 255, .82); }
+/* Край наполнения — тонкая тёмная черта: видно точное место */
 .wave-head {
   position: absolute;
   top: 0;
@@ -277,12 +288,11 @@ body {
   left: 0;
   width: 2px;
   margin-left: -1px;
-  background: #2E7D32;
+  background: #2B2408;
   pointer-events: none;
 }
 /* Дошли до конца — сосуд полон, край растворяется */
 .wave.full .wave-head { opacity: 0; }
-.wave.full .wave-fill { background: rgba(76, 175, 80, .72); }
 
 .audio-del {
   border: 0;
@@ -779,6 +789,9 @@ body {
     if (!Ctx || !blob) return Promise.resolve([]);
     return blob.arrayBuffer().then((buf) => new Promise((resolve) => {
       const ctx = new Ctx();
+      // Без этого Safari на iPhone держит узел спящим и разбор молча
+      // не доходит до конца
+      if (typeof ctx.resume === 'function') { try { ctx.resume(); } catch (e) {} }
       const done = (peaks) => {
         try { ctx.close(); } catch (e) { /* уже закрыт */ }
         resolve(peaks);
@@ -1805,6 +1818,70 @@ body {
     return box;
   }
 
+  /**
+   * Замер громкости прямо с микрофона во время записи.
+   *
+   * Возвращает две вещи: sample() — снять текущий уровень, finish() —
+   * свернуть накопленное в форму волны и отпустить звуковой узел.
+   *
+   * Почему именно так. Разбор готового файла (decodeAudioData) на
+   * компьютере проходит, а на iPhone нет: Safari не умеет читать webm,
+   * и разбор вне нажатия кнопки там часто просто не запускается. Здесь
+   * же уровень берётся до сжатия, поэтому формат файла и браузер роли
+   * не играют — дорожка появляется одинаково везде.
+   */
+  function live_meter(stream) {
+    const Ctx = self.AudioContext || self.webkitAudioContext;
+    const empty = { sample() {}, finish() { return []; } };
+    if (!Ctx) return empty;
+    let ctx, node, buf;
+    try {
+      ctx = new Ctx();
+      if (typeof ctx.resume === 'function') ctx.resume();   // iOS держит его спящим
+      node = ctx.createAnalyser();
+      node.fftSize = 1024;
+      // Байтовый срез поддерживают все браузеры, включая старые Safari.
+      // Значения идут вокруг 128 — это и есть тишина.
+      buf = new Uint8Array(node.fftSize);
+      ctx.createMediaStreamSource(stream).connect(node);
+    } catch (e) { return empty; }
+
+    const levels = [];
+    return {
+      sample() {
+        try {
+          node.getByteTimeDomainData(buf);
+          let peak = 0;
+          for (let i = 0; i < buf.length; i++) {
+            const v = Math.abs(buf[i] - 128);
+            if (v > peak) peak = v;
+          }
+          levels.push(peak);
+        } catch (e) { /* узел уже закрыт */ }
+      },
+      finish() {
+        try { ctx.close(); } catch (e) { /* уже закрыт */ }
+        if (!levels.length) return [];
+        // Растягиваем замеры на PEAK_COUNT столбиков и нормируем по
+        // самому громкому месту: иначе тихая запись выглядит пустой
+        const top = Math.max.apply(null, levels);
+        if (top < 2) return [];            // была тишина — рисовать нечего
+        const out = [];
+        for (let i = 0; i < PEAK_COUNT; i++) {
+          const from = Math.floor(i * levels.length / PEAK_COUNT);
+          const to = Math.max(from + 1,
+            Math.floor((i + 1) * levels.length / PEAK_COUNT));
+          let peak = 0;
+          for (let j = from; j < to && j < levels.length; j++) {
+            if (levels[j] > peak) peak = levels[j];
+          }
+          out.push(Math.round(peak * 100 / top));
+        }
+        return out;
+      },
+    };
+  }
+
   function startRecording(card, audioBar, ui) {
     navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
       // Safari отдаёт mp4, Chrome — webm. Не навязываем формат: пусть
@@ -1817,12 +1894,23 @@ body {
       }
 
       const chunks = [];
+
+      // Форму волны снимаем прямо с микрофона, пока идёт запись.
+      //
+      // Раньше её считали из готового файла. На компьютере это работало,
+      // а на iPhone — нет: Safari не умеет разбирать webm, да и разбор
+      // вне нажатия кнопки там часто не запускается. Здесь же мы читаем
+      // звук ДО сжатия, поэтому способ не зависит ни от формата файла,
+      // ни от браузера.
+      const live = live_meter(stream);
+
       // Время считаем сами и с учётом пауз: длительность самого файла
       // браузеры отдают ненадёжно, а на паузе счётчик обязан замереть
       let elapsed = 0, since = Date.now();
       const tick = setInterval(() => {
         const now = rec.state === 'recording' ? elapsed + (Date.now() - since) / 1000 : elapsed;
         ui.timer.textContent = mmss(now);
+        if (rec.state === 'recording') live.sample();   // тишину на паузе не пишем
         if (now >= 300) stopRecording();          // потолок 5 минут на карточку
       }, 200);
 
@@ -1839,16 +1927,20 @@ body {
         ui.idle();
         ui.pauseBtn.classList.remove('paused', 'recording');
 
+        const snapped = live.finish();
+
         const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
         if (!blob.size) return;
         AudioStore.put(card.id, blob).then(() => {
           card.audio = true;
           card.audioLen = Math.max(1, Math.round(elapsed));
-          card.peaks = [];
+          // Форма волны уже снята с микрофона — рисуем сразу
+          card.peaks = snapped;
           save();
           clear(audioBar); buildPlayer(audioBar, card);
-          // Форму волны считаем сразу после сохранения: к моменту, когда
-          // человек нажмёт «играть», дорожка уже будет нарисована
+          // Если с микрофона снять не удалось (старый браузер), пробуем
+          // разобрать сам файл — на компьютере это работает
+          if (snapped.length) return;
           computePeaks(blob).then((peaks) => {
             if (!peaks || !peaks.length) return;
             card.peaks = peaks; save();
@@ -1924,11 +2016,25 @@ body {
         : mmsscc(cur);
       const p = dur ? Math.max(0, Math.min(1, cur / dur)) : 0;
       const pct = (p * 100).toFixed(2) + '%';
-      // Сосуд наполняется: зелёная часть — то, что уже прозвучало
+      // Сосуд наполняется: плотная часть — то, что уже прозвучало
       fill.style.setProperty('width', pct);
       head.style.setProperty('left', pct);
+      // Столбики на залитой части становятся светлыми, иначе на плотном
+      // фоне они бы пропали и звуковой рисунок исчез бы под наполнением
+      const upto = Math.round(p * bars.length);
+      for (let i = 0; i < bars.length; i++) {
+        const want = i < upto ? 'played' : '';
+        if (bars[i].className !== want) bars[i].className = want;
+      }
+      setWaveClass(p);
+    };
+
+    /** Пометки на дорожке: «играет» и «полон». */
+    let playing = false;
+    const setWaveClass = (p) => {
       // На самом верху черта уже не нужна — сосуд просто полон
-      wave.className = p >= 0.999 ? 'wave full' : 'wave';
+      wave.className = 'wave' + (playing ? ' playing' : '')
+        + (p >= 0.999 ? ' full' : '');
     };
 
     // Линия должна ехать плавно. Событие timeupdate приходит редко,
@@ -1971,9 +2077,17 @@ body {
         audio.preload = 'metadata';
         audio.ontimeupdate = () => { if (audio.paused) setTime(audio.currentTime); };
         audio.onloadedmetadata = () => setTime(audio.currentTime || 0);
-        audio.onplay = () => { play.textContent = '❚❚'; stopFollow(); follow(); };
-        audio.onpause = () => { play.textContent = '▶'; stopFollow(); };
-        audio.onended = () => { play.textContent = '▶'; stopFollow(); setTime(0); };
+        audio.onplay = () => {
+          play.textContent = '❚❚'; playing = true;
+          setTime(audio.currentTime); stopFollow(); follow();
+        };
+        audio.onpause = () => {
+          play.textContent = '▶'; playing = false;
+          stopFollow(); setTime(audio.currentTime);
+        };
+        audio.onended = () => {
+          play.textContent = '▶'; playing = false; stopFollow(); setTime(0);
+        };
         audio.onerror = () => { label.textContent = 'Не удалось воспроизвести'; };
 
         // У старых записей формы волны нет — считаем сейчас и запоминаем,
