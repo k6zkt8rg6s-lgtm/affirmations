@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-aD+0WlBCYY6kVxhnvI/6CgiG/PdU8euqu4gHoOZs1lU=';
-               style-src 'sha256-Tq7ZrjofYcMA030DFJSDcnPS3aXP1v4vTrFV1vutd+s=';
+               script-src 'sha256-9Av/yZu9weW3u60yF/eS9pfh3C2fEuxJj6KFjKwQ730=';
+               style-src 'sha256-eMgpSu6pc0VINF2+L6lITsbIxRzViZFSHxWY6DTLpgY=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -455,21 +455,44 @@ body {
   z-index: 20;
   padding: max(8px, env(safe-area-inset-top)) 12px
            max(12px, env(safe-area-inset-bottom)) 12px;
+  /* Соседние карточки стоят за краями экрана. clip, а не hidden: hidden
+     заводит внутри область прокрутки, и браузер вынужден проверять её на
+     каждом кадре хода — как раз то, от чего мы уходим. clip просто
+     отрезает по краю. Старый Safari его не знает и молча пропустит: экран
+     всё равно position:fixed, за пределы страницы соседки не вылезут. */
+  overflow: clip;
 }
 .reader-bar { display: flex; align-items: center; gap: 8px; min-height: var(--tap); }
 .reader-pos { flex: 1; text-align: center; color: var(--ink-soft); font-size: 14px; }
 
 .stage {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   position: relative;
   touch-action: pan-y;
 }
 
-/* Карточка занимает 80% ширины и 80% доступной высоты — как просили */
+/* Каретка: единственное, что двигается при перелистывании. Все три
+   карточки лежат внутри и едут вместе с ней.
+   will-change и translate3d просят браузер подготовить один слой заранее
+   и дальше только сдвигать его. Раньше слоёв было три, и на телефоне их
+   сведение на каждом кадре давало рывки. */
+.track {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Карточка занимает 80% ширины и 80% доступной высоты — как просили.
+   Все карточки, включая текущую, стоят по центру сцены абсолютно: так их
+   геометрия совпадает точно и в момент подмены ничего не смещается. */
 .bigcard {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: 80%;
   max-width: 520px;
   height: 80%;
@@ -479,7 +502,6 @@ body {
   /* Карточку тянут пальцем — браузер не должен перехватывать жест
      под свою прокрутку, иначе перелистывание срабатывает через раз */
   touch-action: pan-y;
-  will-change: transform;
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
@@ -488,7 +510,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 28px 24px;
-  position: relative;
+  z-index: 1;              /* текущая карточка поверх соседних */
   /* Едва заметная волокнистость бумаги */
   background-image:
     repeating-linear-gradient(90deg, rgba(0,0,0,.018) 0 1px, transparent 1px 3px),
@@ -512,6 +534,22 @@ body {
 .bigcard:has(.audio-bar:not(:empty)) { padding-bottom: 96px; }
 .bigcard:active { cursor: grabbing; }
 .bigcard-text { user-select: text; -webkit-user-select: text; }
+
+/* Соседняя карточка — та, что подъезжает при свайпе.
+   Размеры и вид те же, что у текущей: в момент подмены они совпадают
+   точно, поэтому переход незаметен. Стоит не под карточкой, а сбоку от
+   неё, за краем экрана, — в покое её не видно.
+   Собственный сдвиг ставится из кода один раз, при сборке экрана: дальше
+   двигается только каретка, а карточки внутри неё стоят неподвижно. */
+.bigcard.side {
+  pointer-events: none;          /* палец её не хватает и текст не выделяет */
+  z-index: 0;
+  cursor: default;
+}
+.bigcard.side .bigcard-text { overflow: hidden; user-select: none; }
+/* Место под плеер оставляем и у соседней: иначе в момент подмены текст
+   карточки с записью прыгнул бы вверх */
+.bigcard.side.with-audio { padding-bottom: 96px; }
 
 
 .reader-actions {
@@ -1635,9 +1673,14 @@ body {
       node.style.setProperty('border-color', CARD_EDGE[colour] || colour);
     };
 
-    // На сцене только одна карточка. Раньше из-под неё выглядывала
-    // следующая — задумывалось как намёк на стопку, но при перелистывании
-    // это читалось как застрявшая тень уехавшей карточки.
+    // На сцене три карточки: текущая и по одной соседней слева и справа.
+    // Соседние стоят за краями экрана и едут той же кареткой, что и
+    // текущая, — поэтому при свайпе следующая заходит из-за края вслед за
+    // уходящей, а не появляется потом сама по себе.
+    //
+    // Прошлая попытка показать соседнюю провалилась: она лежала ПОД
+    // текущей и выглядела застрявшей тенью. Здесь соседние не под
+    // карточкой, а сбоку от неё, и в покое их не видно вовсе.
     const stage = el('div', { class: 'stage' });
     // Полоска проигрывания внизу карточки — появляется, только если
     // к карточке действительно прикреплена запись
@@ -1647,56 +1690,130 @@ body {
       audioBar,
     ]);
     paint(big, card.color);
-    stage.appendChild(big);
+
+    /**
+     * Соседняя карточка. Только цвет и текст: плеер и кнопки ей не нужны,
+     * она лишь показывает, что подъезжает. Место под плеер всё равно
+     * оставляем — иначе в момент подмены текст прыгнул бы вверх.
+     */
+    const neighbour = (c) => {
+      const g = el('div', {
+        class: 'bigcard side' + (c.audio ? ' with-audio' : ''),
+        attrs: { 'aria-hidden': 'true' },
+      }, [el('div', { class: 'bigcard-text', text: c.text })]);
+      paint(g, c.color);
+      return g;
+    };
+
+    // Все три карточки лежат в одной каретке, и двигается только она.
+    //
+    // Раньше каждая карточка ехала сама: браузер держал под них три
+    // отдельных слоя и на каждом кадре сводил их вместе — на телефоне это
+    // и давало рывки. Теперь слой один: он рисуется один раз, а дальше
+    // только сдвигается, чем и занимается видеоядро.
+    const track = el('div', { class: 'track' });
+    const before = i > 0 ? neighbour(deck.cards[i - 1]) : null;
+    const after = i < total - 1 ? neighbour(deck.cards[i + 1]) : null;
+    if (before) track.appendChild(before);
+    if (after) track.appendChild(after);
+    track.appendChild(big);
+    stage.appendChild(track);
     if (card.audio) buildPlayer(audioBar, card);
 
-    // Въезд новой карточки с противоположной стороны. Ставим сдвиг сразу,
-    // а снимаем на следующем кадре: если сделать это в одном кадре,
-    // браузер не увидит промежуточного состояния и анимации не будет.
-    if (enterFrom !== 0) {
-      const dir = enterFrom;
-      enterFrom = 0;
-      const w = big.offsetWidth || 360;
-      big.style.setProperty('transition', 'none');
-      big.style.setProperty('transform',
-        'translateX(' + (dir > 0 ? w * 1.15 : -w * 1.15) + 'px) rotate('
-        + (dir > 0 ? 4 : -4) + 'deg)');
-      big.style.setProperty('opacity', '0');
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          big.style.setProperty('transition',
-            'transform ' + SLIDE_MS + 'ms ' + SLIDE_EASE
-            + ', opacity ' + Math.round(SLIDE_MS * 0.6) + 'ms linear');
-          big.style.setProperty('transform', 'translateX(0) rotate(0deg)');
-          big.style.setProperty('opacity', '1');
-        });
-      });
-    }
+    /**
+     * Насколько соседняя карточка отстоит от текущей.
+     *
+     * Считаем от середины сцены: полширины сцены, чтобы дойти до края
+     * экрана, плюс полширины карточки, чтобы вывести её за край целиком,
+     * плюс просвет между карточками. Просвет виден во время хода — это та
+     * полоска бумаги, которая идёт между уходящей и приезжающей.
+     *
+     * Меряем при первом обращении, а не при сборке: пока карточка не
+     * вставлена в страницу, ширины у неё нет.
+     */
+    let gap = 0;
+    const measure = () => {
+      // При самой первой сборке карточка ещё не в странице и меряться ей
+      // нечем. Тогда считаем от ширины окна: так соседки с первого же
+      // кадра стоят почти точно и не дёргаются, когда придут настоящие
+      // размеры. Прежний запасной вариант был просто «360».
+      const guess = (typeof window !== 'undefined' && window.innerWidth)
+        ? window.innerWidth - 24 : 360;
+      const sw = stage.clientWidth || guess;
+      const cw = big.offsetWidth || Math.min(Math.round(sw * 0.8), 520);
+      gap = Math.round((sw + cw) / 2) + CARD_GAP;
+      return gap;
+    };
 
-    // Карточка не подменяется мгновенно: старая уезжает за край, новая
-    // въезжает с другой стороны. Кривая и длительность взяты близкими
-    // к системным переходам iOS — резкая смена читается как «сломалось».
+    // Соседки стоят на своих местах и больше не двигаются: их сдвиг
+    // выставляется один раз, дальше едет вся каретка целиком
+    const seat = () => {
+      measure();
+      if (before) {
+        before.style.setProperty('transform',
+          'translate(-50%, -50%) translate3d(' + (-gap) + 'px, 0, 0)');
+      }
+      if (after) {
+        after.style.setProperty('transform',
+          'translate(-50%, -50%) translate3d(' + gap + 'px, 0, 0)');
+      }
+    };
+
+    /**
+     * Сдвинуть каретку. ms = 0 значит «сразу», без перехода: так карточка
+     * идёт точно за пальцем.
+     *
+     * translate3d, а не translateX: так браузер наверняка отдаёт сдвиг
+     * видеоядру и не перерисовывает карточки на каждом кадре.
+     */
+    let easing = '';
+    const place = (px, ms) => {
+      // Переход переписываем только когда он правда меняется. За один
+      // свайп pointermove приходит сотни раз, и каждая лишняя запись в
+      // стиль — это работа для браузера ровно в тот момент, когда он
+      // должен рисовать кадр.
+      const move = ms ? 'transform ' + ms + 'ms ' + SLIDE_EASE : 'none';
+      if (move !== easing) {
+        easing = move;
+        track.style.setProperty('transition', move);
+      }
+      track.style.setProperty('transform',
+        'translate3d(' + px.toFixed(1) + 'px, 0, 0)');
+    };
+    seat();
+    place(0, 0);
+    // Пока карточка не вставлена в страницу, её ширина неизвестна и просвет
+    // посчитан на глазок. Со следующего кадра размеры настоящие — ставим
+    // соседок точно, до того как человек успеет коснуться экрана.
+    requestAnimationFrame(seat);
+
+    // Перелистывание — сдвиг всей каретки ровно на один шаг. Соседняя
+    // карточка приезжает точно в середину, поэтому подменять содержимое
+    // можно только ПОСЛЕ конца хода: раньше она ещё не на месте, и в
+    // прежней версии это давало заметный скачок.
+    //
+    // Ждём именно конца перехода, а не таймера: таймер и переход считают
+    // время по-разному, и подмена то опережала ход, то запаздывала —
+    // отсюда и был рывок в самом конце. Таймер остаётся страховкой на
+    // случай, когда перехода нет вовсе (свёрнутая вкладка, отключённая
+    // анимация в настройках телефона).
     function step(delta) {
       const next = i + delta;
       if (next < 0 || next >= total || sliding) return;
       sliding = true;
+      place(-delta * measure(), SLIDE_MS);
 
-      const width = stage.clientWidth || big.offsetWidth || 360;
-      big.style.setProperty('transition',
-        'transform ' + SLIDE_MS + 'ms ' + SLIDE_EASE + ', opacity ' + SLIDE_MS + 'ms linear');
-      big.style.setProperty('transform',
-        'translateX(' + (delta > 0 ? -width * 1.15 : width * 1.15) + 'px) rotate('
-        + (delta > 0 ? -4 : 4) + 'deg)');
-      big.style.setProperty('opacity', '0');
-
-      // Переключаем чуть раньше конца анимации: к моменту, когда старая
-      // карточка почти ушла, новая уже начинает въезжать — без паузы
-      // между ними, как это выглядит в системе
-      setTimeout(() => {
-        enterFrom = delta;
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
         sliding = false;
         go({ name: 'read', sectionId: view.sectionId, deckId: view.deckId, index: next });
-      }, Math.round(SLIDE_MS * 0.62));
+      };
+      if (track.addEventListener) {
+        track.addEventListener('transitionend', settle, { once: true });
+      }
+      setTimeout(settle, SLIDE_MS + 60);
     }
 
     // Перетаскивание карточки. Через Pointer Events, а не touch: так один
@@ -1713,7 +1830,10 @@ body {
       dragId = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
       dx = 0; raw = 0; locked = null; speed = 0;
       tPrev = Date.now(); xPrev = ev.clientX;
-      big.style.setProperty('transition', 'none');
+      // Переход снимаем сразу, ещё до первого движения: если сделать это
+      // на первом же pointermove, палец успевает уйти, а карточка секунду
+      // догоняет его по прежней кривой — отсюда ощущение рывка в начале
+      place(0, 0);
     });
 
     big.addEventListener('pointermove', (ev) => {
@@ -1736,13 +1856,12 @@ body {
         tPrev = tNow; xPrev = ev.clientX;
       }
       // У края стопки карточка идёт туго — видно, что дальше некуда.
-      // raw — сколько прошёл палец, dx — насколько уехала карточка:
+      // raw — сколько прошёл палец, dx — насколько уехала каретка:
       // у края они расходятся, и считать порог надо по пальцу
       const edge = (mx > 0 && i === 0) || (mx < 0 && i === total - 1);
       raw = mx;
       dx = edge ? mx * 0.25 : mx;
-      big.style.setProperty('transform',
-        'translateX(' + dx.toFixed(1) + 'px) rotate(' + (dx * 0.02).toFixed(2) + 'deg)');
+      place(dx, 0);
     });
 
     const endDrag = (ev) => {
@@ -1763,10 +1882,9 @@ body {
         step(raw < 0 ? 1 : -1);
         return;
       }
-      // Не дотянули до порога — мягко возвращаем на место
-      big.style.setProperty('transition',
-        'transform ' + Math.round(SLIDE_MS * 0.7) + 'ms ' + SLIDE_EASE);
-      big.style.setProperty('transform', 'translateX(0) rotate(0deg)');
+      // Не дотянули до порога — вся каретка мягко возвращается на место,
+      // и подъехавшая соседка уходит обратно за край
+      place(0, Math.round(SLIDE_MS * 0.7));
     };
     big.addEventListener('pointerup', endDrag);
     big.addEventListener('pointercancel', endDrag);
@@ -1796,10 +1914,9 @@ body {
       wheelTimer = setTimeout(() => { wheelAcc = 0; }, 180);   // пауза — начинаем заново
 
       if (Math.abs(wheelAcc) < WHEEL_TRIGGER) {
-        // Пока порог не набран, показываем сдвиг: видно, что жест ловится
-        const peek = Math.max(-70, Math.min(70, -wheelAcc));
-        big.style.setProperty('transition', 'none');
-        big.style.setProperty('transform', 'translateX(' + peek.toFixed(1) + 'px)');
+        // Пока порог не набран, показываем сдвиг всей каретки: видно, что
+        // жест ловится и какая карточка подъезжает
+        place(Math.max(-70, Math.min(70, -wheelAcc)), 0);
         return;
       }
 
@@ -1807,16 +1924,11 @@ body {
       const dir = wheelAcc > 0 ? 1 : -1;
       wheelAcc = 0;
       wheelUntil = now + WHEEL_COOLDOWN;
-      big.style.setProperty('transition', 'transform .18s ease-out');
-      big.style.setProperty('transform', 'translateX(0)');
       step(dir);
     }, { passive: false });
 
     stage.addEventListener('pointerleave', () => {
-      if (dragId === null) {
-        big.style.setProperty('transition', 'transform .2s ease-out');
-        big.style.setProperty('transform', 'translateX(0)');
-      }
+      if (dragId === null && !sliding) place(0, Math.round(SLIDE_MS * 0.4));
     });
 
     const reader = el('div', { class: 'reader' }, [
@@ -1879,8 +1991,9 @@ body {
   // iOS: быстрый старт и долгое мягкое торможение в конце.
   const SLIDE_MS = 524;   // 380 → 456 → 524: замедлено на 20%, затем ещё на 15%
   const SLIDE_EASE = 'cubic-bezier(.32,.72,0,1)';
-  let enterFrom = 0;      // с какой стороны въезжает новая карточка
-  let pageEnter = 0;      // то же, но для целого экрана при жесте «назад»
+  // Отдельного «въезда» новой карточки больше нет: соседняя приезжает в
+  // середину сама, вместе с кареткой, и подмена происходит уже на месте
+  let pageEnter = 0;      // с какой стороны въезжает экран при жесте «назад»
   let sliding = false;    // идёт анимация — новые жесты игнорируем
 
   // Порог жеста — один на всё приложение. Раньше «назад» требовал 90 px,
@@ -1890,6 +2003,11 @@ body {
   const SWIPE_FLICK = 22;     // короткий взмах — если он быстрый
   const SWIPE_SPEED = 0.35;   // px/мс, порог «быстрого»
   const SWIPE_START = 6;      // с какого сдвига решаем, куда пошёл палец
+
+  // Просвет между карточками в читалке. Видно его во время хода: полоска
+  // бумаги между уходящей и приезжающей. Он же держит соседок за краем
+  // экрана в покое — вместе с их тенью.
+  const CARD_GAP = 56;
 
   /**
    * Дотянул ли человек до срабатывания. Одна проверка для всех жестов:
