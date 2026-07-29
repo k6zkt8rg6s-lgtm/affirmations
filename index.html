@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-CZukM+hqF2wYbqk00mcef3k4rkc280FmCFxVuB9QAkk=';
+               script-src 'sha256-J+BbePHQ0dGi8HXdrrA+HDcq3YH1ri+bPXkBU4aRfpM=';
                style-src 'sha256-kvIob0muDuD+3d01SIBEKXNJ/mhiXLmmpK3dj2HIQZw=';
                img-src 'self' data:;
                media-src blob:;
@@ -756,6 +756,34 @@ body {
       get: (id) => tx('readonly', (s) => s.get(id)),
       del: (id) => tx('readwrite', (s) => s.delete(id)),
       available: () => !!self.indexedDB,
+
+      /** Запись → строка, пригодная для файла синхронизации. */
+      toText: (blob) => new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result));   // data:audio/...;base64,...
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(blob);
+      }),
+
+      /** Обратно: строка из файла → запись.
+       *  Через fetch на data-адрес было бы короче, но connect-src 'none'
+       *  такие запросы запрещает — разбираем base64 вручную. */
+      fromText: (text) => {
+        const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(String(text || ''));
+        if (!m) return null;
+        const type = m[1] || 'audio/webm';
+        try {
+          if (m[2]) {
+            const bin = atob(m[3]);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            return new Blob([bytes], { type: type });
+          }
+          return new Blob([decodeURIComponent(m[3])], { type: type });
+        } catch (e) {
+          return null;   // повреждённая строка — просто пропускаем запись
+        }
+      },
     };
   })();
 
@@ -1138,34 +1166,42 @@ body {
    * туда просто не долетает.
    */
   function attachBackSwipe(node, onBack) {
-    let id = null, x0 = 0, y0 = 0, dx = 0, axis = null;
+    let id = null, x0 = 0, y0 = 0, dx = 0, axis = null, swiped = false;
     const NEED = 90;      // столько пикселей нужно протянуть
 
-    node.addEventListener('pointerdown', (ev) => {
-      if (!ev.isPrimary || sliding) return;
-      // На кнопках и полях ввода жест не начинаем — там своё поведение
-      const t = ev.target;
-      if (t && t.closest && t.closest('button, input, textarea, a')) return;
-      id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY; dx = 0; axis = null;
-      node.style.setProperty('transition', 'none');
-    });
+    // Слушаем корневой элемент, а не сам экран. Экран колоды короткий:
+    // три карточки — и ниже пусто. Если вешать на него, в пустой области
+    // жест просто не по чему поймать.
+    const host = root;
 
-    node.addEventListener('pointermove', (ev) => {
+    const down = (ev) => {
+      if (!ev.isPrimary || sliding) return;
+      // Кнопки НЕ исключаем: весь экран колоды состоит из кнопок-карточек,
+      // и с таким запретом жест не начинался бы почти нигде. Вместо этого
+      // ниже гасим нажатие, если палец поехал вбок.
+      const t = ev.target;
+      if (t && t.closest && t.closest('input, textarea')) return;
+      id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
+      dx = 0; axis = null; swiped = false;
+      node.style.setProperty('transition', 'none');
+    };
+
+    const move = (ev) => {
       if (ev.pointerId !== id) return;
       const mx = ev.clientX - x0, my = ev.clientY - y0;
       if (axis === null) {
         if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
         // Вертикальное движение — это прокрутка списка, не мешаем ей
         axis = Math.abs(mx) > Math.abs(my) * 1.3 ? 'x' : 'y';
-        if (axis === 'x') node.setPointerCapture(id);
+        if (axis === 'x') swiped = true;
       }
       if (axis !== 'x') return;
-      ev.preventDefault();
+      if (ev.cancelable) ev.preventDefault();
       // Влево уходить некуда — там сопротивление
       dx = mx < 0 ? mx * 0.2 : mx;
       node.style.setProperty('transform', 'translateX(' + dx.toFixed(1) + 'px)');
       node.style.setProperty('opacity', String(Math.max(0.55, 1 - dx / 900)));
-    });
+    };
 
     const finish = (ev) => {
       if (ev.pointerId !== id) return;
@@ -1184,9 +1220,32 @@ body {
       node.style.setProperty('transform', 'translateX(0)');
       node.style.setProperty('opacity', '1');
     };
-    node.addEventListener('pointerup', finish);
-    node.addEventListener('pointercancel', finish);
+
+    // Если палец поехал вбок, нажатие на карточку под ним не должно
+    // сработать: иначе свайп заодно открывал бы карточку
+    const killClick = (ev) => {
+      if (!swiped) return;
+      swiped = false;
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
+
+    host.addEventListener('pointerdown', down);
+    host.addEventListener('pointermove', move);
+    host.addEventListener('pointerup', finish);
+    host.addEventListener('pointercancel', finish);
+    host.addEventListener('click', killClick, true);
+
+    backSwipeCleanup = () => {
+      host.removeEventListener('pointerdown', down);
+      host.removeEventListener('pointermove', move);
+      host.removeEventListener('pointerup', finish);
+      host.removeEventListener('pointercancel', finish);
+      host.removeEventListener('click', killClick, true);
+    };
   }
+
+  let backSwipeCleanup = null;
 
   // ------------------------------------------------------------------
   // Экран 3: полноэкранная карточка со свайпом
@@ -1878,7 +1937,12 @@ body {
     fileInput.addEventListener('change', () => {
       const f = fileInput.files && fileInput.files[0];
       if (!f) return;
-      if (f.size > 5 * 1024 * 1024) { status.textContent = 'Файл слишком большой.'; return; }
+      // Потолок поднят: теперь в файл входят и голосовые записи,
+      // а они весят куда больше текста
+      if (f.size > 200 * 1024 * 1024) {
+        status.textContent = 'Файл слишком большой.'; return;
+      }
+      status.textContent = 'Читаю файл…';
       const reader = new FileReader();
       reader.onload = () => {
         let parsed = null;
@@ -1886,30 +1950,86 @@ body {
         catch (e) { status.textContent = 'Это не файл синхронизации.'; return; }
         const clean = sanitizeState(parsed);
         if (clean.sections.length === 0) { status.textContent = 'В файле нет разделов.'; return; }
-        const added = mergeState(clean);
+
+        const res = mergeState(clean);
         state.syncedAt = Date.now();
         save(); render();
-        status.textContent = added
-          ? 'Добавлено новых карточек: ' + added
-          : 'Всё уже было на месте, нового нет.';
+
+        // Записи кладём после слияния: их надо привязать к тем карточкам,
+        // которые только что появились, а у них новые идентификаторы
+        const clips = (parsed && typeof parsed.clips === 'object' && parsed.clips)
+          ? parsed.clips : {};
+        importClips(res.audioLinks, clips, status, res.added);
       };
       reader.readAsText(f);
     });
 
-    const payload = () => JSON.stringify(
-      Object.assign({}, state, { syncedAt: Date.now() }), null, 2);
+    /**
+     * Собрать файл синхронизации ВМЕСТЕ с голосовыми записями.
+     *
+     * Записи лежат в IndexedDB двоичными объектами, а в JSON их не
+     * положишь — переводим в base64. Файл от этого растёт примерно на
+     * треть от веса звука, но зато на втором устройстве появляются
+     * не только тексты, но и голос.
+     */
+    function buildPayload() {
+      const withAudio = [];
+      for (const s of state.sections) {
+        for (const d of s.decks) {
+          for (const c of d.cards) if (c.audio) withAudio.push(c);
+        }
+      }
+      if (withAudio.length === 0) {
+        return Promise.resolve(JSON.stringify(
+          Object.assign({}, state, { syncedAt: Date.now() }), null, 2));
+      }
+
+      status.textContent = 'Собираю записи: 0 из ' + withAudio.length + '…';
+      const clips = {};
+      let done = 0;
+
+      const next = (i) => {
+        if (i >= withAudio.length) return Promise.resolve();
+        const card = withAudio[i];
+        return AudioStore.get(card.id)
+          .then((blob) => (blob ? AudioStore.toText(blob) : null))
+          .then((text) => { if (text) clips[card.id] = text; })
+          .catch(() => { /* запись потерялась — переносим карточку без неё */ })
+          .then(() => {
+            done++;
+            status.textContent = 'Собираю записи: ' + done + ' из '
+              + withAudio.length + '…';
+            return next(i + 1);
+          });
+      };
+
+      return next(0).then(() => {
+        status.textContent = '';
+        return JSON.stringify(
+          Object.assign({}, state, { syncedAt: Date.now(), clips: clips }), null, 2);
+      });
+    }
 
     function sendOut() {
-      const blob = new Blob([payload()], { type: 'application/json' });
+      buildPayload().then(deliver).catch(() => {
+        status.textContent = 'Не удалось собрать файл.';
+      });
+    }
+
+    function deliver(text) {
+      const blob = new Blob([text], { type: 'application/json' });
+      const mb = blob.size / 1048576;
       const file = new File([blob], 'affirmations-sync.json',
                             { type: 'application/json' });
       // Через системное «Поделиться» файл кладётся прямо в iCloud Drive.
       // Если браузер этого не умеет — обычное скачивание, а дальше
       // пользователь сам перекладывает файл в облачную папку.
+      const size = mb < 1 ? Math.round(blob.size / 1024) + ' КБ'
+                          : mb.toFixed(1) + ' МБ';
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         navigator.share({ files: [file], title: 'Аффирмации' })
           .then(() => { state.syncedAt = Date.now(); save(); render();
-                        status.textContent = 'Отправлено.'; })
+                        status.textContent = 'Отправлено, ' + size + '.'; })
           .catch(() => { /* пользователь отменил — это не ошибка */ });
         return;
       }
@@ -1918,7 +2038,8 @@ body {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       state.syncedAt = Date.now(); save(); render();
-      status.textContent = 'Файл сохранён. Положите его в папку iCloud Drive.';
+      status.textContent = 'Файл сохранён (' + size
+        + '). Положите его в папку iCloud Drive.';
     }
 
     clear(sheet);
@@ -1939,8 +2060,9 @@ body {
         text: 'Последний раз: ' + humanTime(state.syncedAt) }));
     }
     sheet.appendChild(el('p', { class: 'hint', text:
-      'Голосовые записи через файл не переносятся — они слишком тяжёлые '
-      + 'для текстового формата и остаются на своём устройстве.' }));
+      'Голосовые записи переносятся вместе с карточками. Из-за них файл '
+      + 'заметно тяжелее — это нормально. Если запись уже есть на этом '
+      + 'устройстве, она сохраняется, чужая её не затирает.' }));
     sheet.appendChild(el('div', { class: 'sheet-actions' }, [
       el('button', { class: 'btn sec', attrs: { type: 'button' }, text: 'Закрыть',
                      on: { click: close } }),
@@ -1960,6 +2082,9 @@ body {
    */
   function mergeState(incoming) {
     let added = 0;
+    // Пары «идентификатор в файле → карточка у нас»: по ним потом
+    // разложим голосовые записи
+    const audioLinks = [];
     for (const inSec of incoming.sections) {
       let sec = state.sections.find((s) => s.name === inSec.name);
       if (!sec) {
@@ -1972,18 +2097,68 @@ body {
           deck = { id: uid(), name: inDeck.name, color: inDeck.color, cards: [] };
           sec.decks.push(deck);
         }
-        const seen = new Set(deck.cards.map((c) => c.text.trim()));
+        const byText = new Map(deck.cards.map((c) => [c.text.trim(), c]));
         for (const inCard of inDeck.cards) {
-          if (seen.has(inCard.text.trim())) continue;
+          const key = inCard.text.trim();
+          const mine = byText.get(key);
+          if (mine) {
+            // Карточка уже есть. Запись подтянем, только если своей нет —
+            // затирать собственную запись чужой было бы потерей данных
+            if (inCard.audio && !mine.audio) {
+              audioLinks.push({ from: inCard.id, card: mine, len: inCard.audioLen });
+            }
+            continue;
+          }
           if (deck.cards.length >= LIMITS.cardsPerDeck) break;
-          deck.cards.push({ id: uid(), text: inCard.text, color: inCard.color,
-                            fav: inCard.fav, audio: false, audioLen: 0 });
-          seen.add(inCard.text.trim());
+          const fresh = { id: uid(), text: inCard.text, color: inCard.color,
+                          fav: inCard.fav, audio: false, audioLen: 0 };
+          deck.cards.push(fresh);
+          byText.set(key, fresh);
           added++;
+          if (inCard.audio) {
+            audioLinks.push({ from: inCard.id, card: fresh, len: inCard.audioLen });
+          }
         }
       }
     }
-    return added;
+    return { added: added, audioLinks: audioLinks };
+  }
+
+  /** Разложить голосовые записи из файла по карточкам. */
+  function importClips(links, clips, status, addedCards) {
+    const todo = links.filter((l) => typeof clips[l.from] === 'string');
+    const finish = (n) => {
+      const parts = [];
+      parts.push(addedCards ? 'Добавлено карточек: ' + addedCards
+                            : 'Новых карточек нет');
+      if (n) parts.push('записей: ' + n);
+      else if (links.length) parts.push('записи в файле не найдены');
+      status.textContent = parts.join(', ') + '.';
+      save(); render();
+    };
+
+    if (todo.length === 0) { finish(0); return; }
+    status.textContent = 'Переношу записи: 0 из ' + todo.length + '…';
+
+    let ok = 0;
+    const step = (i) => {
+      if (i >= todo.length) { finish(ok); return; }
+      const link = todo[i];
+      const blob = AudioStore.fromText(clips[link.from]);
+      const cont = () => {
+        status.textContent = 'Переношу записи: ' + (i + 1) + ' из '
+          + todo.length + '…';
+        step(i + 1);
+      };
+      if (!blob) { cont(); return; }
+      AudioStore.put(link.card.id, blob).then(() => {
+        link.card.audio = true;
+        link.card.audioLen = link.len || 0;
+        ok++;
+        cont();
+      }).catch(cont);
+    };
+    step(0);
   }
 
   function exportBackup() {
@@ -2007,6 +2182,9 @@ body {
     stopRecording();
     audioCleanup.forEach((fn) => { try { fn(); } catch (e) { /* уже убрано */ } });
     audioCleanup = [];
+    // Обработчики жеста «назад» висят на корне и переживают перерисовку —
+    // снимаем их сами, иначе накопятся и начнут срабатывать по нескольку раз
+    if (backSwipeCleanup) { backSwipeCleanup(); backSwipeCleanup = null; }
     clear(root);
     let content;
     if (view.name === 'read') content = renderReader();
