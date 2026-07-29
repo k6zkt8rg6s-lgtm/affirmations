@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-YnnxB01yyBvKqsUvr8jkv/r7xKCmXBqnCA7nI3pgZ40=';
-               style-src 'sha256-wS3zVs6OFNLtils95t3NBUz2o6j1raUf22W4Wr2B4Fw=';
+               script-src 'sha256-CZukM+hqF2wYbqk00mcef3k4rkc280FmCFxVuB9QAkk=';
+               style-src 'sha256-kvIob0muDuD+3d01SIBEKXNJ/mhiXLmmpK3dj2HIQZw=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -435,16 +435,6 @@ body {
 .bigcard:active { cursor: grabbing; }
 .bigcard-text { user-select: text; -webkit-user-select: text; }
 
-/* Соседние карточки стопки выглядывают по краям */
-.bigcard.behind {
-  position: absolute;
-  transform: scale(.94) translateY(10px);
-  opacity: .45;
-  z-index: -1;
-  box-shadow: none;
-  touch-action: auto;
-  cursor: default;
-}
 
 .reader-actions {
   display: flex;
@@ -536,6 +526,15 @@ body {
   font-size: 12px;
   color: var(--ink-soft);
   opacity: .8;
+}
+
+/* Обёртка экрана. Нужна для жеста «назад»: экран едет целиком.
+   touch-action оставляет вертикальную прокрутку системе, а горизонталь
+   отдаёт нам — иначе жест конфликтует со скроллом списка. */
+.page {
+  touch-action: pan-y;
+  will-change: transform;
+  transform: translateX(0);
 }
 </style>
 </head>
@@ -976,7 +975,11 @@ body {
       }),
     ]));
 
-    return frag;
+    // Экран заворачиваем в один узел: анимация возврата двигает его
+    // целиком. Без обёртки уехала бы только первая строка.
+    const page = el('div', { class: 'page' });
+    page.appendChild(frag);
+    return page;
   }
 
   /** Список избранного с возможностью убрать по одной или все сразу. */
@@ -1117,7 +1120,72 @@ body {
         on: { click: () => editCard(deck, null) },
       }),
     ]));
-    return frag;
+
+    // Свайп слева направо возвращает на главный экран. Экран едет за
+    // пальцем, поэтому сразу видно, что жест поймался, и его можно
+    // отменить, не доводя до конца. Кнопка «‹» остаётся на месте.
+    const page = el('div', { class: 'page' });
+    page.appendChild(frag);
+    attachBackSwipe(page, () => go({ name: 'home' }));
+    return page;
+  }
+
+  /**
+   * Жест «назад»: тянем слева направо, отпускаем — уходим назад.
+   *
+   * Слушаем весь экран, а не только левый край: на телефоне край
+   * перехватывает сама система под свой жест «назад» в Safari, и наш
+   * туда просто не долетает.
+   */
+  function attachBackSwipe(node, onBack) {
+    let id = null, x0 = 0, y0 = 0, dx = 0, axis = null;
+    const NEED = 90;      // столько пикселей нужно протянуть
+
+    node.addEventListener('pointerdown', (ev) => {
+      if (!ev.isPrimary || sliding) return;
+      // На кнопках и полях ввода жест не начинаем — там своё поведение
+      const t = ev.target;
+      if (t && t.closest && t.closest('button, input, textarea, a')) return;
+      id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY; dx = 0; axis = null;
+      node.style.setProperty('transition', 'none');
+    });
+
+    node.addEventListener('pointermove', (ev) => {
+      if (ev.pointerId !== id) return;
+      const mx = ev.clientX - x0, my = ev.clientY - y0;
+      if (axis === null) {
+        if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
+        // Вертикальное движение — это прокрутка списка, не мешаем ей
+        axis = Math.abs(mx) > Math.abs(my) * 1.3 ? 'x' : 'y';
+        if (axis === 'x') node.setPointerCapture(id);
+      }
+      if (axis !== 'x') return;
+      ev.preventDefault();
+      // Влево уходить некуда — там сопротивление
+      dx = mx < 0 ? mx * 0.2 : mx;
+      node.style.setProperty('transform', 'translateX(' + dx.toFixed(1) + 'px)');
+      node.style.setProperty('opacity', String(Math.max(0.55, 1 - dx / 900)));
+    });
+
+    const finish = (ev) => {
+      if (ev.pointerId !== id) return;
+      id = null;
+      node.style.setProperty('transition',
+        'transform ' + SLIDE_MS + 'ms ' + SLIDE_EASE + ', opacity '
+        + Math.round(SLIDE_MS * 0.7) + 'ms linear');
+      if (axis === 'x' && dx > NEED) {
+        const w = node.offsetWidth || 400;
+        node.style.setProperty('transform', 'translateX(' + w + 'px)');
+        node.style.setProperty('opacity', '0');
+        pageEnter = -1;                    // главный экран въедет слева
+        setTimeout(onBack, Math.round(SLIDE_MS * 0.55));
+        return;
+      }
+      node.style.setProperty('transform', 'translateX(0)');
+      node.style.setProperty('opacity', '1');
+    };
+    node.addEventListener('pointerup', finish);
+    node.addEventListener('pointercancel', finish);
   }
 
   // ------------------------------------------------------------------
@@ -1136,12 +1204,10 @@ body {
       node.style.setProperty('border-color', CARD_EDGE[colour] || colour);
     };
 
+    // На сцене только одна карточка. Раньше из-под неё выглядывала
+    // следующая — задумывалось как намёк на стопку, но при перелистывании
+    // это читалось как застрявшая тень уехавшей карточки.
     const stage = el('div', { class: 'stage' });
-    if (total > 1) {
-      const behind = el('div', { class: 'bigcard behind' });
-      paint(behind, (deck.cards[i + 1] || deck.cards[i - 1] || card).color);
-      stage.appendChild(behind);
-    }
     // Полоска проигрывания внизу карточки — появляется, только если
     // к карточке действительно прикреплена запись
     const audioBar = el('div', { class: 'audio-bar' });
@@ -1358,9 +1424,10 @@ body {
 
   // Параметры перелистывания. Кривая — та же, что в системных переходах
   // iOS: быстрый старт и долгое мягкое торможение в конце.
-  const SLIDE_MS = 456;   // было 380; замедлено на 20% по просьбе
+  const SLIDE_MS = 524;   // 380 → 456 → 524: замедлено на 20%, затем ещё на 15%
   const SLIDE_EASE = 'cubic-bezier(.32,.72,0,1)';
   let enterFrom = 0;      // с какой стороны въезжает новая карточка
+  let pageEnter = 0;      // то же, но для целого экрана при жесте «назад»
   let sliding = false;    // идёт анимация — новые жесты игнорируем
 
   // ------------------------------------------------------------------
@@ -1947,6 +2014,31 @@ body {
     else content = renderHome();
     root.appendChild(content);
     window.scrollTo(0, 0);
+
+    // Экран въезжает с той стороны, куда ушёл предыдущий. Смещение
+    // ставим сразу, а снимаем на следующем кадре: в одном кадре браузер
+    // не увидит промежуточного состояния и анимации не получится.
+    if (pageEnter !== 0) {
+      const dir = pageEnter;
+      pageEnter = 0;
+      const target = root.firstChild;
+      if (target && target.style) {
+        const w = target.offsetWidth || 400;
+        target.style.setProperty('transition', 'none');
+        target.style.setProperty('transform',
+          'translateX(' + (dir > 0 ? w * 0.4 : -w * 0.4) + 'px)');
+        target.style.setProperty('opacity', '0.4');
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            target.style.setProperty('transition',
+              'transform ' + SLIDE_MS + 'ms ' + SLIDE_EASE
+              + ', opacity ' + Math.round(SLIDE_MS * 0.6) + 'ms linear');
+            target.style.setProperty('transform', 'translateX(0)');
+            target.style.setProperty('opacity', '1');
+          });
+        });
+      }
+    }
   }
 
   // ------------------------------------------------------------------
