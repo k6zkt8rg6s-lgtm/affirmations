@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-Wj0VJQv6gxikd+32O/wI4p7B0t+m54NnJO4cclju+Eg=';
-               style-src 'sha256-Tbu2kZPsybzrJgC+5UbFr3HUxS6Q1b5kOVlsjeg0jDI=';
+               script-src 'sha256-/iWjSo/2pAVoWOcvkurDQJgwzbpMbCvtdVzmCpgC/A8=';
+               style-src 'sha256-EjfsqU6uMCFNnrUHUjd5HL0uZZB8SUBBVLAW9PCBiWI=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -226,49 +226,64 @@ body {
   letter-spacing: .3px;
 }
 
-/* Дорожка звука: столбики громкости и тонкая линия текущего места.
-   Столбики рисуются обычными элементами, а не картинкой, — так их
-   можно подсвечивать по мере проигрывания без перерисовки. */
+/* Дорожка звука — «сосуд», который наполняется зелёным.
+   Пустая часть светлая, пройденная заливается полупрозрачной зеленью;
+   к концу записи полоса зелёная целиком. Столбики громкости остаются
+   поверх заливки тёмным силуэтом — по ним видно, где голос, где тишина. */
 .wave {
   position: relative;
   flex: 1;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  gap: 1px;
+  height: 34px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .55);
+  box-shadow: inset 0 0 0 1px rgba(43, 36, 8, .10);
+  overflow: hidden;
   cursor: pointer;
   touch-action: none;      /* дорожка перематывает, а не листает карточку */
   min-width: 0;
 }
-.wave i {
+/* Собственно «жидкость». Ширина задаётся из кода на каждом кадре,
+   поэтому никакого перехода тут нет — иначе заливка отставала бы. */
+.wave-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: rgba(76, 175, 80, .55);
+  pointer-events: none;
+}
+/* Столбики лежат поверх заливки и не мешают ей: между ними видно цвет */
+.wave-bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 6px;
+  pointer-events: none;
+}
+.wave-bars i {
   flex: 1;
   min-width: 0;
-  background: rgba(43, 36, 8, .28);
+  background: rgba(43, 36, 8, .26);
   border-radius: 1px;
-  transition: background .12s linear;
 }
-.wave i.played { background: rgba(43, 36, 8, .72); }
+/* Край жидкости — тонкая тёмно-зелёная черта: видно точное место */
 .wave-head {
   position: absolute;
-  top: -3px;
-  bottom: -3px;
+  top: 0;
+  bottom: 0;
   left: 0;
   width: 2px;
   margin-left: -1px;
-  background: #2B2408;
-  border-radius: 1px;
+  background: #2E7D32;
   pointer-events: none;
 }
-.wave-head::after {
-  content: "";
-  position: absolute;
-  left: -3px;
-  bottom: -4px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #2B2408;
-}
+/* Дошли до конца — сосуд полон, край растворяется */
+.wave.full .wave-head { opacity: 0; }
+.wave.full .wave-fill { background: rgba(76, 175, 80, .72); }
+
 .audio-del {
   border: 0;
   background: transparent;
@@ -510,7 +525,10 @@ body {
   border-radius: var(--radius-m);
   min-height: 104px;
   color: var(--ink-soft);
-  font: 500 15px/1.3 inherit;
+  font-family: inherit;
+  font-weight: 500;
+  font-size: 15px;
+  line-height: 1.3;
   cursor: pointer;
 }
 .add-tile:active { background: rgba(0, 0, 0, .04); }
@@ -546,7 +564,16 @@ body {
   border: 1px solid var(--hair);
   border-radius: 12px;
   padding: 12px;
-  font: 400 17px/1.4 inherit;   /* 17px — иначе iOS зумит поле при фокусе */
+  /* Размер и семейство — двумя отдельными строками, и это важно.
+     Сокращённая запись «font: 400 17px/1.4 inherit» недействительна:
+     семейство шрифта в ней нельзя задать словом inherit, поэтому браузер
+     отбрасывал правило целиком. Поле оставалось с системным размером
+     около 13 px, а Safari увеличивает страницу на любом поле мельче
+     16 px — отсюда и был скачок масштаба при открытии редактирования. */
+  font-family: inherit;
+  font-weight: 400;
+  font-size: 17px;
+  line-height: 1.4;
   background: #FCFCFB;
   color: var(--ink);
 }
@@ -675,14 +702,28 @@ body {
   const COLORS = ['#D9534F', '#7E8A6E', '#E8974A', '#8C93E0',
                   '#7FBF7F', '#5E86C7', '#B87FBF', '#4F9E9E'];
 
-  // Цвета самой карточки — оттенки бумаги, а не яркая заливка:
-  // на них читается тёмный текст, и лист выглядит листом
-  const CARD_COLORS = ['#E6C84C', '#F2E6C9', '#F3C9C0', '#CFE0EE',
-                       '#CFE6D2', '#E8D7EE', '#FFFDF6', '#DCD6C8'];
+  // Цвета карточки. Все восемь одинаково насыщенные: прежние бледные
+  // оттенки выглядели полупрозрачными рядом с жёлтым, и казалось, будто
+  // они недоступны. Тёмный текст на каждом из них держит контраст не
+  // ниже 5,7 : 1 — это выше требования 4,5 : 1.
+  const CARD_COLORS = ['#E6C84C', '#F0A93C', '#EE8172', '#6FB0E3',
+                       '#6FC58C', '#AE72E0', '#5FC7C0', '#EE76AC'];
+
+  // Бледная палитра прежних версий. В выборе её больше нет, но карточки,
+  // покрашенные раньше, должны сохранить свой цвет: без этого списка
+  // проверка данных сочла бы цвет чужим и перекрасила бы всё в жёлтый.
+  const LEGACY_COLORS = ['#F2E6C9', '#F3C9C0', '#CFE0EE', '#CFE6D2',
+                         '#E8D7EE', '#FFFDF6', '#DCD6C8'];
+  const KNOWN_COLORS = CARD_COLORS.concat(LEGACY_COLORS);
+
   const CARD_EDGE = {
-    '#E6C84C': '#D4B63C', '#F2E6C9': '#DFD0AF', '#F3C9C0': '#DFAFA6',
-    '#CFE0EE': '#B2C9DA', '#CFE6D2': '#B2D0B6', '#E8D7EE': '#CDB8D6',
-    '#FFFDF6': '#E6E2D6', '#DCD6C8': '#C4BCA9',
+    '#E6C84C': '#C5AC41', '#F0A93C': '#CE9133', '#EE8172': '#CC6E62',
+    '#6FB0E3': '#5F97C3', '#6FC58C': '#5FA978', '#AE72E0': '#9562C0',
+    '#5FC7C0': '#51ABA5', '#EE76AC': '#CC6593',
+    // прежние бледные
+    '#F2E6C9': '#DFD0AF', '#F3C9C0': '#DFAFA6', '#CFE0EE': '#B2C9DA',
+    '#CFE6D2': '#B2D0B6', '#E8D7EE': '#CDB8D6', '#FFFDF6': '#E6E2D6',
+    '#DCD6C8': '#C4BCA9',
   };
 
   // ------------------------------------------------------------------
@@ -812,7 +853,7 @@ body {
             text: text,
             // Цвет только из списка: иначе через файл копии можно было бы
             // подсунуть в стиль произвольное значение
-            color: CARD_COLORS.includes(c.color) ? c.color : CARD_COLORS[0],
+            color: KNOWN_COLORS.includes(c.color) ? c.color : CARD_COLORS[0],
             fav: c.fav === true,          // строго булево, не «похожее на правду»
             audio: c.audio === true,      // сама запись лежит в IndexedDB
             // Длину записи держим рядом с карточкой. Спрашивать её у
@@ -1839,11 +1880,20 @@ body {
     });
     const total = card.audioLen || 0;
 
-    // Дорожка: столбики громкости плюс тонкая линия текущего места
+    // Дорожка сделана как сосуд: пустая полоса, которая по мере
+    // проигрывания наполняется зелёным слева направо. Столбики громкости
+    // лежат поверх заливки, чтобы было видно, где голос, а где тишина.
     const wave = el('div', { class: 'wave', attrs: { 'aria-hidden': 'true' } });
+    const fill = el('span', { class: 'wave-fill' });
+    const barBox = el('div', { class: 'wave-bars' });
+    const head = el('span', { class: 'wave-head' });
+    wave.appendChild(fill);
+    wave.appendChild(barBox);
+    wave.appendChild(head);
+
     const bars = [];
     const drawBars = (peaks) => {
-      clear(wave);
+      clear(barBox);
       bars.length = 0;
       const src = (peaks && peaks.length) ? peaks : null;
       for (let i = 0; i < PEAK_COUNT; i++) {
@@ -1852,12 +1902,10 @@ body {
         const v = src ? src[Math.floor(i * src.length / PEAK_COUNT)] : 8;
         const b = el('i');
         b.style.setProperty('height', Math.max(6, v) + '%');
-        wave.appendChild(b);
+        barBox.appendChild(b);
         bars.push(b);
       }
-      wave.appendChild(head);
     };
-    const head = el('span', { class: 'wave-head' });
 
     const label = el('span', {
       class: 'audio-label',
@@ -1875,12 +1923,12 @@ body {
         ? mmsscc(cur) + ' / ' + mmsscc(dur)
         : mmsscc(cur);
       const p = dur ? Math.max(0, Math.min(1, cur / dur)) : 0;
-      head.style.setProperty('left', (p * 100).toFixed(2) + '%');
-      // Пройденная часть подсвечивается — видно, где вы сейчас
-      const upto = Math.round(p * bars.length);
-      for (let i = 0; i < bars.length; i++) {
-        bars[i].className = i < upto ? 'played' : '';
-      }
+      const pct = (p * 100).toFixed(2) + '%';
+      // Сосуд наполняется: зелёная часть — то, что уже прозвучало
+      fill.style.setProperty('width', pct);
+      head.style.setProperty('left', pct);
+      // На самом верху черта уже не нужна — сосуд просто полон
+      wave.className = p >= 0.999 ? 'wave full' : 'wave';
     };
 
     // Линия должна ехать плавно. Событие timeupdate приходит редко,
@@ -2004,7 +2052,12 @@ body {
     for (const f of fields) {
       if (f.type === 'colors') {
         const row = el('div', { class: 'swatches' });
-        const palette = f.palette || COLORS;
+        let palette = f.palette || COLORS;
+        // Если карточка покрашена в цвет из прежней бледной палитры,
+        // показываем его первым отдельным образцом. Иначе при открытии
+        // окна выбор молча съезжал бы на жёлтый и карточка меняла цвет
+        // от одного лишь захода в редактирование.
+        if (f.value && !palette.includes(f.value)) palette = [f.value].concat(palette);
         let chosen = palette.includes(f.value) ? f.value : palette[0];
         palette.forEach((c) => {
           const b = el('button', {
@@ -2036,7 +2089,17 @@ body {
       ]));
     }
 
-    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const close = () => {
+      // Сначала снимаем фокус с поля, потом убираем окно. Пока поле в
+      // фокусе, iPhone держит клавиатуру и сдвинутый экран; если убрать
+      // окно вместе с полем, возвращать вид системе уже не с чего —
+      // и страница остаётся смещённой и увеличенной.
+      const act = document.activeElement;
+      if (act && typeof act.blur === 'function') act.blur();
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      // Экран мог уехать вслед за клавиатурой — ставим его на место
+      if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
+    };
 
     const actions = el('div', { class: 'sheet-actions' }, [
       el('button', { class: 'btn sec', attrs: { type: 'button' }, text: 'Отмена',
