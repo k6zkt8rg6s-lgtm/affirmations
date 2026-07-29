@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-J+BbePHQ0dGi8HXdrrA+HDcq3YH1ri+bPXkBU4aRfpM=';
-               style-src 'sha256-kvIob0muDuD+3d01SIBEKXNJ/mhiXLmmpK3dj2HIQZw=';
+               script-src 'sha256-hnC+Q7DjyewaHFf0ncbKYOaeqWEGgY8uB/hfgQEcTeY=';
+               style-src 'sha256-GWITpubSwDvmKsAFDmQxn13MQmWL96KtIE97MJRHGFE=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -536,6 +536,11 @@ body {
   will-change: transform;
   transform: translateX(0);
 }
+
+/* Блок синхронизации: кнопка и под ней пояснение, куда идут данные */
+.sync-row { margin: 14px 0; }
+.sync-row .btn { width: 100%; }
+.sync-row .hint { margin: 6px 2px 0; }
 </style>
 </head>
 <body>
@@ -1930,8 +1935,12 @@ body {
     const sheet = el('div', { class: 'sheet' });
     const status = el('p', { class: 'hint' });
 
+    // Без accept намеренно. С фильтром по типу файл, пришедший с iPhone
+    // через «Поделиться», в окне выбора оказывался серым и не нажимался:
+    // система помечает его не тем типом, который мы ожидали. Проверяем
+    // не расширение, а содержимое — это и надёжнее, и безопаснее.
     const fileInput = el('input', {
-      attrs: { type: 'file', accept: 'application/json,.json' },
+      attrs: { type: 'file' },
       style: { display: 'none' },
     });
     fileInput.addEventListener('change', () => {
@@ -2027,9 +2036,12 @@ body {
       const size = mb < 1 ? Math.round(blob.size / 1024) + ' КБ'
                           : mb.toFixed(1) + ' МБ';
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({ files: [file], title: 'Аффирмации' })
+        // Передаём ТОЛЬКО файл. Если добавить title или text, iOS
+        // сохраняет их отдельным текстовым файлом рядом — и на диске
+        // оказывается два файла вместо одного.
+        navigator.share({ files: [file] })
           .then(() => { state.syncedAt = Date.now(); save(); render();
-                        status.textContent = 'Отправлено, ' + size + '.'; })
+                        status.textContent = 'Файл сохранён, ' + size + '.'; })
           .catch(() => { /* пользователь отменил — это не ошибка */ });
         return;
       }
@@ -2045,14 +2057,24 @@ body {
     clear(sheet);
     sheet.appendChild(el('h3', { text: 'Синхронизация' }));
     sheet.appendChild(el('p', { class: 'hint', text:
-      'Перенос карточек между MacBook и iPhone через файл в iCloud Drive. '
-      + 'Загрузка не стирает ваши карточки — добавляются только те, '
-      + 'которых ещё нет.' }));
-    sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+      'Перенос карточек и голосовых записей между устройствами через файл '
+      + 'в iCloud Drive.' }));
+
+    // Слова «выгрузить» и «загрузить» отличаются одной буквой и легко
+    // путаются. Пишем прямо, в какую сторону идут данные.
+    sheet.appendChild(el('div', { class: 'sync-row' }, [
       el('button', { class: 'btn', attrs: { type: 'button' },
-                     text: 'Выгрузить', on: { click: sendOut } }),
+                     text: '↑  Сохранить в файл', on: { click: sendOut } }),
+      el('p', { class: 'hint', text:
+        'Отсюда — в файл. Делайте на том устройстве, где вносили изменения.' }),
+    ]));
+    sheet.appendChild(el('div', { class: 'sync-row' }, [
       el('button', { class: 'btn sec', attrs: { type: 'button' },
-                     text: 'Загрузить', on: { click: () => fileInput.click() } }),
+                     text: '↓  Взять из файла',
+                     on: { click: () => fileInput.click() } }),
+      el('p', { class: 'hint', text:
+        'Из файла — сюда. Делайте на втором устройстве. Ваши карточки '
+        + 'не стираются, добавляются только недостающие.' }),
     ]));
     sheet.appendChild(status);
     if (state.syncedAt) {
