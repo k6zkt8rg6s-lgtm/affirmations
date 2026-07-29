@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-Pso2ZxdsCgj2rUD+V/qhV68OUUzXH56sMTVznlHoJsI=';
+               script-src 'sha256-67vD1o4pKeiH+ukE9+1MVvX1eH5a23lD6nGMb+0BaAg=';
                style-src 'sha256-xrqrc3mLjztRbGnkLvuV6yX1h1v4OC1WP1wb3QlqVsE=';
                img-src 'self' data:;
                media-src blob:;
@@ -2699,8 +2699,12 @@ body {
         el('div', { text: 'Голосовых записей: ' + clipCount }),
       ]));
       sheet.appendChild(el('p', { class: 'hint', text:
-        'Ваши карточки не пострадают: добавится только то, чего здесь ещё '
-        + 'нет. Совпадающие пропускаются.' }));
+        clipCount
+          ? 'Голосовые записи лежат внутри этого же файла и разойдутся по '
+            + 'своим карточкам. Ваши карточки не пострадают: добавится '
+            + 'только то, чего здесь ещё нет.'
+          : 'Ваши карточки не пострадают: добавится только то, чего здесь '
+            + 'ещё нет. Совпадающие пропускаются.' }));
       sheet.appendChild(el('div', { class: 'sheet-actions' }, [
         el('button', { class: 'btn sec', attrs: { type: 'button' },
                        text: 'Отмена', on: { click: drawMain } }),
@@ -2729,13 +2733,27 @@ body {
         ? parsed.clips : {};
       importClips(res.audioLinks, clips, {
         set text(v) { report(v, 'wait'); },
-      }, res.added, (cards, clipsDone) => {
+      }, res.added, (cards, clipsDone, info) => {
         clear(sheet);
         sheet.appendChild(el('h3', { text: 'Готово' }));
         const lines = [];
         lines.push('Добавлено карточек: ' + cards);
         lines.push('Перенесено записей: ' + clipsDone);
-        if (cards === 0 && clipsDone === 0) {
+        const inFile = (info && info.inFile) || 0;
+        const kept = (info && info.kept) || 0;
+        // Раньше итог сводился к «нового не оказалось», и было
+        // непонятно, куда делись записи, которые видно в файле.
+        // Теперь про каждую сказано, что с ней стало.
+        if (kept) {
+          lines.push('Уже были на этом устройстве: ' + kept);
+        }
+        const lost = inFile - clipsDone - kept;
+        if (inFile && lost > 0) {
+          lines.push('');
+          lines.push('Не удалось перенести: ' + lost + '. Записи есть в файле, '
+            + 'но не легли в хранилище — возможно, не хватает места.');
+        }
+        if (cards === 0 && clipsDone === 0 && !kept && !inFile) {
           lines.push('');
           lines.push('Нового не оказалось — всё это уже есть на устройстве.');
         }
@@ -2846,11 +2864,20 @@ body {
           const key = inCard.text.trim();
           const mine = byText.get(key);
           if (mine) {
-            // Карточка уже есть. Запись подтянем, только если своей нет —
-            // затирать собственную запись чужой было бы потерей данных
-            if (inCard.audio && !mine.audio) {
+            // Карточка уже есть — сам текст не трогаем. А вот запись
+            // берём в работу всегда, когда она есть в файле.
+            //
+            // Раньше здесь стояло условие «и только если у нас записи
+            // нет» — по отметке на карточке. Отметка же может врать:
+            // после восстановления копии карточка считает, что звук у
+            // неё есть, хотя в хранилище пусто. Из-за этого запись из
+            // файла молча пропускалась, и переносилось ноль записей при
+            // том, что в файле их видно. Теперь наличие своей записи
+            // проверяется по самому хранилищу, а не по отметке.
+            if (inCard.audio) {
               audioLinks.push({ from: inCard.id, card: mine, len: inCard.audioLen,
-                                peaks: sanitizePeaks(inCard.peaks) });
+                                peaks: sanitizePeaks(inCard.peaks),
+                                existing: true });
             }
             continue;
           }
@@ -2876,44 +2903,70 @@ body {
   /** Разложить голосовые записи из файла по карточкам. */
   function importClips(links, clips, status, addedCards, onDone) {
     const todo = links.filter((l) => typeof clips[l.from] === 'string');
-    const finish = (n) => {
+    // Сколько записей было в файле — нужно, чтобы честно объяснить
+    // итог: «две записи в файле, обе уже есть» и «две записи в файле,
+    // ни одна не легла» выглядят одинаково, а означают разное
+    const inFile = Object.keys(clips || {}).length;
+    let ok = 0, kept = 0;
+
+    const finish = () => {
       save(); render();
-      if (typeof onDone === 'function') { onDone(addedCards, n); return; }
+      if (typeof onDone === 'function') {
+        onDone(addedCards, ok, { inFile: inFile, kept: kept });
+        return;
+      }
       const parts = [];
       parts.push(addedCards ? 'Добавлено карточек: ' + addedCards
                             : 'Новых карточек нет');
-      if (n) parts.push('записей: ' + n);
+      if (ok) parts.push('записей: ' + ok);
       status.text = parts.join(', ') + '.';
     };
 
-    if (todo.length === 0) { finish(0); return; }
+    if (todo.length === 0) { finish(); return; }
     status.text = 'Переношу записи: 0 из ' + todo.length + '…';
 
-    let ok = 0;
     const step = (i) => {
-      if (i >= todo.length) { finish(ok); return; }
+      if (i >= todo.length) { finish(); return; }
       const link = todo[i];
-      const blob = AudioStore.fromText(clips[link.from]);
       const cont = () => {
         status.text = 'Переношу записи: ' + (i + 1) + ' из '
           + todo.length + '…';
         step(i + 1);
       };
-      if (!blob || !blob.size) { cont(); return; }
-      // Отмечаем звук только после того, как убедились, что он
-      // действительно читается обратно. Иначе карточка могла бы
-      // заявлять запись, которой на деле нет.
-      AudioStore.put(link.card.id, blob)
-        .then(() => AudioStore.get(link.card.id))
-        .then((back) => {
-          if (!back || !back.size) { cont(); return; }
-          link.card.audio = true;
-          link.card.audioLen = link.len || 0;
-          if (Array.isArray(link.peaks)) link.card.peaks = link.peaks;
-          ok++;
+
+      const take = () => {
+        const blob = AudioStore.fromText(clips[link.from]);
+        if (!blob || !blob.size) { cont(); return; }
+        // Отмечаем звук только после того, как убедились, что он
+        // действительно читается обратно. Иначе карточка могла бы
+        // заявлять запись, которой на деле нет.
+        AudioStore.put(link.card.id, blob)
+          .then(() => AudioStore.get(link.card.id))
+          .then((back) => {
+            if (!back || !back.size) { cont(); return; }
+            link.card.audio = true;
+            link.card.audioLen = link.len || 0;
+            if (Array.isArray(link.peaks) && link.peaks.length) {
+              link.card.peaks = link.peaks;
+            }
+            ok++;
+            cont();
+          })
+          .catch(cont);
+      };
+
+      if (!link.existing) { take(); return; }
+      // Карточка была на устройстве. Своя запись дороже чужой — но
+      // «своя» значит настоящая, а не отметка о ней.
+      AudioStore.get(link.card.id).then((mine) => {
+        if (mine && mine.size) {
+          link.card.audio = true;      // отметка могла быть снята — вернём
+          kept++;
           cont();
-        })
-        .catch(cont);
+          return;
+        }
+        take();
+      }).catch(take);
     };
     step(0);
   }
