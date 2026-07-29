@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-6vcwklGc0o0sVuVBsrQlnu3OyArplEJaJ+1EhqJ4mVI=';
+               script-src 'sha256-oqZOtt7gFkKSBZfCqRHvi0/E85gvyH8mKInh+1IOo8Y=';
                style-src 'sha256-eMgpSu6pc0VINF2+L6lITsbIxRzViZFSHxWY6DTLpgY=';
                img-src 'self' data:;
                media-src blob:;
@@ -1728,9 +1728,14 @@ body {
     // отдельных слоя и на каждом кадре сводил их вместе — на телефоне это
     // и давало рывки. Теперь слой один: он рисуется один раз, а дальше
     // только сдвигается, чем и занимается видеоядро.
+    // Колода замкнута в круг: за последней карточкой снова идёт первая, а
+    // перед первой стоит последняя. Поэтому соседей берём по остатку —
+    // упора у краёв больше нет, листать можно в любую сторону без конца.
+    // Круга нет только у колоды из одной карточки: ходить некуда.
     const track = el('div', { class: 'track' });
-    const before = i > 0 ? neighbour(deck.cards[i - 1]) : null;
-    const after = i < total - 1 ? neighbour(deck.cards[i + 1]) : null;
+    const loop = total > 1;
+    const before = loop ? neighbour(deck.cards[(i - 1 + total) % total]) : null;
+    const after = loop ? neighbour(deck.cards[(i + 1) % total]) : null;
     if (before) track.appendChild(before);
     if (after) track.appendChild(after);
     track.appendChild(big);
@@ -1816,8 +1821,9 @@ body {
     // случай, когда перехода нет вовсе (свёрнутая вкладка, отключённая
     // анимация в настройках телефона).
     function step(delta) {
-      const next = i + delta;
-      if (next < 0 || next >= total || sliding) return;
+      if (!loop || sliding) return;
+      // По кругу: с последней уходим на первую, с первой — на последнюю
+      const next = (i + delta + total) % total;
       sliding = true;
       dressSides();            // кнопками и клавишами тоже листают
       place(-delta * measure(), SLIDE_MS);
@@ -1877,30 +1883,28 @@ body {
         speed = Math.abs(ev.clientX - xPrev) / (tNow - tPrev);
         tPrev = tNow; xPrev = ev.clientX;
       }
-      // У края стопки карточка идёт туго — видно, что дальше некуда.
-      // raw — сколько прошёл палец, dx — насколько уехала каретка:
-      // у края они расходятся, и считать порог надо по пальцу
-      const edge = (mx > 0 && i === 0) || (mx < 0 && i === total - 1);
+      // Колода замкнута в круг, упираться больше некуда — карточка идёт
+      // за пальцем один к одному в обе стороны. Туго она идёт только в
+      // колоде из одной карточки: там и правда ходить некуда.
+      // raw — сколько прошёл палец, dx — насколько уехала каретка.
       raw = mx;
-      dx = edge ? mx * 0.25 : mx;
+      dx = loop ? mx : mx * 0.25;
       place(dx, 0);
     });
 
     const endDrag = (ev) => {
       if (ev.pointerId !== dragId) return;
       dragId = null;
-      if (locked === 'x' && swipePassed(Math.abs(raw), speed)) {
-        // Свайп ВЛЕВО — следующая, ВПРАВО — предыдущая.
+      // loop проверяем здесь, а не только внутри step: в колоде из одной
+      // карточки шага нет, и каретку надо вернуть на место, а не оставить
+      // висеть там, где отпустили
+      if (locked === 'x' && loop && swipePassed(Math.abs(raw), speed)) {
+        // Свайп ВЛЕВО — следующая, ВПРАВО — предыдущая. По кругу, поэтому
+        // из читалки этот жест уже никуда не выводит: с первой карточки
+        // вправо попадаем на последнюю, а не в список колоды. Выйти —
+        // крестиком в углу или клавишей Esc.
         // Карточка не возвращается на место, а продолжает движение
         // с того места, где её отпустили
-        if (raw > 0 && i === 0) {
-          // На первой карточке листать назад некуда, и раньше жест здесь
-          // просто умирал. Теперь он закрывает карточку — то же движение,
-          // что возвращает назад из колоды, работает и тут
-          pageEnter = -1;
-          go({ name: 'deck', sectionId: view.sectionId, deckId: view.deckId });
-          return;
-        }
         step(raw < 0 ? 1 : -1);
         return;
       }
@@ -1926,6 +1930,7 @@ body {
     const WHEEL_COOLDOWN = 550;
 
     stage.addEventListener('wheel', (ev) => {
+      if (!loop) return;                                       // одна карточка — листать нечего
       if (Math.abs(ev.deltaX) <= Math.abs(ev.deltaY)) return;  // это вертикальная прокрутка
       ev.preventDefault();
       const now = Date.now();
