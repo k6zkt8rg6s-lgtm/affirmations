@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-67vD1o4pKeiH+ukE9+1MVvX1eH5a23lD6nGMb+0BaAg=';
+               script-src 'sha256-/DSzi5Z+N/GthfEhXP0V3C1PEw9+gWz6+MY7AhQ0RUc=';
                style-src 'sha256-xrqrc3mLjztRbGnkLvuV6yX1h1v4OC1WP1wb3QlqVsE=';
                img-src 'self' data:;
                media-src blob:;
@@ -1041,17 +1041,38 @@ body {
        *  Через fetch на data-адрес было бы короче, но connect-src 'none'
        *  такие запросы запрещает — разбираем base64 вручную. */
       fromText: (text) => {
-        const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(String(text || ''));
-        if (!m) return null;
-        const type = m[1] || 'audio/webm';
+        const str = String(text || '');
+        if (str.slice(0, 5) !== 'data:') return null;
+        const comma = str.indexOf(',');
+        if (comma < 0) return null;
+
+        // Заголовок разбираем по частям, а не одним шаблоном.
+        //
+        // Здесь была ошибка, из-за которой записи не доезжали до второго
+        // устройства. Шаблон ждал ровно «data:тип;base64,», а браузеры
+        // пишут в тип ещё и кодек: «audio/webm;codecs=opus»,
+        // «audio/mp4;codecs=mp4a.40.2». Такая строка под шаблон не
+        // подходила, разбор возвращал пустоту, и запись молча
+        // пропускалась — при том что в файле она была.
+        const head = str.slice(5, comma).split(';');
+        const type = head[0] || 'audio/webm';
+        let base64 = false;
+        for (let i = 1; i < head.length; i++) {
+          if (head[i].trim().toLowerCase() === 'base64') base64 = true;
+        }
+        const body = str.slice(comma + 1);
+
         try {
-          if (m[2]) {
-            const bin = atob(m[3]);
+          if (base64) {
+            // Пробелы и переводы строк иногда добавляют почтовые и
+            // облачные посредники — они не часть данных
+            const bin = atob(body.replace(/\s+/g, ''));
             const bytes = new Uint8Array(bin.length);
             for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            if (!bytes.length) return null;
             return new Blob([bytes], { type: type });
           }
-          return new Blob([decodeURIComponent(m[3])], { type: type });
+          return new Blob([decodeURIComponent(body)], { type: type });
         } catch (e) {
           return null;   // повреждённая строка — просто пропускаем запись
         }
@@ -2749,9 +2770,15 @@ body {
         }
         const lost = inFile - clipsDone - kept;
         if (inFile && lost > 0) {
+          const w = (info && info.why) || {};
+          const reason = w.parse ? 'не удалось разобрать запись в файле'
+            : w.write ? 'хранилище браузера отказалось её принять'
+            : w.verify ? 'запись легла, но не прочиталась обратно'
+            : w.nolink ? 'для записи не нашлось карточки в этом же файле'
+            : 'причина не определена';
           lines.push('');
-          lines.push('Не удалось перенести: ' + lost + '. Записи есть в файле, '
-            + 'но не легли в хранилище — возможно, не хватает места.');
+          lines.push('Не удалось перенести: ' + lost + '.');
+          lines.push('Причина: ' + reason + '.');
         }
         if (cards === 0 && clipsDone === 0 && !kept && !inFile) {
           lines.push('');
@@ -2907,12 +2934,16 @@ body {
     // итог: «две записи в файле, обе уже есть» и «две записи в файле,
     // ни одна не легла» выглядят одинаково, а означают разное
     const inFile = Object.keys(clips || {}).length;
-    let ok = 0, kept = 0;
+    let ok = 0, kept = 0, lastError = null;
+    // Причины отказов копим поимённо. Гадать «наверное, кончилось
+    // место» бессмысленно: в прошлый раз дело было совсем в другом,
+    // а сообщение уводило в сторону.
+    const why = { parse: 0, write: 0, verify: 0, nolink: 0 };
 
     const finish = () => {
       save(); render();
       if (typeof onDone === 'function') {
-        onDone(addedCards, ok, { inFile: inFile, kept: kept });
+        onDone(addedCards, ok, { inFile: inFile, kept: kept, why: why });
         return;
       }
       const parts = [];
@@ -2922,6 +2953,8 @@ body {
       status.text = parts.join(', ') + '.';
     };
 
+    // Записи, для которых в файле нет карточки (или наоборот)
+    why.nolink = Math.max(0, inFile - todo.length);
     if (todo.length === 0) { finish(); return; }
     status.text = 'Переношу записи: 0 из ' + todo.length + '…';
 
@@ -2936,14 +2969,14 @@ body {
 
       const take = () => {
         const blob = AudioStore.fromText(clips[link.from]);
-        if (!blob || !blob.size) { cont(); return; }
+        if (!blob || !blob.size) { why.parse++; cont(); return; }
         // Отмечаем звук только после того, как убедились, что он
         // действительно читается обратно. Иначе карточка могла бы
         // заявлять запись, которой на деле нет.
         AudioStore.put(link.card.id, blob)
           .then(() => AudioStore.get(link.card.id))
           .then((back) => {
-            if (!back || !back.size) { cont(); return; }
+            if (!back || !back.size) { why.verify++; cont(); return; }
             link.card.audio = true;
             link.card.audioLen = link.len || 0;
             if (Array.isArray(link.peaks) && link.peaks.length) {
@@ -2952,7 +2985,7 @@ body {
             ok++;
             cont();
           })
-          .catch(cont);
+          .catch((e) => { why.write++; lastError = e; cont(); });
       };
 
       if (!link.existing) { take(); return; }
