@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-U1zwlepbW04G6C4KKtfOYMtpi1T3MoHmnVQArx4a5OE=';
+               script-src 'sha256-Pso2ZxdsCgj2rUD+V/qhV68OUUzXH56sMTVznlHoJsI=';
                style-src 'sha256-xrqrc3mLjztRbGnkLvuV6yX1h1v4OC1WP1wb3QlqVsE=';
                img-src 'self' data:;
                media-src blob:;
@@ -970,18 +970,62 @@ body {
       return dbp;
     }
 
+    /**
+     * Одна операция с хранилищем.
+     *
+     * Запись считается состоявшейся не тогда, когда прошёл запрос, а
+     * когда закрылась вся сделка (oncomplete). Разница не теоретическая:
+     * запрос успевает отчитаться раньше, чем данные легли на диск, и
+     * если в этот момент перерисовать страницу, запись может пропасть —
+     * карточка будет говорить, что звук есть, а звука не будет.
+     */
     function tx(mode, fn) {
       return open().then((db) => new Promise((resolve, reject) => {
-        const t = db.transaction(STORE, mode);
+        let t;
+        try { t = db.transaction(STORE, mode); }
+        catch (e) { reject(e); return; }
+        let out;
         const req = fn(t.objectStore(STORE));
-        req.onsuccess = () => resolve(req.result);
+        req.onsuccess = () => { out = req.result; };
         req.onerror = () => reject(req.error);
+        t.onabort = () => reject(t.error || new Error('aborted'));
+        t.onerror = () => reject(t.error);
+        // Ждём именно закрытия сделки. Проверять, поддерживается ли
+        // такое событие, незачем: оно есть во всех реализациях, а
+        // запасной путь «резолвить по успеху запроса» возвращал бы нас
+        // ровно к той ошибке, из-за которой запись пропадала.
+        t.oncomplete = () => resolve(out);
       }));
     }
 
+    /**
+     * Записи храним не объектом Blob, а его содержимым.
+     *
+     * Safari кладёт Blob в хранилище отдельным файлом, и эта связка
+     * ненадёжна: объект сохраняется, а при чтении возвращается пустым.
+     * Простой массив байтов лежит внутри самой базы и читается везде
+     * одинаково. Тип звука держим рядом, чтобы собрать Blob обратно.
+     */
+    function pack(blob) {
+      if (!blob) return Promise.resolve(null);
+      if (typeof blob.arrayBuffer === 'function') {
+        return blob.arrayBuffer().then((buf) => (
+          { kind: 'clip', type: blob.type || 'audio/webm', buf: buf }));
+      }
+      return Promise.resolve(blob);   // старый браузер — кладём как есть
+    }
+
+    function unpack(value) {
+      if (!value) return null;
+      // Записи, сохранённые прежними версиями, лежат объектом Blob
+      if (!value.kind) return value;
+      try { return new Blob([value.buf], { type: value.type || 'audio/webm' }); }
+      catch (e) { return null; }
+    }
+
     return {
-      put: (id, blob) => tx('readwrite', (s) => s.put(blob, id)),
-      get: (id) => tx('readonly', (s) => s.get(id)),
+      put: (id, blob) => pack(blob).then((v) => tx('readwrite', (s) => s.put(v, id))),
+      get: (id) => tx('readonly', (s) => s.get(id)).then(unpack),
       del: (id) => tx('readwrite', (s) => s.delete(id)),
       available: () => !!self.indexedDB,
 
@@ -1014,6 +1058,49 @@ body {
       },
     };
   })();
+
+  /**
+   * Убрать отметку «есть запись» у карточек, у которых записи нет.
+   *
+   * Такое расхождение возникает законным путём: резервная копия — это
+   * только текст, звук в неё не входит. Восстановив её, приложение
+   * получало карточки, уверенные в наличии звука, а при нажатии на
+   * «играть» упиралось в пустоту. Здесь мы сверяем отметки с
+   * действительностью один раз и приводим их в порядок.
+   *
+   * onDone получает число исправленных карточек.
+   */
+  function healAudioFlags(onDone) {
+    const done = (n) => { if (typeof onDone === 'function') onDone(n); };
+    if (!AudioStore.available()) { done(0); return; }
+    const suspects = [];
+    for (const sec of state.sections) {
+      for (const deck of sec.decks) {
+        for (const card of deck.cards) if (card.audio) suspects.push(card);
+      }
+    }
+    if (!suspects.length) { done(0); return; }
+
+    let fixed = 0;
+    const step = (i) => {
+      if (i >= suspects.length) {
+        if (fixed) { save(); render(); }
+        done(fixed);
+        return;
+      }
+      const card = suspects[i];
+      AudioStore.get(card.id).then((blob) => {
+        // Пустой объект считаем отсутствующим: именно так выглядит
+        // запись, которая не долежала до конца сделки с хранилищем
+        if (!blob || !blob.size) {
+          card.audio = false; card.audioLen = 0; card.peaks = [];
+          fixed++;
+        }
+        step(i + 1);
+      }).catch(() => step(i + 1));   // хранилище недоступно — не трогаем
+    };
+    step(0);
+  }
 
   /** Можно ли вообще записывать здесь и сейчас. */
   function recordingSupport() {
@@ -1931,7 +2018,12 @@ body {
 
         const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
         if (!blob.size) return;
-        AudioStore.put(card.id, blob).then(() => {
+        AudioStore.put(card.id, blob)
+          .then(() => AudioStore.get(card.id))
+          .then((back) => {
+          if (!back || !back.size) {
+            alert('Запись не сохранилась. Попробуйте ещё раз.'); return;
+          }
           card.audio = true;
           card.audioLen = Math.max(1, Math.round(elapsed));
           // Форма волны уже снята с микрофона — рисуем сразу
@@ -2071,7 +2163,16 @@ body {
       loading = true;
       return AudioStore.get(card.id).then((blob) => {
         loading = false;
-        if (!blob) { label.textContent = 'Запись не найдена'; return null; }
+        if (!blob || !blob.size) {
+          // Отметка врёт — снимаем её, чтобы карточка не обещала звук,
+          // которого нет. Чаще всего так бывает после восстановления
+          // резервной копии: в ней только текст, звука там нет.
+          label.textContent = 'Запись не найдена — отметка снята';
+          card.audio = false; card.audioLen = 0; card.peaks = [];
+          save();
+          setTimeout(() => { clear(bar); }, 1200);
+          return null;
+        }
         url = URL.createObjectURL(blob);
         audio = new Audio(url);
         audio.preload = 'metadata';
@@ -2356,6 +2457,17 @@ body {
         if (clean.sections.length === 0) { alert('В файле нет разделов.'); return; }
         if (!confirm('Заменить всё содержимое данными из файла?')) return;
         state = clean; save(); close(); go({ name: 'home' });
+        // В резервной копии только текст. Карточки из неё уверены, что
+        // у них есть звук, — сверяем с хранилищем и снимаем лишние
+        // отметки, иначе «играть» упрётся в пустоту.
+        healAudioFlags((n) => {
+          if (n) {
+            alert('Восстановлено из копии.\n\nВ копии нет голосовых '
+              + 'записей — отметка о звуке снята у ' + n
+              + ' карточек. Сами записи остались на том устройстве, где '
+              + 'их сделали; перенести их можно через синхронизацию.');
+          }
+        });
       };
       reader.readAsText(f);
     });
@@ -2737,18 +2849,23 @@ body {
             // Карточка уже есть. Запись подтянем, только если своей нет —
             // затирать собственную запись чужой было бы потерей данных
             if (inCard.audio && !mine.audio) {
-              audioLinks.push({ from: inCard.id, card: mine, len: inCard.audioLen });
+              audioLinks.push({ from: inCard.id, card: mine, len: inCard.audioLen,
+                                peaks: sanitizePeaks(inCard.peaks) });
             }
             continue;
           }
           if (deck.cards.length >= LIMITS.cardsPerDeck) break;
+          // Форму волны переносим сразу: пересчитать её из файла на
+          // iPhone нечем, а без неё дорожка выглядела бы пустой
           const fresh = { id: uid(), text: inCard.text, color: inCard.color,
-                          fav: inCard.fav, audio: false, audioLen: 0 };
+                          fav: inCard.fav, audio: false, audioLen: 0,
+                          peaks: sanitizePeaks(inCard.peaks) };
           deck.cards.push(fresh);
           byText.set(key, fresh);
           added++;
           if (inCard.audio) {
-            audioLinks.push({ from: inCard.id, card: fresh, len: inCard.audioLen });
+            audioLinks.push({ from: inCard.id, card: fresh, len: inCard.audioLen,
+                              peaks: sanitizePeaks(inCard.peaks) });
           }
         }
       }
@@ -2782,13 +2899,21 @@ body {
           + todo.length + '…';
         step(i + 1);
       };
-      if (!blob) { cont(); return; }
-      AudioStore.put(link.card.id, blob).then(() => {
-        link.card.audio = true;
-        link.card.audioLen = link.len || 0;
-        ok++;
-        cont();
-      }).catch(cont);
+      if (!blob || !blob.size) { cont(); return; }
+      // Отмечаем звук только после того, как убедились, что он
+      // действительно читается обратно. Иначе карточка могла бы
+      // заявлять запись, которой на деле нет.
+      AudioStore.put(link.card.id, blob)
+        .then(() => AudioStore.get(link.card.id))
+        .then((back) => {
+          if (!back || !back.size) { cont(); return; }
+          link.card.audio = true;
+          link.card.audioLen = link.len || 0;
+          if (Array.isArray(link.peaks)) link.card.peaks = link.peaks;
+          ok++;
+          cont();
+        })
+        .catch(cont);
     };
     step(0);
   }
@@ -2869,6 +2994,12 @@ body {
       });
     });
   }
+
+  // Разовая сверка отметок о звуке с хранилищем. Нужна тем, кто уже
+  // восстановился из копии до этой правки: у них карточки заявляют
+  // записи, которых нет, и «играть» молча упирается в пустоту.
+  // Проверка идёт своим чередом и отрисовку не задерживает.
+  setTimeout(() => healAudioFlags(), 0);
 
   render();
 })();
