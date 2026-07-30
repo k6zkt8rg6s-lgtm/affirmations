@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-vJM970UrZPTQOL9Tq5DlTNLkKKSg4/7/vDKtAErIPKo=';
-               style-src 'sha256-ZFLg+KNCGLy3hSMxJofvzJk2jEK2EalFF4L1v+hBcuY=';
+               script-src 'sha256-aGqfjsoYhx7rrUK4aFW6jxjPrweUE4rPjtd3K8uyFUo=';
+               style-src 'sha256-sMWoG4cyNGC5Z08sqguA0nEsOIerv9VOeWGK/B8/06s=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -317,6 +317,52 @@ body {
 
 /* ---------- Разделы и колоды ---------- */
 .section { margin: 22px 0 6px; }
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+.section-head h2 {
+  font: 600 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+/* Заголовок раздела — кнопка сворачивания на всю ширину.
+   Прозрачный фон и border: 0 здесь обязательны: это настоящий <button>,
+   и без них браузер рисует его своим серым прямоугольником — название
+   раздела оказывается в рамке. */
+.section-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 8px 0;
+  min-height: var(--tap);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.section-toggle:active { opacity: .6; }
+
+/* Уголок сворачивания — маленький значок слева от названия. Повёрнут
+   вниз, когда раздел раскрыт, и влево, когда свёрнут. */
+.chev {
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform .18s ease;
+  transform: rotate(0deg);
+  flex: none;
+}
+.chev.closed { transform: rotate(-90deg); }
+.section-count { color: var(--ink-soft); font-size: 13px; margin-left: auto; }
+.section.collapsed { margin-bottom: 0; }
 
 /* Список избранного в окне управления не должен вытеснять кнопки */
 .card-list.scroll { max-height: 46vh; overflow-y: auto; }
@@ -691,10 +737,10 @@ body {
    от страницы, а от её собственного места в сетке — и плитка прыгала
    из-под пальца вниз ровно на своё смещение. */
 
-/* За заголовок раздела и за плитку колоды берут долгим нажатием.
-   Долгое нажатие в Safari по умолчанию вызывает своё меню и выделение
-   текста — здесь это только мешает. */
-.section-head, .deck {
+/* За заголовок раздела, за плитку колоды и за строку карточки берут
+   долгим нажатием. Долгое нажатие в Safari по умолчанию вызывает своё
+   меню и выделение текста — здесь это только мешает. */
+.section-head, .deck, .mini {
   -webkit-touch-callout: none;
   user-select: none;
   -webkit-user-select: none;
@@ -705,7 +751,7 @@ body {
    понятно, что элемент оторван от страницы и его несут.
    Селектор с двумя классами взят ради веса: он обязан победить
    `position: relative` у .deck, иначе плитка не оторвётся от сетки. */
-.section.lifted, .deck.lifted {
+.section.lifted, .deck.lifted, .mini.lifted {
   position: absolute;
   z-index: 30;
   margin: 0;
@@ -723,6 +769,9 @@ body {
 /* Сдвиг поднятой плитки ведёт код, поэтому обычное «вдавливание»
    нажатием тут только мешало бы */
 .deck.lifted:active { transform: none; }
+/* Поднятая строка списка карточек: она белая и на бумаге почти теряется,
+   поэтому обводку делаем чуть заметнее обычной */
+.mini.lifted { border-color: rgba(0, 0, 0, .16); }
 
 /* Пустое место, куда элемент встанет, если отпустить. Пунктир — тот же,
    что у плитки «+ Колода»: рука уже знает, что это место под что-то. */
@@ -735,6 +784,9 @@ body {
 /* Ячейка на месте раздела повторяет и его внешние отступы: иначе
    страница подпрыгнула бы на их высоту в момент подъёма */
 .drop-slot.as-section { margin: 22px 0 6px; }
+/* В списке карточек расстояние между строками задаёт gap самого списка,
+   поэтому ячейке свои отступы не нужны — она просто занимает строку */
+.drop-slot.as-card { margin: 0; }
 /* В свёрнутом разделе ячейка появляется под шапкой — ей нужен отступ */
 .section.movable > .drop-slot { margin-top: 10px; min-height: 44px; }
 
@@ -1554,7 +1606,9 @@ body {
       const swatch = el('span', { class: 'mini-swatch' });
       swatch.style.setProperty('background-color', card.color);
       swatch.style.setProperty('border-color', CARD_EDGE[card.color] || card.color);
-      list.appendChild(el('button', {
+      // Номер не хранится, а считается от начала списка: после переноса
+      // нумерация сама остаётся сплошной
+      const row = el('button', {
         class: 'mini', attrs: { type: 'button' },
         on: { click: () => go({ name: 'read', sectionId: section.id, deckId: deck.id, index: i }) },
       }, [
@@ -1563,7 +1617,9 @@ body {
         el('span', { class: 'mini-text', text: card.text }),
         card.audio ? el('span', { class: 'mini-audio', text: '♪' }) : null,
         card.fav ? el('span', { class: 'mini-heart', text: '♥' }) : null,
-      ]));
+      ]);
+      dragCard(row, deck, card);
+      list.appendChild(row);
     });
     frag.appendChild(list);
 
@@ -1601,7 +1657,7 @@ body {
     const now = () => Date.now();
 
     const down = (ev) => {
-      if (!ev.isPrimary || sliding) return;
+      if (!ev.isPrimary || sliding || drag) return;
       // Кнопки НЕ исключаем: весь экран колоды состоит из кнопок-карточек,
       // и с таким запретом жест не начинался бы почти нигде. Вместо этого
       // ниже гасим нажатие, если палец поехал вбок.
@@ -1615,6 +1671,9 @@ body {
 
     const move = (ev) => {
       if (ev.pointerId !== id) return;
+      // Пока карточку несут, экран уезжать не должен: одно движение
+      // пальцем не может значить одновременно «назад» и «переставить»
+      if (drag) return;
       const mx = ev.clientX - x0, my = ev.clientY - y0;
       if (axis === null) {
         if (Math.abs(mx) < SWIPE_START && Math.abs(my) < SWIPE_START) return;
@@ -1775,7 +1834,7 @@ body {
     * этот ход — элемент дёрнулся бы в сторону от пальца.
     */
   const shiftable = () => list('movable')
-    .concat(list('deck')).concat(list('add-tile'))
+    .concat(list('deck')).concat(list('add-tile')).concat(list('mini'))
     .filter((n) => !/\blifted\b/.test(n.className || ''));
 
   /**
@@ -1991,6 +2050,69 @@ body {
             if (from < 0 || to === from) return;
             state.sections.splice(from, 1);
             state.sections.splice(to, 0, section);
+          });
+        },
+      };
+      put(y0);
+    });
+  }
+
+  // ------------------------------------------------------------------
+  /**
+   * Перенос карточки внутри колоды: список, только вверх и вниз.
+   *
+   * Номера у карточек не хранятся, а считаются при отрисовке от начала
+   * списка. Поэтому после переноса нумерация сама становится сплошной:
+   * верхняя всегда первая, нижняя — последняя.
+   */
+  function dragCard(row, deck, card) {
+    attachHold(row, (id, x0, y0) => {
+      const host = row.parentNode;              // .card-list
+      const st = lift(row, id, x0, y0, 'as-card');
+      let at = -1;
+
+      /** Куда встанет строка, если отпустить прямо сейчас. */
+      const aim = (cy) => {
+        const rows = Array.prototype.slice.call(
+          host && host.querySelectorAll ? host.querySelectorAll('.mini') : [])
+          .filter((n) => n !== row);
+        let k = 0;
+        for (const n of rows) {
+          const r = rectOf(n);
+          if (cy > r.top + r.height / 2) k++; else break;
+        }
+        return { index: k, rows: rows };
+      };
+
+      const put = (cy) => {
+        const t = aim(cy);
+        if (t.index === at) return;
+        at = t.index;
+        flipMove(shiftable(), () => {
+          const parent = st.slot.parentNode;
+          if (parent) parent.removeChild(st.slot);
+          const after = t.rows[at] || null;
+          if (after && host.insertBefore) host.insertBefore(st.slot, after);
+          else if (host) host.appendChild(st.slot);
+        });
+      };
+
+      drag = {
+        id: id, lastX: x0, lastY: y0,
+        cancel: () => back(row, st),
+        move: (cx, cy) => {
+          drag.lastX = cx; drag.lastY = cy;
+          follow(row, st, cx, cy);
+          put(cy);
+          edgeScroll(cy);
+        },
+        drop: () => {
+          const to = at;
+          drop(row, st, () => {
+            const from = deck.cards.indexOf(card);
+            if (from < 0 || to < 0 || to === from) return;
+            deck.cards.splice(from, 1);
+            deck.cards.splice(Math.min(to, deck.cards.length), 0, card);
           });
         },
       };
