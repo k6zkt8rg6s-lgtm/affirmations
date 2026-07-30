@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-oqZOtt7gFkKSBZfCqRHvi0/E85gvyH8mKInh+1IOo8Y=';
-               style-src 'sha256-nvf4ipB327bdGUSNkPGSer8OZPd4OlLEYEPidzyZPHc=';
+               script-src 'sha256-efg41RwRpGvpowOEb9UzjZHLmXbetMLZ3oTkjn9sXwM=';
+               style-src 'sha256-5a9BpmojgNh7vdCwKPAZMR1+S+e6UUnrpxaJ/V7AgUk=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -317,6 +317,61 @@ body {
 
 /* ---------- Разделы и колоды ---------- */
 .section { margin: 22px 0 6px; }
+
+/* ---------- Перенос удержанием ---------- */
+
+/* За заголовок раздела и за плитку колоды берут долгим нажатием.
+   Долгое нажатие в Safari по умолчанию вызывает своё меню и выделение
+   текста — здесь это только мешает. */
+.section-head, .deck {
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Поднятый элемент. Выходит из потока и едет за пальцем: сдвиг ставится
+   из кода, здесь только вид. Тень заметно глубже обычной — по ней и
+   понятно, что элемент оторван от страницы и его несут. */
+.lifted {
+  position: absolute;
+  z-index: 30;
+  margin: 0;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, .22), 0 4px 10px rgba(0, 0, 0, .14);
+  will-change: transform;
+  cursor: grabbing;
+}
+/* Заголовок раздела сам по себе прозрачный — под ним надо показать
+   бумагу, иначе поднятый раздел просвечивал бы насквозь */
+.section.lifted {
+  background-color: var(--paper);
+  border-radius: var(--radius-m);
+  padding: 4px 10px;
+}
+.deck.lifted:active { transform: none; }   /* сдвиг ведёт код, не :active */
+
+/* Пустое место, куда элемент встанет, если отпустить. Пунктир — тот же,
+   что у плитки «+ Колода»: рука уже знает, что это место под что-то. */
+.drop-slot {
+  border: 1.5px dashed rgba(0, 0, 0, .22);
+  border-radius: var(--radius-m);
+  background: rgba(0, 0, 0, .03);
+  box-sizing: border-box;
+}
+/* Ячейка на месте раздела повторяет и его внешние отступы: иначе
+   страница подпрыгнула бы на их высоту в момент подъёма */
+.drop-slot.as-section { margin: 22px 0 6px; }
+/* В свёрнутом разделе ячейка появляется под шапкой — ей нужен отступ */
+.section.movable > .drop-slot { margin-top: 10px; min-height: 44px; }
+
+/* Раздел, в который колода попадёт. Подсветка мягкая: она подсказывает,
+   а не кричит. */
+.drop-into { border-radius: var(--radius-m); }
+.drop-into > .section-head h2 { color: var(--ink); }
+.drop-into > .section-head .chev { color: var(--ink); }
+
+/* Раздел и плитки доезжают на новые места переходом. Сам сдвиг ставится
+   из кода приёмом FLIP, здесь только скорость. */
+.section, .deck, .add-tile { will-change: auto; }
 .section-head {
   display: flex;
   align-items: center;
@@ -1356,15 +1411,24 @@ body {
         }),
       ]);
 
+      // movable и data-section — метки для переноса удержанием.
+      // «Избранное» выше тоже нарисовано как раздел, но переносить его
+      // некуда: у него нет колод. Поэтому метку получают только настоящие
+      // разделы, и перенос ориентируется именно по ней.
       if (section.collapsed) {
-        frag.appendChild(el('div', { class: 'section collapsed' }, [head]));
+        const box = el('div', {
+          class: 'section movable collapsed',
+          attrs: { 'data-section': section.id },
+        }, [head]);
+        frag.appendChild(box);
+        dragSection(head, section);
         continue;
       }
 
       const grid = el('div', { class: 'deck-grid' });
       for (const deck of section.decks) {
         const single = deck.cards.length <= 1;
-        grid.appendChild(el('button', {
+        const tile = el('button', {
           class: 'deck' + (single ? ' single' : ''),
           style: { background: deck.color },
           attrs: { type: 'button' },
@@ -1372,7 +1436,9 @@ body {
         }, [
           el('p', { class: 'deck-title', text: deck.name }),
           el('span', { class: 'deck-count', text: cardsLabel(deck.cards.length) }),
-        ]));
+        ]);
+        dragDeck(tile, section, deck);
+        grid.appendChild(tile);
       }
       grid.appendChild(el('button', {
         class: 'add-tile', attrs: { type: 'button' },
@@ -1380,10 +1446,16 @@ body {
         on: { click: () => editDeck(section, null) },
       }));
 
-      frag.appendChild(el('div', { class: 'section' }, [head, grid]));
+      frag.appendChild(el('div', {
+        class: 'section movable',
+        attrs: { 'data-section': section.id },
+      }, [head, grid]));
+      dragSection(head, section);
     }
 
-    frag.appendChild(el('div', { class: 'section' }, [
+    // after-sections — метка конца списка. Когда раздел несут в самый
+    // низ, ячейка встаёт перед ней, а не после кнопки создания.
+    frag.appendChild(el('div', { class: 'section after-sections' }, [
       el('button', {
         class: 'btn sec', attrs: { type: 'button' }, text: '+ Новый раздел',
         on: { click: () => editSection(null) },
@@ -1659,6 +1731,379 @@ body {
   }
 
   let backSwipeCleanup = null;
+
+  // ------------------------------------------------------------------
+  // Перенос удержанием: разделы меняются местами, колоды переезжают
+  // внутри раздела и в другие разделы.
+  //
+  // Почему именно удержание. На одном и том же касании уже висят три
+  // разных смысла: нажатие на заголовок сворачивает раздел, нажатие на
+  // колоду её открывает, а движение пальцем вверх-вниз прокручивает
+  // страницу. Развести их иначе нельзя — палец должен сначала задержаться
+  // на месте, и только тогда элемент «поднимается».
+  //
+  // Как это устроено. Поднятый элемент выходит из потока: он становится
+  // absolute и едет за пальцем, а на его месте появляется пунктирная
+  // ячейка. Дальше вся работа сводится к тому, чтобы переставлять эту
+  // ячейку по странице, — раскладку считает сам браузер, и потому всё
+  // сходится точно и при разной высоте разделов, и при переносе колоды
+  // из одной сетки в другую. Соседи доезжают на новые места приёмом FLIP:
+  // замерили «до», переставили, вернули сдвигом и сняли его с переходом.
+  // ------------------------------------------------------------------
+  const HOLD_MS = 400;     // сколько держать, чтобы поднять
+  const HOLD_SLOP = 8;     // сдвинулись раньше — значит, это прокрутка
+  const LIFT_MS = 140;     // подъём элемента под пальцем
+  const DROP_MS = 220;     // соседи расступаются и элемент опускается
+  const EDGE = 64;         // у края экрана страница подкручивается сама
+  const EDGE_SPEED = 12;   // на столько пикселей за кадр
+
+  let drag = null;         // сведения о текущем переносе
+  let dragKill = 0;        // до какого времени гасим случайное нажатие
+  let holdTimer = null;
+
+  const cancelHold = () => {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  };
+
+  const rectOf = (n) => (n && n.getBoundingClientRect
+    ? n.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0,
+                                    right: 0, bottom: 0 });
+  const pageY = () => (typeof window !== 'undefined' && window.scrollY) || 0;
+  const list = (cls) => {
+    const found = root.querySelectorAll ? root.querySelectorAll('.' + cls) : [];
+    return Array.prototype.slice.call(found);
+  };
+
+  /**
+   * Переставить что-то в разметке так, чтобы соседи доехали на новые
+   * места, а не перескочили. Приём известен как FLIP: узлы замеряются
+   * до перестановки, после неё возвращаются сдвигом на прежнее место и
+   * уже оттуда отпускаются с переходом.
+   */
+  function flipMove(nodes, mutate) {
+    const before = nodes.map(rectOf);
+    mutate();
+    let moved = false;
+    nodes.forEach((n, k) => {
+      const now = rectOf(n);
+      const dx = before[k].left - now.left, dy = before[k].top - now.top;
+      if (!dx && !dy) return;
+      moved = true;
+      n.style.setProperty('transition', 'none');
+      n.style.setProperty('transform',
+        'translate3d(' + dx + 'px,' + dy + 'px,0)');
+    });
+    if (!moved) return;
+    requestAnimationFrame(() => {
+      nodes.forEach((n) => {
+        n.style.setProperty('transition', 'transform ' + DROP_MS + 'ms ' + SLIDE_EASE);
+        n.style.setProperty('transform', 'translate3d(0,0,0)');
+      });
+    });
+  }
+
+  /** Все узлы, которые могут поехать при перестановке ячейки. */
+  const shiftable = () => list('movable')
+    .concat(list('deck')).concat(list('add-tile'));
+
+  /**
+   * Ожидание удержания. Общее для разделов и колод: отличается только
+   * тем, что делать, когда элемент уже подняли.
+   */
+  function attachHold(node, pick) {
+    let id = null, x0 = 0, y0 = 0;
+
+    node.addEventListener('pointerdown', (ev) => {
+      if (!ev.isPrimary || drag) return;
+      // Карандаш правки — отдельная кнопка, за него не тянем
+      const t = ev.target;
+      if (t && t.closest && t.closest('.iconbtn')) return;
+      id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
+      cancelHold();
+      holdTimer = setTimeout(() => {
+        holdTimer = null;
+        if (node.setPointerCapture) {
+          try { node.setPointerCapture(id); } catch (e) { /* не поддержано */ }
+        }
+        pick(id, x0, y0);
+      }, HOLD_MS);
+    });
+
+    node.addEventListener('pointermove', (ev) => {
+      if (ev.pointerId !== id) return;
+      if (drag && drag.id === id) { drag.move(ev.clientX, ev.clientY); return; }
+      // Палец поехал раньше времени — это прокрутка, а не перенос
+      if (Math.abs(ev.clientX - x0) > HOLD_SLOP
+        || Math.abs(ev.clientY - y0) > HOLD_SLOP) cancelHold();
+    });
+
+    node.addEventListener('pointerup', (ev) => {
+      if (ev.pointerId !== id) return;
+      cancelHold();
+      if (drag && drag.id === id) drag.drop();
+    });
+    // Отмена — не то же, что отпускание. Систему может что-то прервать:
+    // входящий звонок, второй палец, переключение приложения. Тогда
+    // элемент возвращается на своё место, а порядок остаётся прежним:
+    // молча переставить что-то из-за прерывания было бы неожиданно.
+    node.addEventListener('pointercancel', (ev) => {
+      if (ev.pointerId !== id) return;
+      cancelHold();
+      if (drag && drag.id === id) drag.cancel();
+    });
+  }
+
+  /**
+   * Поднять элемент: вынуть из потока, поставить на его место ячейку.
+   * Возвращает всё нужное для дальнейшего ведения за пальцем.
+   */
+  function lift(node, id, x0, y0, kind) {
+    const page = root.firstChild;
+    const base = rectOf(page), box = rectOf(node);
+    // Ячейка занимает ровно то же место, что и поднятый элемент, вместе с
+    // внешними отступами: у раздела они есть, у плитки в сетке нет. Без
+    // этого страница подпрыгивала бы на высоту отступа в момент подъёма.
+    const slot = el('div', { class: 'drop-slot' + (kind ? ' ' + kind : '') });
+    slot.style.setProperty('height', box.height + 'px');
+
+    node.style.setProperty('width', box.width + 'px');
+    node.style.setProperty('height', box.height + 'px');
+    node.style.setProperty('left', (box.left - base.left) + 'px');
+    node.style.setProperty('top', (box.top - base.top) + 'px');
+    node.className = node.className + ' lifted';
+    // Подъём показываем переходом, а следующие движения — уже без него:
+    // за пальцем элемент должен идти без запаздывания
+    node.style.setProperty('transition', 'transform ' + LIFT_MS + 'ms ease-out');
+    node.style.setProperty('transform', 'translate3d(0,0,0) scale(1.03)');
+
+    const parent = node.parentNode;
+    if (parent && parent.insertBefore) parent.insertBefore(slot, node);
+    else if (parent) parent.appendChild(slot);
+
+    return { page: page, base: base, box: box, slot: slot,
+             id: id, x0: x0, y0: y0, scroll0: pageY(), first: true };
+  }
+
+  /** Вести поднятый элемент за пальцем. */
+  function follow(node, st, cx, cy) {
+    if (st.first) { st.first = false; node.style.setProperty('transition', 'none'); }
+    const dy = (cy - st.y0) + (pageY() - st.scroll0);
+    node.style.setProperty('transform',
+      'translate3d(' + (cx - st.x0) + 'px,' + dy + 'px,0) scale(1.03)');
+  }
+
+  /**
+   * Опустить элемент в ячейку и только потом переписать порядок.
+   * Порядок меняем после хода: если сделать это сразу, страница
+   * перерисуется под пальцем и движение оборвётся рывком.
+   */
+  function drop(node, st, commit) {
+    stopEdgeScroll();
+    // Куда ехать: элемент стоит от своего исходного места (st.box), а
+    // ячейка меряется в текущих координатах экрана — поэтому разницу
+    // берём между ними, с поправкой на прокрутку, если она была
+    const to = rectOf(st.slot);
+    const scrolled = pageY() - st.scroll0;
+    node.style.setProperty('transition',
+      'transform ' + DROP_MS + 'ms ' + SLIDE_EASE);
+    node.style.setProperty('transform',
+      'translate3d(' + (to.left - st.box.left) + 'px,'
+      + (to.top - st.box.top + scrolled) + 'px,0) scale(1)');
+    drag = null;
+    dragKill = Date.now() + 400;
+    setTimeout(() => { commit(); save(); render(); }, DROP_MS);
+  }
+
+  /** Вернуть элемент туда, откуда взяли, ничего не переставляя. */
+  function back(node, st) {
+    stopEdgeScroll();
+    node.style.setProperty('transition',
+      'transform ' + DROP_MS + 'ms ' + SLIDE_EASE);
+    node.style.setProperty('transform', 'translate3d(0,0,0) scale(1)');
+    drag = null;
+    dragKill = Date.now() + 400;
+    setTimeout(() => render(), DROP_MS);
+  }
+
+  // Подкрутка страницы, когда палец у самого края экрана: иначе длинный
+  // список не пролистать, ведь обычная прокрутка на время переноса
+  // отключена
+  let edgeTimer = 0, edgeDir = 0;
+  const stopEdgeScroll = () => {
+    if (edgeTimer) cancelAnimationFrame(edgeTimer);
+    edgeTimer = 0; edgeDir = 0;
+  };
+  function edgeScroll(cy) {
+    const h = (typeof window !== 'undefined' && window.innerHeight) || 800;
+    const dir = cy < EDGE ? -1 : (cy > h - EDGE ? 1 : 0);
+    if (dir === edgeDir) return;
+    edgeDir = dir;
+    if (edgeTimer) { cancelAnimationFrame(edgeTimer); edgeTimer = 0; }
+    if (!dir) return;
+    const tick = () => {
+      if (!drag || !edgeDir) { edgeTimer = 0; return; }
+      if (typeof window !== 'undefined' && window.scrollBy) {
+        window.scrollBy(0, edgeDir * EDGE_SPEED);
+      }
+      drag.move(drag.lastX, drag.lastY);
+      edgeTimer = requestAnimationFrame(tick);
+    };
+    edgeTimer = requestAnimationFrame(tick);
+  }
+
+  // ------------------------------------------------------------------
+  /** Перенос раздела: меняем разделы местами по вертикали. */
+  function dragSection(head, section) {
+    attachHold(head, (id, x0, y0) => {
+      const node = head.parentNode;              // весь .section
+      if (!node) return;
+      const st = lift(node, id, x0, y0, 'as-section');
+      let at = -1;
+
+      /** Куда встанет раздел, если отпустить прямо сейчас. */
+      const aim = (cy) => {
+        const others = list('movable').filter((n) => n !== node);
+        let k = 0;
+        for (const n of others) {
+          const r = rectOf(n);
+          if (cy > r.top + r.height / 2) k++; else break;
+        }
+        return { index: k, others: others };
+      };
+
+      const put = (cy) => {
+        const t = aim(cy);
+        if (t.index === at) return;
+        at = t.index;
+        flipMove(shiftable(), () => {
+          // Ниже последнего раздела ячейка встаёт перед меткой конца
+          // списка: иначе она оказалась бы под кнопкой «+ Новый раздел»
+          const after = t.others[at]
+            || (root.querySelector ? root.querySelector('.after-sections') : null);
+          const parent = st.slot.parentNode;
+          if (parent) parent.removeChild(st.slot);
+          if (after && after.parentNode && after.parentNode.insertBefore) {
+            after.parentNode.insertBefore(st.slot, after);
+          } else if (st.page) {
+            st.page.appendChild(st.slot);
+          }
+        });
+      };
+
+      drag = {
+        id: id, lastX: x0, lastY: y0,
+        move: (cx, cy) => {
+          drag.lastX = cx; drag.lastY = cy;
+          follow(node, st, cx, cy);
+          put(cy);
+          edgeScroll(cy);
+        },
+        cancel: () => back(node, st),
+        drop: () => {
+          const to = at < 0 ? state.sections.indexOf(section) : at;
+          drop(node, st, () => {
+            const from = state.sections.indexOf(section);
+            if (from < 0 || to === from) return;
+            state.sections.splice(from, 1);
+            state.sections.splice(to, 0, section);
+          });
+        },
+      };
+      put(y0);
+    });
+  }
+
+  // ------------------------------------------------------------------
+  /** Перенос колоды: внутрь своего раздела или в любой другой. */
+  function dragDeck(tile, fromSection, deck) {
+    attachHold(tile, (id, x0, y0) => {
+      const st = lift(tile, id, x0, y0, 'as-deck');
+      let atSection = null, atIndex = -1;
+
+      /** Раздел под пальцем: разделы идут столбиком, хватает высоты. */
+      const sectionUnder = (cy) => {
+        const nodes = list('movable');
+        let best = null, bestGap = Infinity;
+        nodes.forEach((n) => {
+          const r = rectOf(n);
+          const gap = cy < r.top ? r.top - cy : (cy > r.bottom ? cy - r.bottom : 0);
+          if (gap < bestGap) { bestGap = gap; best = n; }
+        });
+        return best;
+      };
+
+      /** Место внутри сетки: сверху вниз, слева направо. */
+      const indexIn = (host, cx, cy) => {
+        const tiles = Array.prototype.slice.call(
+          host && host.querySelectorAll ? host.querySelectorAll('.deck') : [])
+          .filter((n) => n !== tile);
+        let k = 0;
+        for (const n of tiles) {
+          const r = rectOf(n);
+          if (cy > r.bottom) { k++; continue; }
+          if (cy >= r.top && cx > r.left + r.width / 2) { k++; continue; }
+          break;
+        }
+        return { index: k, tiles: tiles };
+      };
+
+      const put = (cx, cy) => {
+        const host = sectionUnder(cy);
+        if (!host) return;
+        const grid = host.querySelector ? host.querySelector('.deck-grid') : null;
+        const spot = grid ? indexIn(grid, cx, cy) : { index: 0, tiles: [] };
+        if (host === atSection && spot.index === atIndex) return;
+        atSection = host; atIndex = spot.index;
+        list('drop-into').forEach((n) => {
+          n.className = n.className.replace(/ drop-into\b/, '');
+        });
+        if (!/drop-into/.test(host.className)) host.className += ' drop-into';
+        flipMove(shiftable(), () => {
+          const parent = st.slot.parentNode;
+          if (parent) parent.removeChild(st.slot);
+          const after = spot.tiles[atIndex] || null;
+          if (grid && after && grid.insertBefore) grid.insertBefore(st.slot, after);
+          else if (grid) grid.appendChild(st.slot);
+          else host.appendChild(st.slot);      // раздел свёрнут — ячейка под шапкой
+        });
+      };
+
+      drag = {
+        id: id, lastX: x0, lastY: y0,
+        move: (cx, cy) => {
+          drag.lastX = cx; drag.lastY = cy;
+          follow(tile, st, cx, cy);
+          put(cx, cy);
+          edgeScroll(cy);
+        },
+        cancel: () => {
+          list('drop-into').forEach((n) => {
+            n.className = n.className.replace(/ drop-into\b/, '');
+          });
+          back(tile, st);
+        },
+        drop: () => {
+          const target = atSection, index = atIndex;
+          drop(tile, st, () => {
+            list('drop-into').forEach((n) => {
+              n.className = n.className.replace(/ drop-into\b/, '');
+            });
+            const dstId = target && target.getAttribute
+              ? target.getAttribute('data-section') : null;
+            const dst = dstId ? findSection(dstId) : fromSection;
+            if (!dst) return;
+            const k = fromSection.decks.indexOf(deck);
+            if (k < 0) return;
+            fromSection.decks.splice(k, 1);
+            const slotAt = index < 0 ? dst.decks.length
+              : Math.min(index, dst.decks.length);
+            dst.decks.splice(slotAt, 0, deck);
+          });
+        },
+      };
+      put(x0, y0);
+    });
+  }
 
   // ------------------------------------------------------------------
   // Экран 3: полноэкранная карточка со свайпом
@@ -3403,6 +3848,28 @@ body {
       });
     });
   }
+
+  // Два обработчика на всё время работы приложения — для переноса
+  // удержанием. Ставятся один раз: корневой узел перерисовку переживает.
+  //
+  // Прокрутка. Пока элемент несут, страница ехать не должна. Одного
+  // touch-action тут мало: он читается в начале касания, а решение
+  // «это перенос» приходит через полсекунды. Поэтому гасим сам
+  // touchmove — на pointermove это не работает, отменять прокрутку
+  // умеет только touch-событие.
+  root.addEventListener('touchmove', (ev) => {
+    if (drag && ev.cancelable) ev.preventDefault();
+  }, { passive: false });
+
+  // Нажатие. После переноса браузер нередко досылает click по тому
+  // элементу, который несли, — раздел свернулся бы, а колода открылась.
+  // Гасим ровно одно нажатие сразу после переноса.
+  root.addEventListener('click', (ev) => {
+    if (!dragKill || Date.now() > dragKill) { dragKill = 0; return; }
+    dragKill = 0;
+    ev.preventDefault();
+    ev.stopPropagation();
+  }, true);
 
   // Разовая сверка отметок о звуке с хранилищем. Нужна тем, кто уже
   // восстановился из копии до этой правки: у них карточки заявляют
