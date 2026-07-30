@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-aGqfjsoYhx7rrUK4aFW6jxjPrweUE4rPjtd3K8uyFUo=';
+               script-src 'sha256-Z+itAZukKQsZFeiJ6cpaOY54zvhGKJHms5gi2FKwxgk=';
                style-src 'sha256-sMWoG4cyNGC5Z08sqguA0nEsOIerv9VOeWGK/B8/06s=';
                img-src 'self' data:;
                media-src blob:;
@@ -1151,6 +1151,10 @@ body {
       put: (id, blob) => pack(blob).then((v) => tx('readwrite', (s) => s.put(v, id))),
       get: (id) => tx('readonly', (s) => s.get(id)).then(unpack),
       del: (id) => tx('readwrite', (s) => s.delete(id)),
+      /** Все ключи хранилища. Нужны, чтобы находить осиротевшие записи:
+       *  карточки уже нет, а её звук занимает место. */
+      keys: () => tx('readonly', (s) => s.getAllKeys())
+        .then((r) => (Array.isArray(r) ? r : [])).catch(() => []),
       available: () => !!self.indexedDB,
 
       /** Запись → строка, пригодная для файла синхронизации. */
@@ -3581,8 +3585,7 @@ body {
       if (clipCount) {
         sheet.appendChild(el('p', { class: 'hint', text:
           'Голосовые записи лежат внутри этого же файла и разойдутся по '
-          + 'своим карточкам. Ваши карточки не пострадают: добавится '
-          + 'только то, чего здесь ещё нет.' }));
+          + 'своим карточкам.' }));
       } else if (isBackup || claimAudio) {
         sheet.appendChild(el('div', { class: 'sync-status bad' }, [
           el('div', { text: 'В этом файле нет голосовых записей.' }),
@@ -3594,29 +3597,97 @@ body {
             + '«↑ Сохранить в файл» в этом окне. Он называется '
             + SYNC_FILE + '.' }),
         ]));
-      } else {
-        sheet.appendChild(el('p', { class: 'hint', text:
-          'Ваши карточки не пострадают: добавится только то, чего здесь '
-          + 'ещё нет. Совпадающие пропускаются.' }));
       }
+
+      // Два разных действия, и разница между ними важная.
+      //
+      // «Сделать как в файле» — то, чего обычно и ждут от переноса с
+      // телефона: устройство становится точно таким же. Раньше этого
+      // способа не было вовсе, загрузка только добавляла, и разделы,
+      // удалённые на телефоне, оставались на компьютере жить своей
+      // жизнью — рядом с новыми.
+      //
+      // «Только добавить» остаётся для другого случая: когда карточки
+      // писались на двух устройствах и нужно свести их вместе.
+      sheet.appendChild(el('p', { class: 'hint', text:
+        'Как в файле — устройство станет точно таким же, лишнее уйдёт. '
+        + 'Только добавить — прежний способ: появится то, чего здесь нет, '
+        + 'остальное останется.' }));
       sheet.appendChild(el('div', { class: 'sheet-actions' }, [
         el('button', { class: 'btn sec', attrs: { type: 'button' },
                        text: 'Отмена', on: { click: drawMain } }),
         el('button', {
           class: 'btn', attrs: { type: 'button' },
-          text: 'Загрузить в приложение',
-          on: { click: () => applyImport(parsed, clean) },
+          text: 'Сделать как в файле',
+          on: { click: () => askMirror(parsed, clean, source) },
+        }),
+      ]));
+      sheet.appendChild(el('div', { class: 'sync-row' }, [
+        el('button', {
+          class: 'btn sec', attrs: { type: 'button' },
+          text: 'Только добавить новое',
+          on: { click: () => applyImport(parsed, clean, 'merge') },
         }),
       ]));
     }
 
-    /** Здесь и только здесь данные действительно попадают в приложение. */
-    function applyImport(parsed, clean) {
+    /**
+     * Перед заменой показываем, что именно исчезнет.
+     *
+     * Удаление отменить нечем, поэтому список — не формальность: человек
+     * должен увидеть названия своими глазами, а не согласиться с общим
+     * «данные будут заменены».
+     */
+    function askMirror(parsed, clean, source) {
+      const gone = extraHere(clean);
+      if (!gone.any) { applyImport(parsed, clean, 'mirror'); return; }
+
+      clear(sheet);
+      sheet.appendChild(el('h3', { text: 'Что исчезнет' }));
+      sheet.appendChild(el('p', { class: 'hint', text:
+        'Этого нет в файле, поэтому на устройстве не останется. '
+        + 'Вернуть будет нечем.' }));
+
+      const lines = [];
+      if (gone.sections.length) {
+        lines.push('Разделы целиком: ' + gone.sections.join(', '));
+      }
+      if (gone.decks.length) {
+        lines.push('Колоды: ' + gone.decks.join(', '));
+      }
+      if (gone.cards) lines.push('Карточек всего: ' + gone.cards);
+      sheet.appendChild(el('div', { class: 'sync-status bad' },
+        lines.map((x) => el('div', { text: x }))));
+      sheet.appendChild(el('p', { class: 'hint', text:
+        'Всё, что есть и здесь, и в файле, останется на месте вместе со '
+        + 'своими голосовыми записями.' }));
+
+      sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Назад', on: { click: () => showPreview(parsed, clean, source) } }),
+        el('button', {
+          class: 'btn danger', attrs: { type: 'button' },
+          text: 'Да, сделать как в файле',
+          on: { click: () => applyImport(parsed, clean, 'mirror') },
+        }),
+      ]));
+    }
+
+    /**
+     * Здесь и только здесь данные действительно попадают в приложение.
+     * mode: 'mirror' — сделать как в файле, 'merge' — только добавить.
+     */
+    function applyImport(parsed, clean, mode) {
       clear(sheet);
       sheet.appendChild(el('h3', { text: 'Загрузка' }));
       sheet.appendChild(status);
       report('Переношу…', 'wait');
 
+      // При замене сначала убираем лишнее, и только потом идёт обычное
+      // слияние: оно доложит то, чего на устройстве не было, и соберёт
+      // связи для голосовых записей
+      let cleared = 0;
+      if (mode === 'mirror') cleared = mirrorState(clean);
       const res = mergeState(clean);
       state.syncedAt = Date.now();
       save(); render();
@@ -3631,6 +3702,10 @@ body {
         clear(sheet);
         sheet.appendChild(el('h3', { text: 'Готово' }));
         const lines = [];
+        if (mode === 'mirror') {
+          lines.push('Устройство приведено к файлу.');
+          if (cleared) lines.push('Убрано голосовых записей: ' + cleared);
+        }
         lines.push('Добавлено карточек: ' + cards);
         lines.push('Перенесено записей: ' + clipsDone);
         const inFile = (info && info.inFile) || 0;
@@ -3742,6 +3817,110 @@ body {
    * устройствами гарантированно однажды сотрёт то, что было сделано
    * на другом, — поэтому только добавление, по совпадению текста.
    */
+  /**
+   * Чего у нас есть, а в файле нет. Считается до замены, чтобы человек
+   * увидел список и решил сам: удаление отменить будет нечем.
+   */
+  function extraHere(incoming) {
+    const sections = [], decks = [];
+    let cards = 0;
+    for (const sec of state.sections) {
+      const inSec = incoming.sections.find((x) => x.name === sec.name);
+      if (!inSec) {
+        sections.push(sec.name);
+        sec.decks.forEach((d) => { cards += d.cards.length; });
+        continue;
+      }
+      for (const deck of sec.decks) {
+        const inDeck = inSec.decks.find((x) => x.name === deck.name);
+        if (!inDeck) {
+          decks.push(sec.name + ' · ' + deck.name);
+          cards += deck.cards.length;
+          continue;
+        }
+        const inTexts = new Set(inDeck.cards.map((c) => c.text.trim()));
+        deck.cards.forEach((c) => { if (!inTexts.has(c.text.trim())) cards++; });
+      }
+    }
+    return { sections: sections, decks: decks, cards: cards,
+             any: sections.length + decks.length + cards > 0 };
+  }
+
+  /**
+   * Привести устройство к тому, что в файле: лишнее убрать, остальное
+   * оставить как есть.
+   *
+   * Почему не «удалить всё и залить заново». У карточек, которые есть и
+   * там и там, уже лежат голосовые записи — они привязаны к нынешним
+   * идентификаторам. Пересоздать карточку значит потерять её запись,
+   * даже если в файле звука нет (файл может быть резервной копией без
+   * звука). Поэтому совпадающее сохраняем вместе с идентификаторами, а
+   * трогаем только лишнее.
+   *
+   * Порядок берём из файла: раз устройство должно выглядеть как файл,
+   * то и последовательность разделов, колод и карточек тоже его.
+   */
+  function mirrorState(incoming) {
+    const dropped = [];               // чьи записи больше не нужны
+    const sections = [];
+    for (const inSec of incoming.sections) {
+      const mine = state.sections.find((s) => s.name === inSec.name);
+      const sec = mine
+        ? { id: mine.id, name: mine.name, collapsed: mine.collapsed, decks: [] }
+        : { id: uid(), name: inSec.name, collapsed: false, decks: [] };
+      for (const inDeck of inSec.decks) {
+        const myDeck = mine ? mine.decks.find((d) => d.name === inDeck.name) : null;
+        const deck = myDeck
+          ? { id: myDeck.id, name: myDeck.name, color: inDeck.color, cards: [] }
+          : { id: uid(), name: inDeck.name, color: inDeck.color, cards: [] };
+        const byText = new Map(
+          myDeck ? myDeck.cards.map((c) => [c.text.trim(), c]) : []);
+        for (const inCard of inDeck.cards) {
+          const keep = byText.get(inCard.text.trim());
+          if (keep) {
+            byText.delete(inCard.text.trim());
+            keep.color = inCard.color;
+            keep.fav = inCard.fav;
+            if (!keep.peaks || !keep.peaks.length) {
+              keep.peaks = sanitizePeaks(inCard.peaks);
+            }
+            deck.cards.push(keep);
+          } else {
+            deck.cards.push({ id: uid(), text: inCard.text, color: inCard.color,
+                              fav: inCard.fav, audio: false, audioLen: 0,
+                              peaks: sanitizePeaks(inCard.peaks) });
+          }
+        }
+        // Всё, что осталось в byText, в файле не значится
+        byText.forEach((c) => { if (c.audio) dropped.push(c.id); });
+        sec.decks.push(deck);
+      }
+      // Колоды нашего раздела, которых в файле нет
+      if (mine) {
+        const kept = new Set(inSec.decks.map((d) => d.name));
+        mine.decks.forEach((d) => {
+          if (kept.has(d.name)) return;
+          d.cards.forEach((c) => { if (c.audio) dropped.push(c.id); });
+        });
+      }
+      sections.push(sec);
+    }
+    // Разделы, которых в файле нет вовсе
+    const kept = new Set(incoming.sections.map((s) => s.name));
+    state.sections.forEach((sec) => {
+      if (kept.has(sec.name)) return;
+      sec.decks.forEach((d) => d.cards.forEach((c) => {
+        if (c.audio) dropped.push(c.id);
+      }));
+    });
+
+    state.sections = sections;
+    // Звук удалённых карточек — из хранилища. Иначе он остался бы лежать
+    // мёртвым грузом: карточки нет, а место занято.
+    dropped.forEach((id) => { AudioStore.del(id).catch(() => {}); });
+    return dropped.length;
+  }
+
   function mergeState(incoming) {
     let added = 0;
     // Пары «идентификатор в файле → карточка у нас»: по ним потом
