@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-efg41RwRpGvpowOEb9UzjZHLmXbetMLZ3oTkjn9sXwM=';
-               style-src 'sha256-5a9BpmojgNh7vdCwKPAZMR1+S+e6UUnrpxaJ/V7AgUk=';
+               script-src 'sha256-vJM970UrZPTQOL9Tq5DlTNLkKKSg4/7/vDKtAErIPKo=';
+               style-src 'sha256-ZFLg+KNCGLy3hSMxJofvzJk2jEK2EalFF4L1v+hBcuY=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -317,101 +317,6 @@ body {
 
 /* ---------- Разделы и колоды ---------- */
 .section { margin: 22px 0 6px; }
-
-/* ---------- Перенос удержанием ---------- */
-
-/* За заголовок раздела и за плитку колоды берут долгим нажатием.
-   Долгое нажатие в Safari по умолчанию вызывает своё меню и выделение
-   текста — здесь это только мешает. */
-.section-head, .deck {
-  -webkit-touch-callout: none;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-/* Поднятый элемент. Выходит из потока и едет за пальцем: сдвиг ставится
-   из кода, здесь только вид. Тень заметно глубже обычной — по ней и
-   понятно, что элемент оторван от страницы и его несут. */
-.lifted {
-  position: absolute;
-  z-index: 30;
-  margin: 0;
-  box-shadow: 0 16px 34px rgba(0, 0, 0, .22), 0 4px 10px rgba(0, 0, 0, .14);
-  will-change: transform;
-  cursor: grabbing;
-}
-/* Заголовок раздела сам по себе прозрачный — под ним надо показать
-   бумагу, иначе поднятый раздел просвечивал бы насквозь */
-.section.lifted {
-  background-color: var(--paper);
-  border-radius: var(--radius-m);
-  padding: 4px 10px;
-}
-.deck.lifted:active { transform: none; }   /* сдвиг ведёт код, не :active */
-
-/* Пустое место, куда элемент встанет, если отпустить. Пунктир — тот же,
-   что у плитки «+ Колода»: рука уже знает, что это место под что-то. */
-.drop-slot {
-  border: 1.5px dashed rgba(0, 0, 0, .22);
-  border-radius: var(--radius-m);
-  background: rgba(0, 0, 0, .03);
-  box-sizing: border-box;
-}
-/* Ячейка на месте раздела повторяет и его внешние отступы: иначе
-   страница подпрыгнула бы на их высоту в момент подъёма */
-.drop-slot.as-section { margin: 22px 0 6px; }
-/* В свёрнутом разделе ячейка появляется под шапкой — ей нужен отступ */
-.section.movable > .drop-slot { margin-top: 10px; min-height: 44px; }
-
-/* Раздел, в который колода попадёт. Подсветка мягкая: она подсказывает,
-   а не кричит. */
-.drop-into { border-radius: var(--radius-m); }
-.drop-into > .section-head h2 { color: var(--ink); }
-.drop-into > .section-head .chev { color: var(--ink); }
-
-/* Раздел и плитки доезжают на новые места переходом. Сам сдвиг ставится
-   из кода приёмом FLIP, здесь только скорость. */
-.section, .deck, .add-tile { will-change: auto; }
-.section-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 36px;
-}
-.section-head h2 {
-  font: 600 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
-  text-transform: uppercase;
-  letter-spacing: .8px;
-  color: var(--ink-soft);
-  margin: 0;
-}
-
-/* Заголовок раздела — кнопка сворачивания на всю ширину */
-.section-toggle {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  background: transparent;
-  padding: 8px 0;
-  min-height: var(--tap);
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
-}
-.section-toggle:active { opacity: .6; }
-.chev {
-  color: var(--ink-soft);
-  font-size: 15px;
-  line-height: 1;
-  transition: transform .18s ease;
-  transform: rotate(0deg);
-  flex: none;
-}
-.chev.closed { transform: rotate(-90deg); }
-.section-count { color: var(--ink-soft); font-size: 13px; margin-left: auto; }
-.section.collapsed { margin-bottom: 0; }
 
 /* Список избранного в окне управления не должен вытеснять кнопки */
 .card-list.scroll { max-height: 46vh; overflow-y: auto; }
@@ -777,6 +682,67 @@ body {
   resize: vertical;
   margin-bottom: 10px;
 }
+
+/* ---------- Перенос удержанием ----------
+   Раздел блока стоит в самом конце файла намеренно. Правила ниже должны
+   перебивать обычный вид элементов, а у .lifted и .deck одинаковый вес:
+   при прежнем порядке `position: relative` у плитки колоды побеждал, и
+   поднятая плитка оставалась в потоке. Тогда left и top отсчитывались не
+   от страницы, а от её собственного места в сетке — и плитка прыгала
+   из-под пальца вниз ровно на своё смещение. */
+
+/* За заголовок раздела и за плитку колоды берут долгим нажатием.
+   Долгое нажатие в Safari по умолчанию вызывает своё меню и выделение
+   текста — здесь это только мешает. */
+.section-head, .deck {
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Поднятый элемент. Выходит из потока и едет за пальцем: сдвиг ставится
+   из кода, здесь только вид. Тень заметно глубже обычной — по ней и
+   понятно, что элемент оторван от страницы и его несут.
+   Селектор с двумя классами взят ради веса: он обязан победить
+   `position: relative` у .deck, иначе плитка не оторвётся от сетки. */
+.section.lifted, .deck.lifted {
+  position: absolute;
+  z-index: 30;
+  margin: 0;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, .22), 0 4px 10px rgba(0, 0, 0, .14);
+  will-change: transform;
+  cursor: grabbing;
+}
+/* Заголовок раздела сам по себе прозрачный — под ним надо показать
+   бумагу, иначе поднятый раздел просвечивал бы насквозь */
+.section.lifted {
+  background-color: var(--paper);
+  border-radius: var(--radius-m);
+  padding: 4px 10px;
+}
+/* Сдвиг поднятой плитки ведёт код, поэтому обычное «вдавливание»
+   нажатием тут только мешало бы */
+.deck.lifted:active { transform: none; }
+
+/* Пустое место, куда элемент встанет, если отпустить. Пунктир — тот же,
+   что у плитки «+ Колода»: рука уже знает, что это место под что-то. */
+.drop-slot {
+  border: 1.5px dashed rgba(0, 0, 0, .22);
+  border-radius: var(--radius-m);
+  background: rgba(0, 0, 0, .03);
+  box-sizing: border-box;
+}
+/* Ячейка на месте раздела повторяет и его внешние отступы: иначе
+   страница подпрыгнула бы на их высоту в момент подъёма */
+.drop-slot.as-section { margin: 22px 0 6px; }
+/* В свёрнутом разделе ячейка появляется под шапкой — ей нужен отступ */
+.section.movable > .drop-slot { margin-top: 10px; min-height: 44px; }
+
+/* Раздел, в который колода попадёт. Подсветка мягкая: она подсказывает,
+   а не кричит. */
+.drop-into { border-radius: var(--radius-m); }
+.drop-into > .section-head h2,
+.drop-into > .section-head .chev { color: var(--ink); }
 </style>
 </head>
 <body>
@@ -1802,9 +1768,15 @@ body {
     });
   }
 
-  /** Все узлы, которые могут поехать при перестановке ячейки. */
+  /**
+    * Все узлы, которые могут поехать при перестановке ячейки.
+    *
+    * Поднятый исключаем: его ведёт палец, и общий сдвиг от FLIP затёр бы
+    * этот ход — элемент дёрнулся бы в сторону от пальца.
+    */
   const shiftable = () => list('movable')
-    .concat(list('deck')).concat(list('add-tile'));
+    .concat(list('deck')).concat(list('add-tile'))
+    .filter((n) => !/\blifted\b/.test(n.className || ''));
 
   /**
    * Ожидание удержания. Общее для разделов и колод: отличается только
@@ -1822,10 +1794,13 @@ body {
       cancelHold();
       holdTimer = setTimeout(() => {
         holdTimer = null;
+        // Сначала поднимаем, и только потом забираем указатель себе:
+        // подъём переносит узел в другое место разметки, а перенос узла
+        // сбрасывает захват — в обратном порядке он бы просто потерялся
+        pick(id, x0, y0);
         if (node.setPointerCapture) {
           try { node.setPointerCapture(id); } catch (e) { /* не поддержано */ }
         }
-        pick(id, x0, y0);
       }, HOLD_MS);
     });
 
@@ -1879,6 +1854,16 @@ body {
     const parent = node.parentNode;
     if (parent && parent.insertBefore) parent.insertBefore(slot, node);
     else if (parent) parent.appendChild(slot);
+
+    // Переносим поднятый узел прямо в страницу.
+    //
+    // Это не украшение, а необходимость. Элемент с absolute отсчитывается
+    // от ближайшего предка со своим сдвигом, а FLIP как раз и ставит сдвиг
+    // на разделы и плитки. Пока плитка лежала внутри своего раздела, стоило
+    // разделу получить сдвиг — и отсчёт для плитки начинался уже от него:
+    // плитка прыгала из-под пальца. В самой странице сдвиг один и тот же
+    // всегда, поэтому координаты остаются теми, что померили при подъёме.
+    if (page && page.appendChild) page.appendChild(node);
 
     return { page: page, base: base, box: box, slot: slot,
              id: id, x0: x0, y0: y0, scroll0: pageY(), first: true };
