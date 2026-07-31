@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-Cp43WVNpiM4tqfOlxDN9XM1M2/mydEHGgmFmYjclscI=';
-               style-src 'sha256-4DOBMOQE1IlUlAFhNKKa1cH/z7LwWda2Ju/xq/a4bqU=';
+               script-src 'sha256-N6MthB3ME7FjceNiGDXeE6/4sNAVXAheZtHCIZuFNNU=';
+               style-src 'sha256-kfhkadXgsQYU/+mA6X50p8gadQwRCRgihdw7V02w5z4=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -424,55 +424,52 @@ body {
 .mk-i { font-style: italic; }
 .mk { text-underline-offset: 2px; }
 
-/* Панель оформления под полем ввода. В покое её не видно: она нужна
-   только когда есть что оформлять. */
-.rich-bar {
-  display: flex;
-  gap: 8px;
-  margin: -4px 2px 0;
-  max-height: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition: max-height .18s ease, opacity .18s ease, margin .18s ease;
+/* Поле текста аффирмации. Не обычное поле ввода: в нём весь текст был бы
+   одного вида, и показать жирным только выделенное слово нечем. Здесь
+   область, где оформление рисуется теми же кусками, что и на карточке. */
+.rich-input {
+  display: block;
+  width: 100%;
+  min-height: 132px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-m);
+  background: var(--sheet);
+  color: var(--ink);
+  /* 16 px обязательны: при меньшем Safari на iPhone увеличивает страницу */
+  font: 400 16px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Helvetica Neue", Arial, sans-serif;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
 }
-.rich-bar.on { max-height: 56px; opacity: 1; margin: 6px 2px 2px; }
-/* По правой кнопке мыши панель коротко подсвечивается — иначе неясно,
-   что меню заменили на неё */
-.rich-bar.flash { outline: 2px solid var(--ink-soft); outline-offset: 4px;
-                  border-radius: 10px; }
+.rich-input:focus { outline: 2px solid var(--ink-soft); outline-offset: 1px; }
+/* Пустое поле не должно схлопываться в полоску */
+.rich-input:empty::before { content: ''; display: inline-block; }
+
+/* Кнопки оформления. Стоят всегда, а не появляются по выделению: так
+   сразу видно, что оформить текст вообще можно. */
+.rich-bar { display: flex; gap: 8px; margin: 8px 2px 2px; }
 .rich-btn {
-  min-width: 44px;
-  min-height: 38px;
+  min-width: 48px;
+  min-height: 40px;
   border: 1px solid var(--hair);
   border-radius: 10px;
   background: var(--sheet);
   color: var(--ink);
-  font: 500 16px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 500 17px/1 -apple-system, BlinkMacSystemFont, sans-serif;
   cursor: pointer;
 }
 .rich-btn:active { background: rgba(0, 0, 0, .06); }
-/* Уже применённое оформление видно по самой кнопке */
+/* Оформление, которое уже стоит на выделенном, видно по самой кнопке */
 .rich-btn.on { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .rich-btn[aria-label="Жирный"] { font-weight: 800; }
 .rich-btn[aria-label="Курсив"] { font-style: italic; }
 .rich-btn[aria-label="Подчёркнутый"] { text-decoration: underline; }
 .rich-btn[aria-label="Зачёркнутый"] { text-decoration: line-through; }
-
-/* Как это будет выглядеть на карточке */
-.rich-preview {
-  margin: 4px 2px 0;
-  padding: 12px 14px;
-  border-radius: var(--radius-m);
-  background: var(--card-yellow);
-  border: 1px solid var(--card-yellow-edge);
-  color: #2B2408;
-  font: 500 17px/1.35 -apple-system, BlinkMacSystemFont, sans-serif;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 22vh;
-  overflow-y: auto;
-}
-.rich-preview:empty { display: none; }
 
 /* ---------- Список карточек внутри колоды ---------- */
 .card-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
@@ -2009,7 +2006,13 @@ body {
   function paintText(node, text, marks) {
     clear(node);
     const clean = sanitizeMarks(marks, text.length);
-    if (!clean.length) { node.textContent = text; return node; }
+    // Даже неоформленный текст кладём отдельным текстовым узлом, а не в
+    // textContent. Для показа разницы нет, но в поле правки по этим узлам
+    // считается, какие символы выделены, — а textContent их не создаёт.
+    if (!clean.length) {
+      if (text) node.appendChild(document.createTextNode(text));
+      return node;
+    }
     const cells = marksToCells(clean, text.length);
     let at = 0;
     while (at < text.length) {
@@ -2023,7 +2026,10 @@ body {
         const cls = ['mk'];
         if (m.indexOf('b') >= 0) cls.push('mk-b');
         if (m.indexOf('i') >= 0) cls.push('mk-i');
-        const span = el('span', { class: cls.join(' '), text: piece });
+        // Текст внутрь кладём отдельным узлом, как и неоформленные куски:
+        // по этим узлам поле правки считает выделение
+        const span = el('span', { class: cls.join(' ') });
+        span.appendChild(document.createTextNode(piece));
         // Подчёркивание и зачёркивание задаём одним свойством: два
         // отдельных правила перебили бы друг друга, и вместе они бы
         // никогда не показались
@@ -2038,26 +2044,85 @@ body {
   }
 
   /**
-   * Панель оформления под полем ввода: Ж, К, Ч, зачёркнутый.
+   * Поле текста аффирмации с оформлением.
    *
-   * Кнопки появляются, когда в поле что-то выделено, и действуют ровно на
-   * выделенное. На компьютере то же самое вызывается правой кнопкой мыши
-   * по выделению.
+   * Обычное поле ввода тут не годится: в нём весь текст одного вида, и
+   * показать жирным только выделенное слово физически нечем. Поэтому
+   * поле — редактируемая область, а оформление в ней рисуется теми же
+   * кусками, что и на самой карточке. Нажали Ж — выделенное сразу стало
+   * жирным, ещё раз — вернулось обычным. Ждать сохранения не нужно.
    *
-   * Почему панель, а не пункты в системном меню телефона. Меню «Вырезать
-   * / Скопировать / Вставить» принадлежит iOS, и своих кнопок веб-стра­ница
-   * туда добавить не может — такой возможности у браузера нет. Панель же
-   * появляется прямо на месте и работает одинаково и на телефоне, и на
-   * компьютере.
+   * Разметка при этом по-прежнему нигде не разбирается: содержимое
+   * собирается из частей через createElement, а наружу отдаётся простым
+   * текстом плюс список отметок.
    */
-  function attachRich(sheet, input, startMarks) {
-    let marks = sanitizeMarks(startMarks, (input.value || '').length);
-    let last = input.value || '';
+  function richField(sheet, f) {
+    let text = String(f.value || '');
+    let marks = sanitizeMarks(f.marks || [], text.length);
 
-    const bar = el('div', { class: 'rich-bar', attrs: { 'aria-hidden': 'true' } });
-    const preview = el('div', { class: 'rich-preview' });
-    const hint = el('p', { class: 'hint',
-      text: 'Выделите слово или кусок текста — появятся кнопки оформления.' });
+    const box = el('div', {
+      class: 'rich-input',
+      attrs: { contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true',
+               'aria-label': f.label, spellcheck: 'true' },
+    });
+
+    /** Сколько символов идёт до этой точки в редактируемой области. */
+    const offsetOf = (node, off) => {
+      let total = 0, done = false;
+      const walk = (n) => {
+        if (done) return;
+        if (n === node) {
+          if (n.nodeType === 3) { total += off; done = true; return; }
+          // Точка стоит между детьми: считаем всё, что левее
+          const kids = n.childNodes || [];
+          for (let i = 0; i < Math.min(off, kids.length); i++) walk(kids[i]);
+          done = true;
+          return;
+        }
+        if (n.nodeType === 3) { total += (n.nodeValue || '').length; return; }
+        const kids = n.childNodes || [];
+        for (let i = 0; i < kids.length; i++) { walk(kids[i]); if (done) return; }
+      };
+      walk(box);
+      return total;
+    };
+
+    /** Что сейчас выделено внутри поля. */
+    const selection = () => {
+      const sel = (typeof window !== 'undefined' && window.getSelection)
+        ? window.getSelection() : null;
+      if (!sel || !sel.rangeCount || !sel.anchorNode || !sel.focusNode) return null;
+      const a = offsetOf(sel.anchorNode, sel.anchorOffset);
+      const b = offsetOf(sel.focusNode, sel.focusOffset);
+      const s = Math.min(a, b), e = Math.max(a, b);
+      return e > s ? { s: s, e: e } : null;
+    };
+
+    /** Вернуть выделение на прежние символы после перерисовки. */
+    const select = (from, to) => {
+      const sel = (typeof window !== 'undefined' && window.getSelection)
+        ? window.getSelection() : null;
+      if (!sel || !document.createRange) return;
+      const nodes = [];
+      const walk = (n) => {
+        if (n.nodeType === 3) { nodes.push(n); return; }
+        (n.childNodes || []).forEach(walk);
+      };
+      walk(box);
+      let at = 0, a = null, ao = 0, b = null, bo = 0;
+      for (const n of nodes) {
+        const len = (n.nodeValue || '').length;
+        if (a === null && from <= at + len) { a = n; ao = from - at; }
+        if (b === null && to <= at + len) { b = n; bo = to - at; }
+        at += len;
+      }
+      if (!a || !b) return;
+      const r = document.createRange();
+      r.setStart(a, ao); r.setEnd(b, bo);
+      sel.removeAllRanges(); sel.addRange(r);
+    };
+
+    const paint = () => { paintText(box, text, marks); };
 
     const buttons = [
       { m: 'b', label: 'Ж', title: 'Жирный' },
@@ -2065,93 +2130,86 @@ body {
       { m: 'u', label: 'Ч', title: 'Подчёркнутый' },
       { m: 's', label: 'З', title: 'Зачёркнутый' },
     ];
+    const bar = el('div', { class: 'rich-bar' });
 
-    const redraw = () => {
-      paintText(preview, input.value || '', marks);
-      // Пустой текст — показывать нечего
-      if (!(input.value || '').trim()) preview.textContent = '';
-    };
-
-    /** Что сейчас выделено. Ничего не выделено — обе границы совпадают. */
-    const range = () => {
-      const s = Number(input.selectionStart), e = Number(input.selectionEnd);
-      if (!isFinite(s) || !isFinite(e)) return null;
-      return e > s ? { s: s, e: e } : null;
-    };
-
+    /** Подсветить кнопки того оформления, что уже стоит на выделенном. */
     const refresh = () => {
-      const r = range();
-      bar.className = 'rich-bar' + (r ? ' on' : '');
-      bar.setAttribute('aria-hidden', r ? 'false' : 'true');
-      const cells = r ? marksToCells(marks, (input.value || '').length) : null;
+      const r = selection();
+      const cells = r ? marksToCells(marks, text.length) : null;
       buttons.forEach((b) => {
-        if (!b.node) return;
-        let all = !!r;
+        let on = !!r;
         if (r) {
           for (let i = r.s; i < r.e; i++) {
-            if (cells[i].indexOf(b.m) < 0) { all = false; break; }
+            if (cells[i].indexOf(b.m) < 0) { on = false; break; }
           }
         }
-        b.node.setAttribute('aria-pressed', String(all));
-        b.node.className = 'rich-btn' + (all ? ' on' : '');
+        b.node.setAttribute('aria-pressed', String(on));
+        b.node.className = 'rich-btn' + (on ? ' on' : '');
       });
     };
 
     buttons.forEach((b) => {
       b.node = el('button', {
         class: 'rich-btn',
-        attrs: { type: 'button', 'aria-label': b.title, 'aria-pressed': 'false',
-                 title: b.title },
+        attrs: { type: 'button', 'aria-label': b.title, title: b.title,
+                 'aria-pressed': 'false' },
         text: b.label,
       });
-      // Не даём полю потерять выделение: без этого к моменту нажатия
-      // выделять было бы уже нечего
-      b.node.addEventListener('pointerdown', (ev) => { if (ev.preventDefault) ev.preventDefault(); });
+      // Не даём полю потерять выделение, пока палец идёт к кнопке
+      b.node.addEventListener('pointerdown', (ev) => {
+        if (ev.preventDefault) ev.preventDefault();
+      });
+      b.node.addEventListener('mousedown', (ev) => {
+        if (ev.preventDefault) ev.preventDefault();
+      });
       b.node.addEventListener('click', () => {
-        const r = range();
-        if (!r) return;
-        marks = toggleMark(marks, (input.value || '').length, r.s, r.e, b.m);
-        redraw();
+        const r = selection();
+        if (!r) return;                       // нечего оформлять
+        marks = toggleMark(marks, text.length, r.s, r.e, b.m);
+        paint();                              // изменения видны сразу, в поле
+        select(r.s, r.e);                     // выделение остаётся — можно нажать ещё
         refresh();
-        // Возвращаем выделение — можно нажать вторую кнопку подряд
-        if (input.focus) input.focus();
-        if (input.setSelectionRange) {
-          try { input.setSelectionRange(r.s, r.e); } catch (e) { /* не поддержано */ }
-        }
       });
       bar.appendChild(b.node);
     });
 
-    // Правая кнопка мыши по выделению — та же панель, только заметная
-    input.addEventListener('contextmenu', (ev) => {
-      if (!range()) return;              // нет выделения — обычное меню
+    // Правка текста: отметки едут следом, перерисовку не делаем — иначе
+    // сбивалась бы точка ввода и подсказки клавиатуры на телефоне
+    box.addEventListener('input', () => {
+      let now = box.textContent || '';
+      if (f.max && now.length > f.max) now = now.slice(0, f.max);
+      marks = shiftMarks(marks, text, now);
+      text = now;
+      refresh();
+    });
+    ['keyup', 'pointerup', 'mouseup', 'select', 'focus'].forEach((type) => {
+      box.addEventListener(type, refresh);
+    });
+
+    // Перевод строки вставляем сами: браузеры иначе норовят создать
+    // вложенные блоки, а нам нужен ровно один плоский текст
+    box.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter' || ev.shiftKey) return;
       if (ev.preventDefault) ev.preventDefault();
-      refresh();
-      bar.className = 'rich-bar on flash';
-      setTimeout(() => {
-        bar.className = 'rich-bar' + (range() ? ' on' : '');
-      }, 900);
+      const r = selection() || { s: text.length, e: text.length };
+      const at = r.s;
+      text = text.slice(0, at) + '\n' + text.slice(r.e);
+      marks = shiftMarks(marks, box.textContent || '', text);
+      paint();
+      select(at + 1, at + 1);
     });
 
-    // Текст правят — отметки едут вместе с ним
-    input.addEventListener('input', () => {
-      const now = input.value || '';
-      marks = shiftMarks(marks, last, now);
-      last = now;
-      redraw();
-      refresh();
-    });
-    ['select', 'keyup', 'pointerup', 'focus'].forEach((type) => {
-      input.addEventListener(type, refresh);
-    });
-
-    input.__marks = () => sanitizeMarks(marks, (input.value || '').length);
-
-    sheet.appendChild(bar);
-    sheet.appendChild(hint);
-    sheet.appendChild(preview);
-    redraw();
+    paint();
     refresh();
+    sheet.appendChild(el('label', { class: 'field' }, [
+      el('span', { text: f.label }), box,
+    ]));
+    sheet.appendChild(bar);
+
+    return {
+      get value() { return box.textContent || ''; },
+      __marks: () => sanitizeMarks(marks, (box.textContent || '').length),
+    };
   }
 
   // ------------------------------------------------------------------
@@ -3788,6 +3846,8 @@ body {
         ]));
         continue;
       }
+      // Текст аффирмации — своё поле: в нём оформление видно сразу
+      if (f.rich) { inputs[f.key] = richField(sheet, f); continue; }
       const input = f.type === 'textarea'
         ? el('textarea', { attrs: { maxlength: String(f.max), rows: '6' } })
         : el('input', { attrs: { type: 'text', maxlength: String(f.max),
@@ -3797,11 +3857,6 @@ body {
       sheet.appendChild(el('label', { class: 'field' }, [
         el('span', { text: f.label }), input,
       ]));
-      // Оформление куска текста. Обычное поле ввода оставлено намеренно:
-      // клавиатура, выделение, автозамена и вставка на телефоне работают
-      // ровно так, как человек привык, а оформление живёт рядом отдельным
-      // списком отметок и на сам текст не влияет.
-      if (f.rich) attachRich(sheet, input, f.marks || []);
     }
 
     const close = () => {
