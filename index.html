@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-PCZ/YYre/K2HkxKCBy4M8+DAmif6xiWFtLc++rxzu1Y=';
-               style-src 'sha256-GAQv+y8AIeIEdhlDdfZEIYexKh+vwIyaN26MyiHtESQ=';
+               script-src 'sha256-KOgDQwhsunjY1Lpv/RogQWYPuO2IVQXgZCVfr+aVcf4=';
+               style-src 'sha256-KnSmrC1JVhMa1MXwJ5B8Xxkuu1V2MFchljqQlTP6lcE=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -779,6 +779,9 @@ body {
 .sheet-actions .btn { flex: 1; }
 
 .hint { font-size: 13px; color: var(--ink-soft); margin: 10px 2px 0; }
+/* Отметка сборки. Нарочно тихая: она справочная, но должна быть видна —
+   по ней проверяют, одна ли версия открыта на телефоне и на компьютере. */
+.build-stamp { text-align: center; opacity: .6; font-size: 12px; margin-top: 14px; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
@@ -947,6 +950,14 @@ body {
 
 (function () {
   const STORE_KEY = 'affirmations.v1';
+  // Отметка сборки. Подставляется при сборке файла; в версии для
+  // разработки так и остаётся с решётками. Нужна, чтобы на каждом
+  // устройстве можно было своими глазами убедиться, какая версия
+  // открыта: иначе «на телефоне работает, на компьютере нет» проверить
+  // нечем — а чаще всего это просто старый файл на одном из них.
+  const BUILD = '31.07.2026, 19:33';
+  const buildLabel = () => (BUILD.indexOf('#') >= 0
+    ? 'версия для разработки' : 'версия от ' + BUILD);
 
   // Ограничения длины: защита и от случайной вставки книги, и от попытки
   // раздуть хранилище до отказа
@@ -4514,6 +4525,9 @@ body {
       });
     }
 
+    /** Отметка сборки внизу окна: по ней видно, что за версия открыта. */
+    const stamp = () => el('p', { class: 'hint build-stamp', text: buildLabel() });
+
     function drawMain() {
     clear(sheet);
     sheet.appendChild(el('h3', { text: 'Синхронизация' }));
@@ -4576,6 +4590,7 @@ body {
                      on: { click: close } }),
     ]));
     sheet.appendChild(fileInput);
+    sheet.appendChild(stamp());
     }
 
     drawMain();
