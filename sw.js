@@ -12,7 +12,10 @@
  */
 'use strict';
 
-const VERSION = 'affirmations-v1';
+// Номер меняется при каждой правке обработчика. На «активации» все чужие
+// кеши удаляются, поэтому смена номера — это ещё и способ выбросить
+// накопленное старьё разом.
+const VERSION = 'affirmations-v2';
 const SHELL = [
   './',
   './index.html',
@@ -49,8 +52,20 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   if (new URL(req.url).origin !== self.location.origin) return;
 
+  // Саму страницу берём в обход кеша браузера.
+  //
+  // Без этого приложение, поставленное в док или на экран «Домой», может
+  // неделями показывать старую версию: хостинг отдаёт страницу с
+  // разрешением хранить её десять минут, а установленное приложение
+  // страницу лишний раз не перезапрашивает вовсе. Человек обновляет файл
+  // на хостинге, на телефоне видит новое, на компьютере — старое, и
+  // понять, почему, невозможно.
+  const fresh = (req.mode === 'navigate' || /\.html?$/.test(new URL(req.url).pathname))
+    ? new Request(req, { cache: 'no-store' })
+    : req;
+
   event.respondWith(
-    fetch(req)
+    fetch(fresh)
       .then((res) => {
         // Копию кладём в кеш на случай, когда сети не будет
         const copy = res.clone();

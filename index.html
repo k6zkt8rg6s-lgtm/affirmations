@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-KOgDQwhsunjY1Lpv/RogQWYPuO2IVQXgZCVfr+aVcf4=';
+               script-src 'sha256-H5hm2SqoPyh3a3EciLPijrxDRfC3kySFAL1RjwWCOl8=';
                style-src 'sha256-KnSmrC1JVhMa1MXwJ5B8Xxkuu1V2MFchljqQlTP6lcE=';
                img-src 'self' data:;
                media-src blob:;
@@ -955,7 +955,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '31.07.2026, 19:33';
+  const BUILD = '31.07.2026, 19:53';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -4528,6 +4528,36 @@ body {
     /** Отметка сборки внизу окна: по ней видно, что за версия открыта. */
     const stamp = () => el('p', { class: 'hint build-stamp', text: buildLabel() });
 
+    /**
+     * Заставить приложение перечитать себя заново.
+     *
+     * Приложение, поставленное в док или на экран «Домой», живёт своей
+     * жизнью: у него свой кеш и свой обработчик офлайна, и обновлённый
+     * файл на хостинге оно может не увидеть неделями. Получается самое
+     * неприятное — на телефоне новая версия, на компьютере старая, и
+     * почему, снаружи не видно. Эта кнопка выбрасывает всё накопленное и
+     * перечитывает страницу.
+     */
+    const refreshApp = () => {
+      report('Выбрасываю накопленное и перечитываю…', 'wait');
+      const jobs = [];
+      if (typeof caches !== 'undefined' && caches.keys) {
+        jobs.push(caches.keys()
+          .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+          .catch(() => {}));
+      }
+      if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+        jobs.push(navigator.serviceWorker.getRegistrations()
+          .then((regs) => Promise.all(regs.map((r) => r.unregister())))
+          .catch(() => {}));
+      }
+      Promise.all(jobs).then(() => {
+        // Карточки и записи это не трогает: они лежат в хранилище
+        // браузера, а не в кеше страницы
+        if (typeof location !== 'undefined' && location.reload) location.reload();
+      });
+    };
+
     function drawMain() {
     clear(sheet);
     sheet.appendChild(el('h3', { text: 'Синхронизация' }));
@@ -4590,6 +4620,20 @@ body {
                      on: { click: close } }),
     ]));
     sheet.appendChild(fileInput);
+
+    // Обновление приложения. Отдельно от переноса карточек: это про сам
+    // код приложения, а не про данные.
+    sheet.appendChild(el('div', { class: 'sync-row' }, [
+      el('button', {
+        class: 'btn sec', attrs: { type: 'button' },
+        text: 'Обновить приложение',
+        on: { click: refreshApp },
+      }),
+      el('p', { class: 'hint', text:
+        'Если на одном устройстве новое, а на другом старое — нажмите здесь. '
+        + 'Приложение перечитает себя заново. Карточки и записи не пострадают: '
+        + 'они хранятся отдельно от самого приложения.' }),
+    ]));
     sheet.appendChild(stamp());
     }
 
