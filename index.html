@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-GTlr1vqUqeH9Ko7/01sAbwBX3Nllw8lPwNCH2b8dhEU=';
-               style-src 'sha256-ebcQYjJFIQMcX4MSTs+LrmNOW+6YqT4rj2qrzpioXp4=';
+               script-src 'sha256-VAYT66dO/D75cWKCuUG7noo9bcj0oe9age8SMGxQzmo=';
+               style-src 'sha256-HU40ufXU+ALGYH/ztRMlS24B+laNyWhqWHiBoVHYiT8=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -208,7 +208,11 @@ body {
   bottom: 12px;
 }
 .audio-bar:empty { display: none; }
-.audio-row { display: flex; align-items: center; gap: 10px; }
+/* Кнопки записи и удаления прижаты друг к другу и стоят парой у правого
+   края: так дорожке достаётся вся оставшаяся ширина, а рука тянется к
+   одному месту, а не к двум разным. */
+.audio-row { display: flex; align-items: center; gap: 8px; }
+.audio-side { display: flex; align-items: center; gap: 0; flex: none; }
 .audio-btn {
   min-width: 40px;
   min-height: 40px;
@@ -318,8 +322,9 @@ body {
   background: transparent;
   color: rgba(43, 36, 8, .55);
   font-size: 15px;
-  min-width: 32px;
-  min-height: 32px;
+  min-width: 28px;
+  min-height: 30px;
+  padding: 0;
   cursor: pointer;
   flex: none;
 }
@@ -331,20 +336,26 @@ body {
 .audio-more {
   border: 0;
   background: transparent;
-  color: #E23B3B;
-  font-size: 15px;
-  min-width: 32px;
-  min-height: 32px;
+  /* Тот же приглушённый тёмный, что у кнопки play и у крестика.
+     Красной точке здесь не место: рядом с текстом аффирмации она
+     перетягивает взгляд на себя. */
+  color: rgba(43, 36, 8, .55);
+  font-size: 11px;          /* точка мельче крестика — она и тише по смыслу */
+  min-width: 28px;
+  min-height: 30px;
   border-radius: 50%;
   cursor: pointer;
   flex: none;
-  transition: background .18s ease;
+  transition: background .18s ease, color .18s ease;
 }
-.audio-more:active { background: rgba(226, 59, 59, .14); }
-/* Идёт дозапись: знак меняется на «стоп», и кнопка пульсирует —
-   то же поведение, что у главной кнопки записи */
+.audio-more:active { background: rgba(0, 0, 0, .10); }
+/* Идёт дозапись: знак меняется на «стоп» и наливается цветом.
+   Пульсирует здесь только эта кнопка, поэтому пропустить работающую
+   запись невозможно и без красного. */
 .audio-more.on {
-  background: rgba(226, 59, 59, .14);
+  color: #2B2408;
+  font-size: 13px;
+  background: rgba(0, 0, 0, .14);
   animation: pulse 1.1s infinite;
 }
 /* Пока пишем, слушать и удалять нечего */
@@ -990,7 +1001,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '31.07.2026, 22:13';
+  const BUILD = '31.07.2026, 22:55';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1061,6 +1072,20 @@ body {
   // проигрывает их как одну запись.
   const AUDIO_PARTS_MAX = 12;
   const AUDIO_CAP = 300;    // потолок звука на карточку, секунды
+
+  // Буквы оформления текста и предел числа отметок.
+  //
+  // Стоят именно здесь, в самом начале, и переносить их вниз нельзя.
+  // Сохранённые карточки читаются сразу при запуске приложения, а разбор
+  // отметок обращается к этим двум значениям. Пока объявление лежало
+  // ниже по файлу, до него на тот момент ещё не доходила очередь, и
+  // запуск обрывался с ошибкой — приложение открывалось пустым фоном.
+  // Заметно это было только у тех, кто успел что-то выделить жирным:
+  // у карточки без оформления разбор заканчивается раньше и до этих
+  // значений не добирается. Отсюда и «на телефоне работает, на
+  // компьютере белый экран».
+  const MARKS = 'bius';        // b — жирный, i — курсив, u — подчёркнутый, s — зачёркнутый
+  const MARK_LIMIT = 300;      // столько отметок на карточку хватит с запасом
 
   // Имя файла обмена между устройствами.
   //
@@ -2081,8 +2106,10 @@ body {
   // ней и защита от подсунутого кода. Отметки же — это числа и четыре
   // буквы, подделать через них нечего.
   // ------------------------------------------------------------------
-  const MARKS = 'bius';        // b — жирный, i — курсив, u — подчёркнутый, s — зачёркнутый
-  const MARK_LIMIT = 300;      // столько отметок на карточку хватит с запасом
+  // MARKS и MARK_LIMIT объявлены в самом начале файла — рядом с
+  // остальными пределами. Здесь их нет намеренно: sanitizeMarks
+  // вызывается при чтении сохранённого, а это происходит задолго до
+  // этого места. См. подробное объяснение там.
 
   /** Привести отметки к порядку: целые числа, внутри текста, без мусора. */
   function sanitizeMarks(list, len) {
@@ -3986,8 +4013,8 @@ body {
       attrs: { type: 'button', 'aria-label': 'Удалить запись', tabindex: '-1' },
       text: '✕',
     });
-    bar.appendChild(el('div', { class: 'audio-row' },
-      [face.play, face.wave, more, del]));
+    bar.appendChild(el('div', { class: 'audio-row' }, [face.play, face.wave,
+      el('div', { class: 'audio-side' }, [more, del])]));
     bar.appendChild(face.label);
   }
 
@@ -4079,9 +4106,28 @@ body {
       },
     });
 
-    let audio = null, loading = false;
+    // ------------------------------------------------------------------
+    // Два проигрывателя по очереди.
+    //
+    // Куски записи лежат отдельными файлами, и стык между ними — самое
+    // уязвимое место. Пока источник менялся у одного и того же элемента,
+    // браузеру в момент стыка приходилось бросать текущий звук и
+    // загружать новый: получался щелчок и провал в тишину. Теперь
+    // следующий кусок заранее заряжается во второй элемент, и к моменту
+    // стыка он уже готов — остаётся только запустить.
+    //
+    // Оба элемента будятся в тот же миг, когда человек нажимает
+    // «играть»: на iPhone звучать может только тот элемент, которому
+    // разрешили это внутри нажатия. Если второй разбудить не удалось,
+    // работает прежний путь через первый элемент — хуже, но не молча.
+    // ------------------------------------------------------------------
+    const pool = [null, null];
+    let live = 0;               // какой из двух сейчас звучит
+    let audio = null;           // он же, под привычным именем
+    let loading = false;
     const urls = [];            // ссылки на куски, чтобы не доставать дважды
     let want = -1;              // куда перемотать, как только кусок загрузится
+    const FADE_MS = 90;         // затухание на стыке
 
     /** Ссылка на кусок i. null — куска нет в хранилище. */
     function partUrl(i) {
@@ -4094,13 +4140,97 @@ body {
     }
 
     /**
-     * Поставить в проигрыватель кусок i.
+     * Плавно вывести кусок на полную громкость.
      *
-     * Элемент звука один на все куски, и это не мелочь. На iPhone
-     * проиграть можно только тот элемент, который человек уже разбудил
-     * нажатием; новый, созданный по ходу дела, Safari молча откажется
-     * запускать — продолжение оборвалось бы на первом же стыке.
-     * Поэтому меняем источник, а сам элемент оставляем прежним.
+     * Начало новой записи всегда даёт лёгкий призвук: микрофон только
+     * что включился. Без сглаживания он слышен на стыке как треск.
+     * На iPhone громкостью управляет система, и присвоение там просто
+     * ничего не делает — стык всё равно остаётся ровным за счёт того,
+     * что кусок заряжен заранее.
+     */
+    function fadeIn(a) {
+      if (typeof requestAnimationFrame !== 'function') return;
+      const from = Date.now();
+      const step = () => {
+        if (a !== audio) { try { a.volume = 1; } catch (e) { /* нельзя */ } return; }
+        const k = Math.min(1, (Date.now() - from) / FADE_MS);
+        try { a.volume = k; } catch (e) { return; }
+        if (k < 1) requestAnimationFrame(step);
+      };
+      try { a.volume = 0; } catch (e) { return; }
+      requestAnimationFrame(step);
+    }
+
+    /** Зарядить кусок i в свободный элемент — заранее, а не на стыке. */
+    function preload(i) {
+      if (!many || i < 0 || i >= list.length) return;
+      const spare = pool[1 - live];
+      if (!spare || spare.__part === i) return;
+      partUrl(i).then((u) => {
+        if (!u || spare !== pool[1 - live]) return;
+        spare.__part = i;
+        spare.src = u;
+        spare.preload = 'auto';
+        if (typeof spare.load === 'function') spare.load();
+      }).catch(() => {});
+    }
+
+    /** Разбудить второй элемент, пока мы внутри нажатия человека. */
+    let woke = false;
+    function wakeSpare() {
+      if (woke || !many) return;
+      const spare = pool[1 - live];
+      if (!spare || !spare.src) return;
+      woke = true;
+      try {
+        spare.muted = true;              // будим беззвучно
+        const pr = spare.play();
+        const settle = () => {
+          spare.pause();
+          try { spare.currentTime = 0; } catch (e) { /* ещё не готов */ }
+          spare.muted = false;
+        };
+        if (pr && pr.then) pr.then(settle).catch(() => { spare.muted = false; woke = false; });
+        else settle();
+      } catch (e) { woke = false; }
+    }
+
+    /**
+     * Передать звук следующему куску — тот самый стык.
+     *
+     * Если следующий кусок уже заряжен во второй элемент, переключение
+     * мгновенное. Если нет (не успели или элемент не разбудили) —
+     * возвращаемся к прежнему способу через тот же элемент.
+     */
+    function handOver(i) {
+      const spare = pool[1 - live];
+      if (!spare || spare.__part !== i || !spare.src) return goPart(i, true);
+      const prev = audio;
+      live = 1 - live;
+      audio = spare;
+      idx = i;
+      // Будили его беззвучно — снять глушение обязательно, иначе
+      // продолжение записи проиграло бы в полной тишине
+      audio.muted = false;
+      fadeIn(audio);
+      const pr = audio.play();
+      if (pr && pr.catch) {
+        pr.catch(() => {
+          // Не пустили — отыгрываем назад и идём прежним путём
+          live = 1 - live; audio = prev;
+          goPart(i, true);
+        });
+      }
+      if (prev) { try { prev.currentTime = 0; } catch (e) { /* неважно */ } }
+      preload(i + 1);
+      return Promise.resolve(audio);
+    }
+
+    /**
+     * Поставить кусок i в тот элемент, который звучит сейчас.
+     *
+     * Запасной путь: перемотка на другой кусок и случай, когда второй
+     * элемент оказался не готов.
      */
     function goPart(i, autoplay) {
       return partUrl(i).then((u) => {
@@ -4110,14 +4240,17 @@ body {
           return null;
         }
         idx = i;
+        audio.__part = i;
         audio.src = u;
         // Без явной перезагрузки Safari какое-то время держит прежний
         // кусок и отдаёт его время — черта прыгала бы назад
         if (typeof audio.load === 'function') audio.load();
         if (autoplay) {
+          try { audio.volume = 1; } catch (e) { /* нельзя */ }
           const pr = audio.play();
           if (pr && pr.catch) pr.catch(() => {});
         }
+        preload(i + 1);
         return audio;
       }).catch(() => null);
     }
@@ -4140,35 +4273,72 @@ body {
           return null;
         }
         idx = 0;
-        audio = new Audio(u);
-        audio.preload = 'metadata';
-        audio.ontimeupdate = () => { if (audio.paused) setTime(at()); };
-        audio.onloadedmetadata = () => {
-          // Перемотку на другой кусок выставляем только здесь: пока он
-          // не загружен, браузер её просто не примет
-          if (want >= 0) {
-            try { audio.currentTime = want; } catch (e) { /* не принял */ }
-            want = -1;
-          }
-          setTime(at());
+        // Обработчики одни на оба элемента и молчат, пока элемент не
+        // звучит: заряжаемый кусок не должен двигать черту и подписи
+        const wire = (a) => {
+          a.preload = 'auto';
+          a.ontimeupdate = () => {
+            if (a !== audio) return;
+            // Страховка на случай, когда экран погас или приложение ушло
+            // в фон: покадровые вызовы там останавливаются, и нарастание
+            // громкости могло бы замереть на нуле — продолжение записи
+            // играло бы беззвучно. Это событие приходит и в фоне.
+            if (a.currentTime > 0.4 && a.volume < 1) {
+              try { a.volume = 1; } catch (e) { /* громкость не наша */ }
+            }
+            if (a.paused) setTime(at());
+          };
+          a.onloadedmetadata = () => {
+            if (a !== audio) return;
+            // Перемотку на другой кусок выставляем только здесь: пока он
+            // не загружен, браузер её просто не примет
+            if (want >= 0) {
+              try { a.currentTime = want; } catch (e) { /* не принял */ }
+              want = -1;
+            }
+            setTime(at());
+          };
+          a.onplay = () => {
+            if (a !== audio) return;
+            play.textContent = '❚❚'; playing = true;
+            setTime(at()); stopFollow(); follow();
+          };
+          a.onpause = () => {
+            if (a !== audio) return;
+            play.textContent = '▶'; playing = false;
+            stopFollow(); setTime(at());
+          };
+          a.onended = () => {
+            if (a !== audio) return;
+            // Кусок кончился — сразу передаём звук следующему, чтобы для
+            // человека это осталось одной непрерывной записью
+            if (many && idx + 1 < list.length) { handOver(idx + 1); return; }
+            play.textContent = '▶'; playing = false; stopFollow();
+            setTime(0);
+            if (many) goPart(0, false);   // вернуться к началу для повтора
+          };
+          a.onerror = () => {
+            if (a === audio) label.textContent = 'Не удалось воспроизвести';
+          };
+          return a;
         };
-        audio.onplay = () => {
-          play.textContent = '❚❚'; playing = true;
-          setTime(at()); stopFollow(); follow();
-        };
-        audio.onpause = () => {
-          play.textContent = '▶'; playing = false;
-          stopFollow(); setTime(at());
-        };
-        audio.onended = () => {
-          // Кусок кончился — сразу берём следующий, чтобы для человека
-          // это осталось одной непрерывной записью
-          if (many && idx + 1 < list.length) { goPart(idx + 1, true); return; }
-          play.textContent = '▶'; playing = false; stopFollow();
-          setTime(0);
-          if (many) goPart(0, false);   // вернуться к началу для повтора
-        };
-        audio.onerror = () => { label.textContent = 'Не удалось воспроизвести'; };
+
+        audio = wire(new Audio(u));
+        audio.__part = 0;
+        pool[0] = audio;
+        live = 0;
+        // Второй элемент нужен только склеенной записи.
+        //
+        // Источник ему сразу даём тот же, что и первому. Не ради звука —
+        // ради того, чтобы было что будить: разбудить пустой элемент
+        // нельзя, а достать следующий кусок из хранилища мы успеем уже
+        // после того, как человек отпустит палец. Через мгновение
+        // preload подменит источник на настоящий следующий кусок.
+        if (many) {
+          pool[1] = wire(new Audio());
+          pool[1].src = u;
+          preload(1);
+        }
 
         // У старых записей формы волны нет — считаем сейчас и запоминаем,
         // чтобы в следующий раз она появилась сразу. Только для цельной
@@ -4197,8 +4367,12 @@ body {
       if (audio && !audio.paused) { audio.pause(); return; }
       ensureAudio().then((a) => {
         if (!a) return;
+        try { a.volume = 1; } catch (e) { /* громкость не наша */ }
         const pr = a.play();
         if (pr && pr.catch) pr.catch(() => {});
+        // Пока не вышли из нажатия — будим и второй элемент, иначе на
+        // iPhone продолжение записи просто не пустят звучать
+        wakeSpare();
       }).catch(() => {});
     });
 
@@ -4299,11 +4473,12 @@ body {
     // перезагрузки страницы. Кусков может быть несколько — отпускаем все.
     audioCleanup.push(() => {
       stopFollow();
-      if (audio) { audio.pause(); }
+      pool.forEach((a) => { if (a) { try { a.pause(); } catch (e) { /* уже */ } } });
       urls.forEach((u) => { if (u) URL.revokeObjectURL(u); });
     });
 
-    bar.appendChild(el('div', { class: 'audio-row' }, [play, wave, more, del]));
+    bar.appendChild(el('div', { class: 'audio-row' }, [play, wave,
+      el('div', { class: 'audio-side' }, [more, del])]));
     bar.appendChild(label);
   }
 
