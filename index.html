@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-N6MthB3ME7FjceNiGDXeE6/4sNAVXAheZtHCIZuFNNU=';
-               style-src 'sha256-kfhkadXgsQYU/+mA6X50p8gadQwRCRgihdw7V02w5z4=';
+               script-src 'sha256-PCZ/YYre/K2HkxKCBy4M8+DAmif6xiWFtLc++rxzu1Y=';
+               style-src 'sha256-GAQv+y8AIeIEdhlDdfZEIYexKh+vwIyaN26MyiHtESQ=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -420,9 +420,20 @@ body {
    Здесь только вид: жирный и курсив классами, подчёркивание и
    зачёркивание — одним свойством из кода, потому что два отдельных
    правила перебили бы друг друга и вместе бы не показались. */
+/* Кусок оформленного текста. Всё, что перечислено ниже, — защита от
+   чужих правил: кусок обязан остаться в строке, того же размера и цвета,
+   что и текст вокруг. Меняться ему позволено только начертанием. */
+.mk {
+  display: inline;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  margin: 0;
+  padding: 0;
+  text-underline-offset: 2px;
+}
 .mk-b { font-weight: 700; }
 .mk-i { font-style: italic; }
-.mk { text-underline-offset: 2px; }
 
 /* Поле текста аффирмации. Не обычное поле ввода: в нём весь текст был бы
    одного вида, и показать жирным только выделенное слово нечем. Здесь
@@ -729,7 +740,16 @@ body {
 }
 .sheet h3 { margin: 0 0 14px; font-size: 19px; }
 .field { display: block; margin-bottom: 12px; }
-.field span { display: block; font-size: 13px; color: var(--ink-soft); margin-bottom: 6px; }
+/* Подпись поля. Только прямой потомок, через `>`.
+   Без этого правило доставало и до кусков оформленного текста внутри
+   поля: каждый выделенный кусок становился блоком, уезжал на отдельную
+   строку и мельчал до размера подписи. На вид это читалось так, будто
+   после нажатия «Ж» текст перепрыгнул в другое место. */
+.field > span { display: block; font-size: 13px; color: var(--ink-soft); margin-bottom: 6px; }
+/* Подпись у поля с оформлением. Само поле нарочно не внутри <label>:
+   для редактируемой области метка перехватывает нажатие, выделение
+   теряется, и системное меню «Шрифт» показывается погашенным. */
+.field-label { display: block; font-size: 13px; color: var(--ink-soft); margin-bottom: 6px; }
 .field input, .field textarea {
   width: 100%;
   border: 1px solid var(--hair);
@@ -2162,14 +2182,7 @@ body {
       b.node.addEventListener('mousedown', (ev) => {
         if (ev.preventDefault) ev.preventDefault();
       });
-      b.node.addEventListener('click', () => {
-        const r = selection();
-        if (!r) return;                       // нечего оформлять
-        marks = toggleMark(marks, text.length, r.s, r.e, b.m);
-        paint();                              // изменения видны сразу, в поле
-        select(r.s, r.e);                     // выделение остаётся — можно нажать ещё
-        refresh();
-      });
+      b.node.addEventListener('click', () => { apply(b.m); });
       bar.appendChild(b.node);
     });
 
@@ -2199,10 +2212,59 @@ body {
       select(at + 1, at + 1);
     });
 
+    /**
+     * Применить оформление к тому, что выделено.
+     * Общая точка для наших кнопок, сочетаний клавиш и системного меню.
+     */
+    const apply = (letter) => {
+      const r = selection();
+      if (!r) return false;
+      marks = toggleMark(marks, text.length, r.s, r.e, letter);
+      paint();                    // изменения видны сразу, в поле
+      select(r.s, r.e);           // выделение остаётся — можно нажать ещё
+      refresh();
+      return true;
+    };
+
+    /**
+     * Жирный, курсив и подчёркнутый умеет запрашивать и сама система:
+     * сочетанием Cmd+B или через меню «Шрифт» по правой кнопке мыши на
+     * Маке. Браузер сообщает об этом заранее, событием beforeinput с
+     * пометкой formatBold и подобными.
+     *
+     * Перехватываем и делаем сами. Если отдать это браузеру, он вставит
+     * в поле свою разметку — а приложение хранит оформление отдельным
+     * списком отметок и такую вставку просто не заметит: она пропала бы
+     * при сохранении. Лучше один путь для всех способов.
+     */
+    const BY_INPUT = {
+      formatBold: 'b', formatItalic: 'i',
+      formatUnderline: 'u', formatStrikeThrough: 's',
+    };
+    box.addEventListener('beforeinput', (ev) => {
+      const letter = BY_INPUT[ev.inputType];
+      if (!letter) return;
+      if (ev.preventDefault) ev.preventDefault();
+      apply(letter);
+    });
+    // Запасной путь для браузеров, которые о таком заранее не сообщают
+    box.addEventListener('keydown', (ev) => {
+      if (!(ev.metaKey || ev.ctrlKey) || ev.altKey) return;
+      const letter = { b: 'b', i: 'i', u: 'u' }[String(ev.key || '').toLowerCase()];
+      if (!letter) return;
+      if (ev.preventDefault) ev.preventDefault();
+      apply(letter);
+    });
+
     paint();
     refresh();
-    sheet.appendChild(el('label', { class: 'field' }, [
-      el('span', { text: f.label }), box,
+    // Поле НЕ внутри <label>. С обычным полем ввода это работало, а с
+    // редактируемой областью ломает саму правку: нажатие по метке Safari
+    // переадресует, выделение теряется — и системное меню «Шрифт» с его
+    // «жирный / курсив / подчёркнутый» показывается погашенным, потому
+    // что редактировать, по мнению браузера, нечего.
+    sheet.appendChild(el('div', { class: 'field' }, [
+      el('span', { class: 'field-label', text: f.label }), box,
     ]));
     sheet.appendChild(bar);
 
