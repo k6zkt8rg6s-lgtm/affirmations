@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-Z+itAZukKQsZFeiJ6cpaOY54zvhGKJHms5gi2FKwxgk=';
-               style-src 'sha256-sMWoG4cyNGC5Z08sqguA0nEsOIerv9VOeWGK/B8/06s=';
+               script-src 'sha256-dLHwnp2qCHChWl4dVM0aTqSgrRZ/w6SjLiJ8cpAlUEo=';
+               style-src 'sha256-V0tddd2gRcjbSdOKztONrVM1JRm4IKZDkG/O1DCaAd8=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -418,6 +418,57 @@ body {
 /* ---------- Список карточек внутри колоды ---------- */
 .card-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 
+/* Обёртка строки. Кнопка «В колоду» лежит под строкой у правого края и
+   открывается, когда строка уезжает влево. overflow прячет её в покое:
+   без него она торчала бы сбоку всегда. */
+.card-row {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-m);
+}
+.row-actions {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 96px;
+  display: flex;
+}
+.row-move {
+  flex: 1;
+  border: 0;
+  border-radius: 0;
+  background: var(--ink-soft);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+.row-move:active { background: var(--ink); }
+.row-move-icon { font-size: 18px; line-height: 1; }
+.row-move-text { font-size: 12px; letter-spacing: .2px; }
+
+/* Сама строка едет поверх кнопки. Фон обязателен и непрозрачен: сквозь
+   строку кнопка просвечивать не должна. */
+.card-row > .mini {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  will-change: transform;
+}
+
+/* Колода, в которую переносим. Список выбора — те же строки, но нажатие
+   у них другое, поэтому и вид чуть иной: без номера слева. */
+.mini.pick { cursor: pointer; }
+.mini.pick .mini-num { color: var(--ink-soft); font-size: 13px; margin-left: auto; }
+.mini.pick.full { opacity: .45; cursor: default; }
+
 .mini {
   display: flex;
   align-items: center;
@@ -740,7 +791,7 @@ body {
 /* За заголовок раздела, за плитку колоды и за строку карточки берут
    долгим нажатием. Долгое нажатие в Safari по умолчанию вызывает своё
    меню и выделение текста — здесь это только мешает. */
-.section-head, .deck, .mini {
+.section-head, .deck, .mini, .card-row {
   -webkit-touch-callout: none;
   user-select: none;
   -webkit-user-select: none;
@@ -751,7 +802,7 @@ body {
    понятно, что элемент оторван от страницы и его несут.
    Селектор с двумя классами взят ради веса: он обязан победить
    `position: relative` у .deck, иначе плитка не оторвётся от сетки. */
-.section.lifted, .deck.lifted, .mini.lifted {
+.section.lifted, .deck.lifted, .card-row.lifted {
   position: absolute;
   z-index: 30;
   margin: 0;
@@ -771,7 +822,7 @@ body {
 .deck.lifted:active { transform: none; }
 /* Поднятая строка списка карточек: она белая и на бумаге почти теряется,
    поэтому обводку делаем чуть заметнее обычной */
-.mini.lifted { border-color: rgba(0, 0, 0, .16); }
+.card-row.lifted > .mini { border-color: rgba(0, 0, 0, .16); }
 
 /* Пустое место, куда элемент встанет, если отпустить. Пунктир — тот же,
    что у плитки «+ Колода»: рука уже знает, что это место под что-то. */
@@ -1622,8 +1673,26 @@ body {
         card.audio ? el('span', { class: 'mini-audio', text: '♪' }) : null,
         card.fav ? el('span', { class: 'mini-heart', text: '♥' }) : null,
       ]);
-      dragCard(row, deck, card);
-      list.appendChild(row);
+
+      // Обёртка нужна двум разным жестам сразу. Кнопка «В колоду» лежит
+      // под строкой у правого края и открывается, когда строка уезжает
+      // влево. А при переносе вверх-вниз поднимается именно обёртка,
+      // целиком со своей кнопкой, — иначе кнопка осталась бы на месте.
+      const move = el('button', {
+        class: 'row-move', attrs: { type: 'button', 'aria-label':
+          'Перенести карточку в другую колоду' },
+        on: { click: () => { closeRow(true); moveCardTo(deck, card); } },
+      }, [
+        el('span', { class: 'row-move-icon', text: '→' }),
+        el('span', { class: 'row-move-text', text: 'В колоду' }),
+      ]);
+      const holder = el('div', { class: 'card-row' }, [
+        el('div', { class: 'row-actions' }, [move]),
+        row,
+      ]);
+      attachRowSwipe(row);
+      dragCard(row, holder, deck, card);
+      list.appendChild(holder);
     });
     frag.appendChild(list);
 
@@ -1661,7 +1730,7 @@ body {
     const now = () => Date.now();
 
     const down = (ev) => {
-      if (!ev.isPrimary || sliding || drag) return;
+      if (!ev.isPrimary || sliding || drag || rowGesture) return;
       // Кнопки НЕ исключаем: весь экран колоды состоит из кнопок-карточек,
       // и с таким запретом жест не начинался бы почти нигде. Вместо этого
       // ниже гасим нажатие, если палец поехал вбок.
@@ -1675,9 +1744,10 @@ body {
 
     const move = (ev) => {
       if (ev.pointerId !== id) return;
-      // Пока карточку несут, экран уезжать не должен: одно движение
-      // пальцем не может значить одновременно «назад» и «переставить»
-      if (drag) return;
+      // Пока карточку несут или ведут вбок, экран уезжать не должен:
+      // одно движение пальцем не может значить сразу «назад»,
+      // «переставить» и «открыть кнопку»
+      if (drag || rowGesture) return;
       const mx = ev.clientX - x0, my = ev.clientY - y0;
       if (axis === null) {
         if (Math.abs(mx) < SWIPE_START && Math.abs(my) < SWIPE_START) return;
@@ -1838,7 +1908,7 @@ body {
     * этот ход — элемент дёрнулся бы в сторону от пальца.
     */
   const shiftable = () => list('movable')
-    .concat(list('deck')).concat(list('add-tile')).concat(list('mini'))
+    .concat(list('deck')).concat(list('add-tile')).concat(list('card-row'))
     .filter((n) => !/\blifted\b/.test(n.className || ''));
 
   /**
@@ -2061,6 +2131,195 @@ body {
     });
   }
 
+
+  // ------------------------------------------------------------------
+  // Свайп по строке карточки: сдвинули влево — справа открылась кнопка
+  // «В колоду». Оттуда карточка переезжает в любую другую колоду.
+  //
+  // Почему влево, а не вправо. Вправо на экране колоды уже занято жестом
+  // «назад», он уводит на главный экран. Две разные стороны — две разные
+  // задачи, и спутать их нельзя.
+  //
+  // Строка едет, а кнопка стоит: она лежит под строкой у правого края и
+  // просто открывается по мере того, как строка уходит. Так понятнее,
+  // чем если бы кнопка выезжала сама.
+  // ------------------------------------------------------------------
+  const ACTION_W = 96;      // ширина открывающейся кнопки
+  let openRow = null;       // сейчас открыта не больше одной строки
+  let rowGesture = false;   // идёт свайп по строке — жест «назад» молчит
+
+  /** Закрыть открытую строку, если она есть. */
+  function closeRow(instant) {
+    if (!openRow) return;
+    const n = openRow;
+    openRow = null;
+    n.style.setProperty('transition',
+      instant ? 'none' : 'transform ' + DROP_MS + 'ms ' + SLIDE_EASE);
+    n.style.setProperty('transform', 'translate3d(0,0,0)');
+  }
+
+  /**
+   * Повесить свайп на строку списка карточек.
+   *   row  — сама строка, она и едет
+   *   open — что делать, когда нажали открывшуюся кнопку
+   */
+  function attachRowSwipe(row) {
+    let id = null, x0 = 0, y0 = 0, axis = null, dx = 0, was = 0;
+    let tPrev = 0, xPrev = 0, speed = 0, eatClick = false;
+
+    row.addEventListener('pointerdown', (ev) => {
+      if (!ev.isPrimary || drag) return;
+      id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
+      axis = null; speed = 0; eatClick = false;
+      was = (openRow === row) ? -ACTION_W : 0;
+      dx = was;
+      tPrev = Date.now(); xPrev = ev.clientX;
+    });
+
+    row.addEventListener('pointermove', (ev) => {
+      if (ev.pointerId !== id || drag) return;
+      const mx = ev.clientX - x0, my = ev.clientY - y0;
+      if (axis === null) {
+        if (Math.abs(mx) < SWIPE_START && Math.abs(my) < SWIPE_START) return;
+        axis = Math.abs(mx) >= Math.abs(my) ? 'x' : 'y';
+        if (axis === 'x') {
+          rowGesture = true;
+          // Другую открытую строку закрываем сразу: открытых больше одной
+          // быть не должно, иначе непонятно, к чему относится кнопка
+          if (openRow && openRow !== row) closeRow();
+          if (row.setPointerCapture) {
+            try { row.setPointerCapture(id); } catch (e) { /* не поддержано */ }
+          }
+          row.style.setProperty('transition', 'none');
+        }
+      }
+      if (axis !== 'x') return;
+      if (ev.cancelable) ev.preventDefault();
+      const tNow = Date.now();
+      if (tNow > tPrev) {
+        speed = Math.abs(ev.clientX - xPrev) / (tNow - tPrev);
+        tPrev = tNow; xPrev = ev.clientX;
+      }
+      // Дальше кнопки строка не уходит, а вправо от нуля идёт туго:
+      // открывать там нечего
+      dx = Math.max(-ACTION_W, was + mx);
+      if (dx > 0) dx = (was + mx) * 0.2;
+      row.style.setProperty('transform',
+        'translate3d(' + dx.toFixed(1) + 'px,0,0)');
+    });
+
+    const finish = (ev) => {
+      if (ev.pointerId !== id) return;
+      id = null;
+      if (axis !== 'x') return;
+      rowGesture = false;
+      // После движения вбок мышь на компьютере всё равно шлёт нажатие по
+      // строке. Без этой отметки строка открылась бы и тут же закрылась
+      // сама, а на телефоне вдобавок открылась бы карточка.
+      eatClick = true;
+      // Открываем, если протянули больше половины кнопки или махнули
+      // быстро; иначе строка возвращается на место
+      const moved = Math.abs(dx - was);
+      const wantOpen = dx < 0
+        && (Math.abs(dx) > ACTION_W / 2 || (moved >= SWIPE_FLICK && speed >= SWIPE_SPEED));
+      row.style.setProperty('transition',
+        'transform ' + DROP_MS + 'ms ' + SLIDE_EASE);
+      if (wantOpen) {
+        openRow = row;
+        row.style.setProperty('transform',
+          'translate3d(' + (-ACTION_W) + 'px,0,0)');
+      } else {
+        if (openRow === row) openRow = null;
+        row.style.setProperty('transform', 'translate3d(0,0,0)');
+      }
+    };
+    row.addEventListener('pointerup', finish);
+    row.addEventListener('pointercancel', (ev) => {
+      if (ev.pointerId !== id) return;
+      rowGesture = false;
+      finish(ev);
+    });
+
+    // Пока строка открыта, нажатие по ней только закрывает её, а карточку
+    // не открывает: иначе не выйдет передумать
+    row.addEventListener('click', (ev) => {
+      if (eatClick) {
+        eatClick = false;
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      if (openRow !== row) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeRow();
+    }, true);
+  }
+
+  /**
+   * Куда перенести карточку. Список всех колод, кроме той, в которой она
+   * сейчас лежит, с названием раздела — иначе одинаковые названия колод
+   * в разных разделах не различить.
+   */
+  function moveCardTo(fromDeck, card) {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const short = card.text.length > 60 ? card.text.slice(0, 60) + '…' : card.text;
+    const sheet = el('div', { class: 'sheet' }, [
+      el('h3', { text: 'Перенести карточку' }),
+      el('p', { class: 'hint', text: short }),
+    ]);
+
+    const list = el('div', { class: 'card-list scroll' });
+    let any = false;
+    for (const sec of state.sections) {
+      for (const deck of sec.decks) {
+        if (deck === fromDeck) continue;
+        any = true;
+        const swatch = el('span', { class: 'mini-swatch' });
+        swatch.style.setProperty('background-color', deck.color);
+        swatch.style.setProperty('border-color', deck.color);
+        const full = deck.cards.length >= LIMITS.cardsPerDeck;
+        list.appendChild(el('button', {
+          class: 'mini pick' + (full ? ' full' : ''),
+          attrs: { type: 'button' },
+          on: { click: () => {
+            if (full) return;
+            const k = fromDeck.cards.indexOf(card);
+            if (k < 0) { close(); return; }
+            // Карточку переносим тем же объектом, не копией: за ней
+            // тянется голосовая запись, привязанная к её же
+            // идентификатору. Новая карточка осталась бы без звука.
+            fromDeck.cards.splice(k, 1);
+            deck.cards.push(card);
+            openRow = null;
+            save(); close(); render();
+          } },
+        }, [
+          swatch,
+          el('span', { class: 'mini-text',
+                       text: sec.name + ' · ' + deck.name }),
+          el('span', { class: 'mini-num',
+                       text: full ? 'полна' : cardsLabel(deck.cards.length) }),
+        ]));
+      }
+    }
+
+    if (any) sheet.appendChild(list);
+    else {
+      sheet.appendChild(el('p', { class: 'empty',
+        text: 'Других колод пока нет. Создайте ещё одну на главном экране.' }));
+    }
+
+    sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+      el('button', { class: 'btn sec', attrs: { type: 'button' },
+                     text: 'Отмена', on: { click: close } }),
+    ]));
+
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+  }
   // ------------------------------------------------------------------
   /**
    * Перенос карточки внутри колоды: список, только вверх и вниз.
@@ -2069,17 +2328,20 @@ body {
    * списка. Поэтому после переноса нумерация сама становится сплошной:
    * верхняя всегда первая, нижняя — последняя.
    */
-  function dragCard(row, deck, card) {
+  function dragCard(row, holder, deck, card) {
     attachHold(row, (id, x0, y0) => {
-      const host = row.parentNode;              // .card-list
-      const st = lift(row, id, x0, y0, 'as-card');
+      // Берут за строку, а поднимается обёртка: вместе со строкой едет и
+      // её кнопка «В колоду», спрятанная справа
+      closeRow(true);
+      const host = holder.parentNode;           // .card-list
+      const st = lift(holder, id, x0, y0, 'as-card');
       let at = -1;
 
       /** Куда встанет строка, если отпустить прямо сейчас. */
       const aim = (cy) => {
         const rows = Array.prototype.slice.call(
-          host && host.querySelectorAll ? host.querySelectorAll('.mini') : [])
-          .filter((n) => n !== row);
+          host && host.querySelectorAll ? host.querySelectorAll('.card-row') : [])
+          .filter((n) => n !== holder);
         let k = 0;
         for (const n of rows) {
           const r = rectOf(n);
@@ -2103,16 +2365,16 @@ body {
 
       drag = {
         id: id, lastX: x0, lastY: y0,
-        cancel: () => back(row, st),
+        cancel: () => back(holder, st),
         move: (cx, cy) => {
           drag.lastX = cx; drag.lastY = cy;
-          follow(row, st, cx, cy);
+          follow(holder, st, cx, cy);
           put(cy);
           edgeScroll(cy);
         },
         drop: () => {
           const to = at;
-          drop(row, st, () => {
+          drop(holder, st, () => {
             const from = deck.cards.indexOf(card);
             if (from < 0 || to < 0 || to === from) return;
             deck.cards.splice(from, 1);
