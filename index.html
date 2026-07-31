@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-wlOCTvaoiKr6eCdffjxgYiA6J91z8pVCNy3Cr5arwKo=';
+               script-src 'sha256-3g5RhcQuc3mVIYjq1tm1PDPhmKCaK6B0uOLkRdw0IHI=';
                style-src 'sha256-l6V+MmaEJ+ecvK0/tvbwo9g2UYYhQXPhMsVnpe4+/V4=';
                img-src 'self' data:;
                media-src blob:;
@@ -1039,7 +1039,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '31.07.2026, 23:34';
+  const BUILD = '01.08.2026, 00:00';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -4301,6 +4301,23 @@ body {
       ready() { return ready; },
       /** Настоящие длины кусков — их стоит запомнить на карточке. */
       lengths() { return pieces.map((p) => Math.round(p.len * 100) / 100); },
+      /**
+       * Где искать секунду t в исходных файлах.
+       *
+       * Нужно при уходе в фон: там звук доигрывает обычный
+       * проигрыватель, а он работает с целыми файлами — вместе со
+       * срезанной у нас тишиной. Возвращаем номер куска и место
+       * внутри самого файла, а не внутри обрезанного.
+       */
+      locate(t) {
+        if (!ready || !pieces.length) return null;
+        const want = Math.max(0, Math.min(t, total));
+        let i = 0;
+        while (i + 1 < pieces.length && want >= offs[i + 1]) i++;
+        return { i: i, at: pieces[i].from + (want - offs[i]) };
+      },
+      /** Сколько тишины срезано в начале каждого куска. */
+      heads() { return pieces.map((p) => p.from); },
       onEnd(fn) { hooks.end = fn; },
       onFail(fn) { hooks.fail = fn; },
       close() {
@@ -4347,10 +4364,17 @@ body {
         ? audio.duration : total;
     };
 
+    // После передачи звука в фон обычный проигрыватель играет целые
+    // файлы — вместе с тишиной, которую бесшовный путь срезал. Чтобы
+    // время на дорожке осталось прежним, держим поправку на эту тишину.
+    let heads = null;
+
     /** Сколько прошло с начала всей записи, а не текущего куска. */
     const at = () => {
-      if (seamless()) return smooth.time();
-      return audio ? (offs[idx] || 0) + (audio.currentTime || 0) : 0;
+      if (seamless() && smooth.playing()) return smooth.time();
+      if (!audio) return seamless() ? smooth.time() : 0;
+      const back = heads ? (heads[idx] || 0) : 0;
+      return Math.max(0, (offs[idx] || 0) - back + (audio.currentTime || 0));
     };
 
     const setTime = (cur) => {
@@ -4613,22 +4637,16 @@ body {
             }
             setTime(at());
           };
-          a.onplay = () => {
-            if (a !== audio) return;
-            play.textContent = '❚❚'; playing = true;
-            setTime(at()); stopFollow(); follow();
-          };
-          a.onpause = () => {
-            if (a !== audio) return;
-            play.textContent = '▶'; playing = false;
-            stopFollow(); setTime(at());
-          };
+          a.onplay = () => { if (a === audio) markPlaying(); };
+          a.onpause = () => { if (a === audio) markStopped(); };
           a.onended = () => {
             if (a !== audio) return;
             // Кусок кончился — сразу передаём звук следующему, чтобы для
             // человека это осталось одной непрерывной записью
             if (many && idx + 1 < list.length) { handOver(idx + 1); return; }
-            play.textContent = '▶'; playing = false; stopFollow();
+            play.textContent = '▶'; playing = false;
+            tellSystem('paused');
+            stopFollow();
             setTime(0);
             if (many) goPart(0, false);   // вернуться к началу для повтора
           };
@@ -4677,13 +4695,55 @@ body {
       });
     }
 
+    /**
+     * Сказать системе, что здесь играет запись.
+     *
+     * Это не украшение. Пока страница просто издаёт звук, iPhone
+     * считает её обычной страницей и в фоне глушит. Заполненная
+     * карточка проигрывания переводит её в разряд настоящего
+     * проигрывателя: запись видно в пункте управления, ею можно
+     * управлять с экрана блокировки, и система не обрывает её, когда
+     * человек уходит на домашний экран.
+     */
+    function tellSystem(state) {
+      const ms = (typeof navigator !== 'undefined') ? navigator.mediaSession : null;
+      if (!ms) return;
+      try {
+        if (state === 'playing' && typeof self.MediaMetadata === 'function') {
+          const line = String(card.text || '').split('\n')[0].trim();
+          ms.metadata = new self.MediaMetadata({
+            title: line.slice(0, 70) || 'Запись',
+            artist: 'Аффирмации',
+          });
+        }
+        ms.playbackState = state;
+        if (ms.setActionHandler) {
+          ms.setActionHandler('play', () => { if (!playing) play.click(); });
+          ms.setActionHandler('pause', () => { if (playing) play.click(); });
+        }
+      } catch (e) { /* система не поддерживает — не беда */ }
+    }
+    audioCleanup.push(() => {
+      const ms = (typeof navigator !== 'undefined') ? navigator.mediaSession : null;
+      if (!ms) return;
+      try {
+        ms.playbackState = 'none';
+        if (ms.setActionHandler) {
+          ms.setActionHandler('play', null);
+          ms.setActionHandler('pause', null);
+        }
+      } catch (e) { /* уже нечего снимать */ }
+    });
+
     /** Пометить экран как «играет» — общее для обоих способов. */
     const markPlaying = () => {
       play.textContent = '❚❚'; playing = true;
+      tellSystem('playing');
       setTime(at()); stopFollow(); follow();
     };
     const markStopped = () => {
       play.textContent = '▶'; playing = false;
+      tellSystem('paused');
       stopFollow(); setTime(at());
     };
 
@@ -4699,6 +4759,57 @@ body {
         wakeSpare();
       }).catch(() => {});
     };
+
+    // ------------------------------------------------------------------
+    // Уход в фон.
+    //
+    // Человек нажал «играть» и смахнул приложение на домашний экран.
+    // Запись при этом обрывалась, и вот почему: куски мы сшиваем
+    // звуковым движком, а его iPhone в фоне усыпляет — это правило
+    // системы, обойти его нельзя. Обычный проигрыватель система в фоне
+    // не трогает.
+    //
+    // Поэтому на самом пороге ухода передаём звук ему, ровно с той
+    // секунды, где остановились. Шов в этот миг может чуть щёлкнуть,
+    // зато запись доигрывает до конца, а не обрывается на полуслове.
+    // Экран в этот момент всё равно погашен — щелчка никто не увидит.
+    // ------------------------------------------------------------------
+    function handToBackground() {
+      if (!seamless() || !smooth.playing()) return false;
+      const spot = smooth.locate(smooth.time());
+      if (!spot) return false;
+      heads = smooth.heads();
+      smooth.pause();
+      stopFollow();
+      ensureAudio().then((a) => {
+        if (!a) return;
+        try { a.volume = 1; } catch (e) { /* громкость не наша */ }
+        want = spot.at;
+        goPart(spot.i, true);
+        wakeSpare();
+      }).catch(() => {});
+      return true;
+    }
+
+    const onVisible = () => {
+      if (typeof document === 'undefined') return;
+      if (document.hidden || document.visibilityState === 'hidden') {
+        handToBackground();
+        return;
+      }
+      // Вернулись. Звук уже у обычного проигрывателя — там и оставляем:
+      // передавать его обратно на ходу значит устроить ещё один шов
+      // ради красоты, которой никто не заметит.
+      if (playing) { stopFollow(); follow(); }
+    };
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', onVisible);
+      audioCleanup.push(() => {
+        if (document.removeEventListener) {
+          document.removeEventListener('visibilitychange', onVisible);
+        }
+      });
+    }
 
     if (smooth) {
       smooth.onEnd(() => { markStopped(); smooth.seek(0); setTime(0); });
