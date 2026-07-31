@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-uhLjcHwtda7BGBOQleJKRpY+5AFhppd49OGRrdVYRtQ=';
-               style-src 'sha256-l6V+MmaEJ+ecvK0/tvbwo9g2UYYhQXPhMsVnpe4+/V4=';
+               script-src 'sha256-MA0QwdRLM/xNMg24zwBrL6qvMyVU72XLiI6eAJp7c7w=';
+               style-src 'sha256-XUjLjoQFeZ6n1efW55LujgA2G6qqW/l73UnDKY5n/xU=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -200,6 +200,13 @@ body {
 
 /* Пауза и стоп появляются рядом с кнопкой записи только во время записи */
 .rec-box { display: flex; align-items: center; gap: 2px; }
+
+/* Загрузить готовую запись — стрелка вниз рядом с кнопкой записи.
+   Обёртка нужна из-за спрятанного поля выбора файла: класть его внутрь
+   кнопки нельзя, а рядом в строке оно заняло бы место. */
+.pick-box { display: flex; align-items: center; }
+.iconbtn.ghost.pick { color: var(--ink-soft); font-size: 19px; }
+.iconbtn.ghost.pick:disabled { opacity: .45; cursor: default; }
 .iconbtn.rec-ctl {
   background: transparent;
   color: var(--ink);
@@ -1039,7 +1046,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 00:10';
+  const BUILD = '01.08.2026, 00:25';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -3511,6 +3518,7 @@ body {
         }),
         el('span', { class: 'reader-pos', text: (i + 1) + ' / ' + total }),
         makeRecordControls(card, audioBar),
+        makeAudioPicker(card, audioBar),
         el('button', {
           class: 'iconbtn heart' + (card.fav ? ' on' : ''),
           attrs: {
@@ -3767,6 +3775,141 @@ body {
         return out;
       },
     };
+  }
+
+  // Предел на готовый файл. Записи хранятся на самом устройстве и целиком
+  // уезжают в файл обмена — гигабайтный подкаст туда просто не пролезет.
+  const PICK_MAX_MB = 25;
+
+  /**
+   * Узнать, играется ли файл здесь, и сколько он длится.
+   *
+   * Проверяем ДО того, как класть в хранилище. Иначе карточка получила
+   * бы запись, которую браузер не умеет открыть, — на вид звук есть,
+   * а нажимаешь «играть» и тишина.
+   *
+   * Заодно берём длину у самого файла: это единственное надёжное место,
+   * своих часов записи у чужого файла нет.
+   */
+  function probeAudio(blob) {
+    return new Promise((done) => {
+      let url = null;
+      try { url = URL.createObjectURL(blob); } catch (e) { done(null); return; }
+      const a = new Audio();
+      let settled = false;
+      const finish = (secs) => {
+        if (settled) return;
+        settled = true;
+        try { a.pause(); } catch (e) { /* уже */ }
+        try { URL.revokeObjectURL(url); } catch (e) { /* уже */ }
+        done(secs);
+      };
+      a.preload = 'metadata';
+      a.onloadedmetadata = () => {
+        const d = a.duration;
+        finish((typeof d === 'number' && isFinite(d) && d > 0) ? d : 0);
+      };
+      a.onerror = () => finish(null);
+      // Если браузер молчит, ждать вечно нельзя: у некоторых форматов он
+      // не отвечает ни успехом, ни ошибкой
+      setTimeout(() => finish(settled ? undefined : null), 8000);
+      a.src = url;
+      try { a.load(); } catch (e) { /* сам разберётся */ }
+    });
+  }
+
+  /**
+   * Кнопка «загрузить готовую запись».
+   *
+   * Рядом с кнопкой записи, но делает противоположное: не пишет новое, а
+   * берёт то, что уже записано — в «Диктофоне», в iCloud Drive, на
+   * компьютере. Формат Apple (m4a, он же MPEG-4 Audio) читается без
+   * всякого преобразования: ровно в нём Safari и сам записывает голос.
+   */
+  function makeAudioPicker(card, audioBar) {
+    const btn = el('button', {
+      class: 'iconbtn ghost pick',
+      attrs: { type: 'button', 'aria-label': 'Загрузить готовую запись' },
+      text: '↓',
+    });
+    // Фильтра по типу нет намеренно — по той же причине, что и в окне
+    // синхронизации: iPhone делает серыми и неактивными все файлы, чей
+    // вид система не сопоставила со списком, и нужная запись из iCloud
+    // может оказаться среди них. Что за файл выбрали, всё равно
+    // проверяем сами — попыткой его открыть.
+    const input = el('input', {
+      attrs: { type: 'file' },
+      style: { display: 'none' },
+    });
+
+    const busy = (on) => {
+      btn.disabled = on;
+      btn.textContent = on ? '…' : '↓';
+    };
+
+    btn.addEventListener('click', () => {
+      if (activeRecorder) { alert('Сейчас идёт запись — сначала остановите её.'); return; }
+      if (card.audio && !confirm(
+        'На карточке уже есть запись. Заменить её выбранным файлом?')) return;
+      input.click();
+    });
+
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.value = '';                       // чтобы тот же файл выбрался снова
+      if (!file) return;
+      if (!AudioStore.available()) {
+        alert('Хранилище недоступно — записи негде хранить.'); return;
+      }
+      if (file.size > PICK_MAX_MB * 1024 * 1024) {
+        alert('Файл больше ' + PICK_MAX_MB + ' МБ. Такой не поместится: записи '
+          + 'хранятся на самом устройстве и целиком уезжают в файл обмена.');
+        return;
+      }
+      if (!file.size) { alert('Файл пустой.'); return; }
+
+      busy(true);
+      probeAudio(file).then((secs) => {
+        if (secs === null) {
+          busy(false);
+          alert('Этот файл здесь не открывается. Подойдёт запись «Диктофона» '
+            + '(m4a), а также mp3, wav и aac.');
+          return null;
+        }
+        // Прежние куски продолжения к новому файлу отношения не имеют
+        const stale = audioKeys(card).slice(1);
+        stale.forEach((k) => { AudioStore.del(k).catch(() => {}); });
+        return AudioStore.put(card.id, file)
+          .then(() => AudioStore.get(card.id))
+          .then((back) => {
+            busy(false);
+            if (!back || !back.size) {
+              alert('Не удалось сохранить запись. Попробуйте ещё раз.');
+              return null;
+            }
+            const len = Math.max(1, Math.round((secs || 0) * 100) / 100);
+            card.audio = true;
+            card.audioLen = len;
+            card.parts = [{ len: len, top: 100, head: 0 }];
+            card.peaks = [];
+            save();
+            clear(audioBar); buildPlayer(audioBar, card);
+            // Рисунок волны считаем из самого файла. На iPhone это
+            // работает: формат Apple Safari разбирает без труда.
+            return computePeaks(file).then((peaks) => {
+              if (!peaks || !peaks.length) return null;
+              card.peaks = peaks; save();
+              clear(audioBar); buildPlayer(audioBar, card);
+              return null;
+            }).catch(() => null);
+          });
+      }).catch(() => {
+        busy(false);
+        alert('Не удалось загрузить файл.');
+      });
+    });
+
+    return el('span', { class: 'pick-box' }, [btn, input]);
   }
 
   /**
