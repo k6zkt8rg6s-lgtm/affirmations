@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-Z54YSUxr/2VchXADdXDNsXACbcA7yliLb95WHL44Rf4=';
+               script-src 'sha256-wlOCTvaoiKr6eCdffjxgYiA6J91z8pVCNy3Cr5arwKo=';
                style-src 'sha256-l6V+MmaEJ+ecvK0/tvbwo9g2UYYhQXPhMsVnpe4+/V4=';
                img-src 'self' data:;
                media-src blob:;
@@ -1039,7 +1039,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '31.07.2026, 23:11';
+  const BUILD = '31.07.2026, 23:34';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -4056,6 +4056,264 @@ body {
     bar.appendChild(face.label);
   }
 
+  // Сколько звука готовы разобрать целиком ради бесшовной сшивки.
+  // Разобранный звук лежит в памяти несжатым: минута — примерно
+  // одиннадцать мегабайт. Три минуты телефон переживёт, больше — уже
+  // нет, и такая запись пойдёт прежним путём, через два проигрывателя.
+  const SMOOTH_CAP = 180;
+  const EDGE_TRIM = 0.25;    // сколько тишины на краю куска готовы срезать
+  const JOIN_FADE = 0.008;   // сглаживание на самом стыке, секунды
+
+  /**
+   * Где в куске начинается и заканчивается голос.
+   *
+   * Между кусками слышался провал, и дело не только в загрузке. Сжатие
+   * добавляет к записи немного тишины в начале — так устроен любой
+   * кодек. А кнопку «стоп» человек нажимает не в тот же миг, когда
+   * замолчал, поэтому в конце тоже остаётся пауза. Складываясь, они и
+   * дают то самое «разделение» на стыке. Ищем настоящие границы голоса
+   * и играем только их.
+   *
+   * Срезаем осторожно: не больше четверти секунды с каждого края и
+   * только то, что тише двух процентов от самого громкого места.
+   */
+  function voiceEdges(buf) {
+    const data = buf.getChannelData(0);
+    const rate = buf.sampleRate || 48000;
+    const n = data.length;
+    if (!n) return { from: 0, len: 0 };
+    let peak = 0;
+    for (let i = 0; i < n; i += 7) {
+      const v = data[i] < 0 ? -data[i] : data[i];
+      if (v > peak) peak = v;
+    }
+    if (peak < 0.002) return { from: 0, len: n / rate };   // весь кусок тихий
+    const gate = Math.max(0.003, peak * 0.02);
+    const room = Math.floor(rate * EDGE_TRIM);
+    let a = 0;
+    while (a < room && a < n && (data[a] < 0 ? -data[a] : data[a]) < gate) a++;
+    let b = n;
+    const floor = n - room;
+    while (b > floor && b > a + 1) {
+      const v = data[b - 1] < 0 ? -data[b - 1] : data[b - 1];
+      if (v >= gate) break;
+      b--;
+    }
+    return { from: a / rate, len: Math.max(0.02, (b - a) / rate) };
+  }
+
+  /**
+   * Бесшовное проигрывание склеенной записи.
+   *
+   * Прежний способ — два проигрывателя по очереди — убрал загрузку в
+   * момент стыка, но не убрал сам стык. Между двумя файлами всё равно
+   * оставался зазор в несколько миллисекунд, а ползунок на переходе
+   * прыгал: длина куска бралась с часов, тикавших во время записи, и не
+   * совпадала с тем, сколько звука на самом деле в файле.
+   *
+   * Здесь всё иначе. Куски разбираются в звук целиком и выкладываются
+   * на общую шкалу времени звукового движка вплотную друг к другу — с
+   * точностью до отсчёта, тридцати-с-чем-то тысячных долей секунды.
+   * Стыка не остаётся вовсе: для движка это одна непрерывная запись.
+   * Время тоже берётся у него, поэтому ползунок едет ровно, а не
+   * вздрагивает на границах.
+   *
+   * Возвращает null, если движок недоступен, — тогда работает прежний
+   * способ. Замолчать приложение не имеет права ни при каких условиях.
+   */
+  function smoothChain(card, list) {
+    const Ctx = self.AudioContext || self.webkitAudioContext;
+    if (!Ctx || !list || list.length < 2) return null;
+    let whole = 0;
+    list.forEach((p) => { whole += p.len; });
+    if (whole > SMOOTH_CAP) return null;          // слишком длинно для памяти
+
+    // Движок заводим не сразу, а по первому нажатию.
+    //
+    // Браузер разрешает держать их всего несколько штук на страницу, а
+    // карточек с записями может быть много: пролистав десяток, мы бы
+    // упёрлись в предел, и звук пропал бы вовсе. К тому же движок,
+    // созданный без участия человека, Chrome сразу усыпляет и пишет об
+    // этом в консоль.
+    let ctx = null;
+    function engine() {
+      if (ctx) return ctx;
+      try { ctx = new Ctx(); } catch (e) { ctx = null; }
+      return ctx;
+    }
+
+    const pieces = [];        // {buf, from, len} — уже без тишины по краям
+    const offs = [];          // с какой секунды начинается каждый кусок
+    let total = 0;
+    let ready = false;
+    let pos = 0;              // где мы сейчас, если ничего не звучит
+    let anchor = 0;           // время движка, отвечающее pos
+    let running = false;
+    let sources = [];
+    let turn = 0;             // номер захода: старые источники не мешают новым
+    const hooks = { end: null, fail: null };
+
+    function decodeOne(i) {
+      return AudioStore.get(partKey(card.id, i))
+        .then((blob) => (blob && blob.size ? blob.arrayBuffer() : null))
+        .then((raw) => {
+          if (!raw) return null;
+          return new Promise((ok, no) => {
+            // Обещание понимают не все: у старых Safari только два
+            // обработчика, и без запасного пути там ничего не разберётся
+            let out = null;
+            try { out = ctx.decodeAudioData(raw, ok, no); }
+            catch (e) { no(e); return; }
+            if (out && typeof out.then === 'function') out.then(ok, no);
+          });
+        });
+    }
+
+    /** Разобрать все куски и разложить их по общей шкале. */
+    function prepare() {
+      const step = (i) => {
+        if (i >= list.length) return true;
+        return decodeOne(i).then((buf) => {
+          if (!buf) throw new Error('кусок не разобрался');
+          const cut = voiceEdges(buf);
+          pieces.push({ buf: buf, from: cut.from, len: cut.len });
+          return step(i + 1);
+        });
+      };
+      return Promise.resolve().then(() => step(0)).then(() => {
+        offs.length = 0;
+        total = 0;
+        pieces.forEach((p) => { offs.push(total); total += p.len; });
+        ready = true;
+        return true;
+      });
+    }
+
+    function stopAll() {
+      turn++;
+      sources.forEach((s) => { try { s.stop(); } catch (e) { /* уже */ } });
+      sources = [];
+    }
+
+    /**
+     * Выложить куски начиная с секунды t. Каждый следующий встаёт ровно
+     * туда, где кончился предыдущий, — зазору взяться неоткуда.
+     */
+    function layOut(t) {
+      const mine = ++turn;
+      const lead = 0.06;                 // движку нужно чуть-чуть форы
+      const base = ctx.currentTime + lead;
+      anchor = base;
+      pos = Math.max(0, Math.min(t, total));
+
+      let first = 0;
+      while (first + 1 < pieces.length && pos >= offs[first + 1]) first++;
+
+      for (let i = first; i < pieces.length; i++) {
+        const p = pieces[i];
+        // Сколько этого куска пропускаем. Пропуск бывает только у того
+        // куска, на который пришлась точка старта; все следующие идут
+        // с самого начала и встают вплотную к предыдущему.
+        const off = (i === first) ? Math.max(0, pos - offs[i]) : 0;
+        const when = base + Math.max(0, offs[i] + off - pos);
+        const play = p.len - off;
+        if (play <= 0.001) continue;
+
+        let src, gain;
+        try {
+          src = ctx.createBufferSource();
+          gain = ctx.createGain();
+        } catch (e) { return false; }
+        src.buffer = p.buf;
+        src.connect(gain);
+        gain.connect(ctx.destination);
+
+        // Короткое сглаживание на самих стыках. Даже после срезки
+        // тишины начало новой записи может дать щелчок: микрофон
+        // включается не бесшумно. Восемь тысячных секунды на слух не
+        // заметны, а щелчок съедают.
+        const till = when + play;
+        const joinIn = i > first || off > 0.001 ? true : false;
+        try {
+          gain.gain.setValueAtTime(joinIn ? 0 : 1, when);
+          if (joinIn) gain.gain.linearRampToValueAtTime(1, when + JOIN_FADE);
+          if (i < pieces.length - 1) {
+            gain.gain.setValueAtTime(1, Math.max(when + JOIN_FADE, till - JOIN_FADE));
+            gain.gain.linearRampToValueAtTime(0, till);
+          }
+        } catch (e) { /* без сглаживания тоже сойдёт */ }
+
+        try { src.start(when, p.from + off, play); }
+        catch (e) { return false; }
+
+        if (i === pieces.length - 1) {
+          src.onended = () => {
+            if (mine !== turn) return;   // это отголосок прежнего захода
+            running = false;
+            pos = total;
+            if (hooks.end) hooks.end();
+          };
+        }
+        sources.push(src);
+      }
+      running = true;
+      return true;
+    }
+
+    const api = {
+      // Разобрать звук можно только после нажатия: до него движок спит
+      start(from) {
+        if (!engine()) {
+          if (hooks.fail) hooks.fail();
+          return Promise.resolve(false);
+        }
+        const wake = (ctx.state === 'suspended' && ctx.resume)
+          ? ctx.resume().catch(() => {}) : Promise.resolve();
+        return wake
+          .then(() => (ready ? true : prepare()))
+          .then(() => {
+            stopAll();
+            return layOut(typeof from === 'number' ? from : pos);
+          })
+          .catch(() => { if (hooks.fail) hooks.fail(); return false; });
+      },
+      pause() {
+        if (!running) return;
+        pos = api.time();
+        stopAll();
+        running = false;
+      },
+      seek(t) {
+        pos = Math.max(0, Math.min(t, total || 0));
+        if (running) { stopAll(); layOut(pos); }
+      },
+      time() {
+        if (!running || !ctx) return pos;
+        // Время берём у самого движка. Это его собственные часы, они
+        // идут вместе со звуком и не зависят ни от кадров отрисовки,
+        // ни от того, какой кусок сейчас звучит, — потому ползунок и
+        // едет ровно через все стыки.
+        const gone = ctx.currentTime - anchor;
+        return Math.max(pos, Math.min(total, pos + Math.max(0, gone)));
+      },
+      total() { return total; },
+      playing() { return running; },
+      ready() { return ready; },
+      /** Настоящие длины кусков — их стоит запомнить на карточке. */
+      lengths() { return pieces.map((p) => Math.round(p.len * 100) / 100); },
+      onEnd(fn) { hooks.end = fn; },
+      onFail(fn) { hooks.fail = fn; },
+      close() {
+        stopAll();
+        pieces.length = 0;
+        ready = false;
+        if (ctx) { try { if (ctx.close) ctx.close(); } catch (e) { /* уже */ } }
+        ctx = null;
+      },
+    };
+    return api;
+  }
+
   /** Плеер внизу карточки: кнопка, дорожка волны, время до сотых. */
   function buildPlayer(bar, card) {
     const face = playerFace(card);
@@ -4074,16 +4332,26 @@ body {
     const many = list.length > 1;
     let idx = 0;                // какой кусок сейчас в проигрывателе
 
+    // Бесшовный путь для склеенной записи. Пока он жив, элементы звука
+    // не участвуют вовсе — куски выложены на общую шкалу движка.
+    let smooth = many ? smoothChain(card, list) : null;
+    const seamless = () => !!(smooth && smooth.ready());
+
     const duration = () => {
-      // У склеенной записи длину знаем только мы: сам файл в
-      // проигрывателе — это один кусок, и спрашивать его бесполезно
+      // Настоящую длину знает только разобранный звук: наши записанные
+      // числа взяты с часов во время записи и с содержимым файла не
+      // совпадают — ровно на эту разницу ползунок и прыгал на стыке
+      if (seamless()) return smooth.total() || chainLen || total;
       if (many) return chainLen || total;
       return (audio && isFinite(audio.duration) && audio.duration > 0)
         ? audio.duration : total;
     };
 
     /** Сколько прошло с начала всей записи, а не текущего куска. */
-    const at = () => (audio ? (offs[idx] || 0) + (audio.currentTime || 0) : 0);
+    const at = () => {
+      if (seamless()) return smooth.time();
+      return audio ? (offs[idx] || 0) + (audio.currentTime || 0) : 0;
+    };
 
     const setTime = (cur) => {
       const dur = duration();
@@ -4124,11 +4392,21 @@ body {
     // во время проигрывания обновляем покадрово.
     let raf = 0;
     const follow = () => {
-      if (!audio || audio.paused) { raf = 0; return; }
+      if (seamless()) {
+        if (!smooth.playing()) { raf = 0; return; }
+      } else if (!audio || audio.paused) { raf = 0; return; }
       setTime(at());
       raf = requestAnimationFrame(follow);
     };
     const stopFollow = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
+
+    /** Остановить всё, чем бы оно ни игралось. */
+    const hush = () => {
+      stopFollow();
+      if (smooth) smooth.pause();
+      if (audio && !audio.paused) audio.pause();
+    };
+
     const del = el('button', {
       class: 'audio-del', attrs: { type: 'button', 'aria-label': 'Удалить запись' },
       text: '✕',
@@ -4136,8 +4414,7 @@ body {
         click: () => {
           if (taping) return;             // идёт дозапись — не до удаления
           if (!confirm('Удалить голосовую запись с этой карточки?')) return;
-          stopFollow();
-          if (audio) audio.pause();
+          hush();
           forgetAudio(card);              // вместе со всеми продолжениями
           save(); clear(bar);
         },
@@ -4400,9 +4677,18 @@ body {
       });
     }
 
-    play.addEventListener('click', () => {
-      if (taping) return;                    // сейчас пишем, а не слушаем
-      if (audio && !audio.paused) { audio.pause(); return; }
+    /** Пометить экран как «играет» — общее для обоих способов. */
+    const markPlaying = () => {
+      play.textContent = '❚❚'; playing = true;
+      setTime(at()); stopFollow(); follow();
+    };
+    const markStopped = () => {
+      play.textContent = '▶'; playing = false;
+      stopFollow(); setTime(at());
+    };
+
+    // Прежний способ — на случай, если движок откажет
+    const playByElement = () => {
       ensureAudio().then((a) => {
         if (!a) return;
         try { a.volume = 1; } catch (e) { /* громкость не наша */ }
@@ -4412,7 +4698,59 @@ body {
         // iPhone продолжение записи просто не пустят звучать
         wakeSpare();
       }).catch(() => {});
+    };
+
+    if (smooth) {
+      smooth.onEnd(() => { markStopped(); smooth.seek(0); setTime(0); });
+      smooth.onFail(() => {
+        // Движок не справился — тихо отдаём звук прежнему способу.
+        // Человек этого знать не должен: он просто нажал «играть».
+        if (smooth) { try { smooth.close(); } catch (e) { /* уже */ } }
+        smooth = null;
+        playByElement();
+      });
+    }
+
+    play.addEventListener('click', () => {
+      if (taping) return;                    // сейчас пишем, а не слушаем
+      if (smooth && smooth.playing()) { smooth.pause(); markStopped(); return; }
+      if (audio && !audio.paused) { audio.pause(); return; }
+      if (smooth) {
+        // Разбор звука идёт после нажатия: до него движок спит, а на
+        // iPhone разбудить его можно только рукой человека
+        smooth.start().then((ok) => {
+          if (!ok || !smooth) return;
+          fixLengths();
+          markPlaying();
+        }).catch(() => {});
+        return;
+      }
+      playByElement();
     });
+
+    /**
+     * Запомнить настоящие длины кусков.
+     *
+     * Записанные числа взяты с часов, тикавших во время записи. Разобрав
+     * звук, мы впервые узнаём, сколько в куске на самом деле — и
+     * запоминаем, чтобы в следующий раз подпись и ползунок были верны
+     * ещё до нажатия «играть».
+     */
+    let fixed = false;
+    function fixLengths() {
+      if (fixed || !seamless()) return;
+      fixed = true;
+      const real = smooth.lengths();
+      if (real.length !== list.length) return;
+      let sum = 0;
+      real.forEach((v) => { sum += v; });
+      sum = Math.round(sum * 100) / 100;
+      if (Math.abs(sum - (card.audioLen || 0)) < 0.15) return;
+      const prev = audioParts(card);
+      card.parts = real.map((len, i) => ({ len: len, top: prev[i] ? prev[i].top : 100 }));
+      card.audioLen = sum;
+      save();
+    }
 
     // ------------------------------------------------------------------
     // Дозапись: одно нажатие — продолжаю, второе — останавливаю.
@@ -4443,8 +4781,7 @@ body {
           + (AUDIO_PARTS_MAX - 1) + ' продолжений.');
         return;
       }
-      stopFollow();
-      if (audio && !audio.paused) audio.pause();
+      hush();
       showTaping(true);
       label.textContent = 'Дописываю… 0:00';
       startRecording(card, bar, {
@@ -4466,6 +4803,9 @@ body {
       if (!dur) return;
       const t = p * dur;
       setTime(t);
+      // Бесшовный путь перематывает сам: куски заново выкладываются на
+      // шкалу от нужной секунды, без всякой догрузки
+      if (seamless()) { smooth.seek(t); return; }
       ensureAudio().then((a) => {
         if (!a) return;
         if (!many) { a.currentTime = t; return; }
@@ -4511,6 +4851,9 @@ body {
     // перезагрузки страницы. Кусков может быть несколько — отпускаем все.
     audioCleanup.push(() => {
       stopFollow();
+      // Разобранный звук занимает в памяти в десятки раз больше сжатого —
+      // отпускаем его сразу, а не ждём перезагрузки страницы
+      if (smooth) { try { smooth.close(); } catch (e) { /* уже */ } smooth = null; }
       pool.forEach((a) => { if (a) { try { a.pause(); } catch (e) { /* уже */ } } });
       urls.forEach((u) => { if (u) URL.revokeObjectURL(u); });
     });
