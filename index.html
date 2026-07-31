@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-U7gPe7nCh57iKSQaDwfmXcOeN3vao+E9EW8j2wFv7gY=';
+               script-src 'sha256-BnhFaZ0QzQ9fwxy6UREDFzynG+qRhqJF25V0GiNMT80=';
                style-src 'sha256-V0tddd2gRcjbSdOKztONrVM1JRm4IKZDkG/O1DCaAd8=';
                img-src 'self' data:;
                media-src blob:;
@@ -1919,8 +1919,32 @@ body {
    * Ожидание удержания. Общее для разделов и колод: отличается только
    * тем, что делать, когда элемент уже подняли.
    */
+  /**
+   * Слушать окно, пока идёт жест.
+   *
+   * Не элемент, а именно окно. Элемент под курсором меняется: он выходит
+   * из потока, едет за пальцем, а курсор мышью легко его обгоняет и
+   * оказывается над соседями. Захват указателя это чинит не везде и не
+   * всегда — в Safari он теряется, когда узел переезжает в разметке, и
+   * тогда движения уходят другому элементу, а перенос замирает.
+   * Окно же на месте всегда, и до него событие доходит в любом случае.
+   */
+  function whileGesture(handlers) {
+    const w = (typeof window !== 'undefined' && window.addEventListener)
+      ? window : null;
+    if (!w) return () => {};
+    const on = [];
+    Object.keys(handlers).forEach((type) => {
+      w.addEventListener(type, handlers[type], true);
+      on.push([type, handlers[type]]);
+    });
+    return () => on.forEach((h) => w.removeEventListener(h[0], h[1], true));
+  }
+
   function attachHold(node, pick) {
-    let id = null, x0 = 0, y0 = 0, mouse = false;
+    let id = null, x0 = 0, y0 = 0, mouse = false, off = null;
+
+    const release = () => { if (off) { off(); off = null; } id = null; };
 
     /** Поднять элемент и забрать указатель себе. */
     const begin = () => {
@@ -1938,48 +1962,54 @@ body {
       // Карандаш правки — отдельная кнопка, за него не тянем
       const t = ev.target;
       if (t && t.closest && t.closest('.iconbtn')) return;
+      release();
       id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
       mouse = ev.pointerType === 'mouse';
       cancelHold();
+
+      const onMove = (e) => {
+        if (e.pointerId !== id) return;
+        if (drag && drag.id === id) { drag.move(e.clientX, e.clientY); return; }
+        const dx = Math.abs(e.clientX - x0), dy = Math.abs(e.clientY - y0);
+        if (mouse) {
+          // Строку карточки могут вести вбок — это другой жест, свой.
+          // Он объявляет о себе раньше: его порог меньше нашего.
+          if (rowGesture) { release(); return; }
+          if (dx < MOUSE_SLOP && dy < MOUSE_SLOP) return;
+          begin();
+          drag.move(e.clientX, e.clientY);
+          return;
+        }
+        // Палец поехал раньше времени — это прокрутка, а не перенос
+        if (dx > HOLD_SLOP || dy > HOLD_SLOP) { cancelHold(); release(); }
+      };
+      const onUp = (e) => {
+        if (e.pointerId !== id) return;
+        cancelHold();
+        const live = drag && drag.id === id;
+        release();
+        if (live) drag.drop();
+      };
+      // Отмена — не то же, что отпускание. Систему может что-то прервать:
+      // входящий звонок, второй палец, переключение приложения. Тогда
+      // элемент возвращается на своё место, а порядок остаётся прежним:
+      // молча переставить что-то из-за прерывания было бы неожиданно.
+      const onCancel = (e) => {
+        if (e.pointerId !== id) return;
+        cancelHold();
+        const live = drag && drag.id === id;
+        release();
+        if (live) drag.cancel();
+      };
+      off = whileGesture({ pointermove: onMove, pointerup: onUp,
+                           pointercancel: onCancel });
+
       // Ждём удержания только от пальца. Мышь начнёт тянуть сама, с
       // первым движением: если требовать паузы и от неё, человек успевает
       // повести мышь раньше срока, ожидание отменяется порогом сдвига — и
       // не происходит ничего, а по отпусканию открывается карточка.
       if (mouse) return;
       holdTimer = setTimeout(() => { holdTimer = null; begin(); }, HOLD_MS);
-    });
-
-    node.addEventListener('pointermove', (ev) => {
-      if (ev.pointerId !== id) return;
-      if (drag && drag.id === id) { drag.move(ev.clientX, ev.clientY); return; }
-      const dx = Math.abs(ev.clientX - x0), dy = Math.abs(ev.clientY - y0);
-
-      if (mouse) {
-        // Строку карточки могут вести вбок — это другой жест, свой.
-        // Он объявляет о себе раньше: его порог меньше нашего.
-        if (rowGesture) { id = null; return; }
-        if (dx < MOUSE_SLOP && dy < MOUSE_SLOP) return;
-        begin();
-        drag.move(ev.clientX, ev.clientY);
-        return;
-      }
-      // Палец поехал раньше времени — это прокрутка, а не перенос
-      if (dx > HOLD_SLOP || dy > HOLD_SLOP) cancelHold();
-    });
-
-    node.addEventListener('pointerup', (ev) => {
-      if (ev.pointerId !== id) return;
-      cancelHold();
-      if (drag && drag.id === id) drag.drop();
-    });
-    // Отмена — не то же, что отпускание. Систему может что-то прервать:
-    // входящий звонок, второй палец, переключение приложения. Тогда
-    // элемент возвращается на своё место, а порядок остаётся прежним:
-    // молча переставить что-то из-за прерывания было бы неожиданно.
-    node.addEventListener('pointercancel', (ev) => {
-      if (ev.pointerId !== id) return;
-      cancelHold();
-      if (drag && drag.id === id) drag.cancel();
     });
   }
 
@@ -2187,18 +2217,25 @@ body {
    */
   function attachRowSwipe(row) {
     let id = null, x0 = 0, y0 = 0, axis = null, dx = 0, was = 0;
-    let tPrev = 0, xPrev = 0, speed = 0, eatClick = false;
+    let tPrev = 0, xPrev = 0, speed = 0, eatClick = false, off = null;
+
+    const release = () => { if (off) { off(); off = null; } id = null; };
 
     row.addEventListener('pointerdown', (ev) => {
       if (!ev.isPrimary || drag) return;
+      release();
       id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
       axis = null; speed = 0; eatClick = false;
       was = (openRow === row) ? -ACTION_W : 0;
       dx = was;
       tPrev = Date.now(); xPrev = ev.clientX;
+      // Слушаем окно, а не строку: мышью курсор легко уходит со строки
+      // вбок, и на самой строке движения тогда просто перестают приходить
+      off = whileGesture({ pointermove: onMove, pointerup: onUp,
+                           pointercancel: onCancel });
     });
 
-    row.addEventListener('pointermove', (ev) => {
+    const onMove = (ev) => {
       if (ev.pointerId !== id || drag) return;
       const mx = ev.clientX - x0, my = ev.clientY - y0;
       if (axis === null) {
@@ -2228,11 +2265,11 @@ body {
       if (dx > 0) dx = (was + mx) * 0.2;
       row.style.setProperty('transform',
         'translate3d(' + dx.toFixed(1) + 'px,0,0)');
-    });
+    };
 
     const finish = (ev) => {
       if (ev.pointerId !== id) return;
-      id = null;
+      release();
       if (axis !== 'x') return;
       rowGesture = false;
       // После движения вбок мышь на компьютере всё равно шлёт нажатие по
@@ -2255,12 +2292,12 @@ body {
         row.style.setProperty('transform', 'translate3d(0,0,0)');
       }
     };
-    row.addEventListener('pointerup', finish);
-    row.addEventListener('pointercancel', (ev) => {
+    const onUp = finish;
+    const onCancel = (ev) => {
       if (ev.pointerId !== id) return;
       rowGesture = false;
       finish(ev);
-    });
+    };
 
     // Пока строка открыта, нажатие по ней только закрывает её, а карточку
     // не открывает: иначе не выйдет передумать
