@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-x8Tz3hjw64fpGPsntQ5uGMDSmHuzVGH7pztr8EbCX6U=';
-               style-src 'sha256-gJgewdgMvWkuY7CjjZrVdZhtwwV2DK4sKeUZx+s4UuA=';
+               script-src 'sha256-GTlr1vqUqeH9Ko7/01sAbwBX3Nllw8lPwNCH2b8dhEU=';
+               style-src 'sha256-ebcQYjJFIQMcX4MSTs+LrmNOW+6YqT4rj2qrzpioXp4=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -323,6 +323,32 @@ body {
   cursor: pointer;
   flex: none;
 }
+
+/* Дописать к записи. Стоит перед крестиком: удаление остаётся с краю,
+   и палец не попадает по нему вместо продолжения.
+   Точка красная — тот же знак, что и на главной кнопке записи, чтобы
+   не пришлось догадываться, что делает эта кнопка. */
+.audio-more {
+  border: 0;
+  background: transparent;
+  color: #E23B3B;
+  font-size: 15px;
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  flex: none;
+  transition: background .18s ease;
+}
+.audio-more:active { background: rgba(226, 59, 59, .14); }
+/* Идёт дозапись: знак меняется на «стоп», и кнопка пульсирует —
+   то же поведение, что у главной кнопки записи */
+.audio-more.on {
+  background: rgba(226, 59, 59, .14);
+  animation: pulse 1.1s infinite;
+}
+/* Пока пишем, слушать и удалять нечего */
+.audio-btn:disabled, .audio-del:disabled { opacity: .35; cursor: default; }
 
 /* ---------- Разделы и колоды ---------- */
 .section { margin: 22px 0 6px; }
@@ -964,7 +990,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '31.07.2026, 21:33';
+  const BUILD = '31.07.2026, 22:13';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1023,6 +1049,19 @@ body {
 
   const PEAK_COUNT = 190;   // столько столбиков рисуем в дорожке
 
+  // Сколько кусков можно склеить в одну запись на карточке.
+  //
+  // Запись, к которой дописали продолжение, хранится не одним файлом,
+  // а несколькими. Склеить их в один нельзя: браузер отдаёт сжатый
+  // звук (webm или mp4), и два таких куска, положенные подряд, не
+  // проигрываются — заголовок в начале описывает только первый.
+  // Раскодировать и пересобрать тоже не выход: несжатый звук весит
+  // в десятки раз больше и не пролезает ни в хранилище, ни в файл
+  // обмена. Поэтому куски лежат порознь, а приложение показывает и
+  // проигрывает их как одну запись.
+  const AUDIO_PARTS_MAX = 12;
+  const AUDIO_CAP = 300;    // потолок звука на карточку, секунды
+
   // Имя файла обмена между устройствами.
   //
   // Расширение .txt выбрано намеренно. iPhone в окне выбора файла делает
@@ -1044,6 +1083,94 @@ body {
       const n = Math.round(Number(v));
       out.push(isFinite(n) ? Math.max(0, Math.min(100, n)) : 0);
     }
+    return out;
+  }
+
+  /**
+   * Куски записи: [{len, top}] — длина в секундах и громкость самого
+   * громкого места. Из файла обмена сюда может прийти что угодно,
+   * поэтому числа проверяются так же строго, как всё остальное.
+   */
+  function sanitizeParts(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const p of value.slice(0, AUDIO_PARTS_MAX)) {
+      if (!p || typeof p !== 'object') continue;
+      const len = Number(p.len);
+      if (!isFinite(len) || len <= 0) continue;
+      const top = Number(p.top);
+      out.push({
+        len: Math.round(Math.min(len, 3600) * 100) / 100,
+        top: (isFinite(top) && top > 0) ? Math.min(Math.round(top), 127) : 100,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Куски записи карточки — всегда непустым списком.
+   *
+   * У записей, сделанных до появления дозаписи, списка нет вовсе.
+   * Такая запись — это один кусок во всю длину; так она и подаётся
+   * дальше, чтобы остальному коду не приходилось разбирать два случая.
+   */
+  function audioParts(card) {
+    const list = sanitizeParts(card && card.parts);
+    if (list.length) return list;
+    return [{ len: (card && card.audioLen) || 0, top: 100 }];
+  }
+
+  /**
+   * Ключ куска в хранилище.
+   *
+   * Первый кусок лежит под самим номером карточки — ровно там, где
+   * лежали все записи раньше. Иначе прежние записи после обновления
+   * оказались бы потеряны.
+   */
+  function partKey(id, i) { return i ? id + '~' + i : id; }
+
+  /** Все ключи записи карточки — для удаления и для файла обмена. */
+  function audioKeys(card) {
+    const n = Math.max(1, sanitizeParts(card && card.parts).length);
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(partKey(card.id, i));
+    return out;
+  }
+
+  /** Убрать звук карточки целиком: и из хранилища, и с самой карточки. */
+  function forgetAudio(card) {
+    audioKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+    card.audio = false; card.audioLen = 0; card.peaks = []; card.parts = [];
+  }
+
+  /**
+   * Склеить рисунок звука: было la секунд с рисунком a, дописали lb с b.
+   *
+   * Каждый кусок занимает в дорожке долю по своей длине — короткое
+   * продолжение и выглядит коротким хвостом. Громкость приводится к
+   * общей шкале: замеры каждого куска хранятся нормированными на его
+   * собственный максимум, и без пересчёта тихое продолжение смотрелось
+   * бы таким же громким, как основная запись.
+   */
+  function joinPeaks(a, la, ta, b, lb, tb) {
+    const A = sanitizePeaks(a), B = sanitizePeaks(b);
+    const l1 = Math.max(0, Number(la) || 0), l2 = Math.max(0, Number(lb) || 0);
+    const whole = l1 + l2;
+    if (!whole) return [];
+    const t1 = Math.max(1, Number(ta) || 100), t2 = Math.max(1, Number(tb) || 100);
+    const top = Math.max(t1, t2);
+    const cut = Math.max(0, Math.min(PEAK_COUNT, Math.round(PEAK_COUNT * l1 / whole)));
+    const out = [];
+    const take = (src, from, to, k) => {
+      const span = Math.max(1, to - from);
+      for (let i = from; i < to; i++) {
+        if (!src.length) { out.push(0); continue; }
+        const at = Math.min(src.length - 1, Math.floor((i - from) / span * src.length));
+        out.push(Math.max(0, Math.min(100, Math.round(src[at] * k))));
+      }
+    };
+    take(A, 0, cut, t1 / top);
+    take(B, cut, PEAK_COUNT, t2 / top);
     return out;
   }
 
@@ -1145,6 +1272,9 @@ body {
             // записей, сделанных на лету, и полоса времени ломается.
             audioLen: (typeof c.audioLen === 'number' && isFinite(c.audioLen)
                        && c.audioLen > 0) ? Math.min(c.audioLen, 3600) : 0,
+            // Куски записи, если к ней дописывали продолжение. У обычной
+            // записи список пуст — она и так одно целое.
+            parts: sanitizeParts(c.parts),
             // Форма волны: столбики громкости, целые числа 0–100.
             // Считается один раз при записи и хранится рядом с карточкой,
             // иначе при каждом открытии пришлось бы заново раскодировать
@@ -1393,7 +1523,9 @@ body {
         // Пустой объект считаем отсутствующим: именно так выглядит
         // запись, которая не долежала до конца сделки с хранилищем
         if (!blob || !blob.size) {
-          card.audio = false; card.audioLen = 0; card.peaks = [];
+          // Заодно подчищаем куски продолжения: без первого они всё
+          // равно ни к чему не относятся и просто заняли бы место
+          forgetAudio(card);
           fixed++;
         }
         step(i + 1);
@@ -3467,7 +3599,10 @@ body {
       if (activeRecorder) return;                 // уже пишем
       const sup = recordingSupport();
       if (!sup.ok) { alert(RECORD_HELP[sup.why]); return; }
-      startRecording(card, audioBar, { timer, live, idle, pauseBtn });
+      startRecording(card, audioBar, {
+        tick: (text) => { timer.textContent = text; },
+        live: live, idle: idle, pauseBtn: pauseBtn,
+      });
     });
 
     // Значок паузы не меняется никогда — меняется только его плотность.
@@ -3508,7 +3643,7 @@ body {
    */
   function live_meter(stream) {
     const Ctx = self.AudioContext || self.webkitAudioContext;
-    const empty = { sample() {}, finish() { return []; } };
+    const empty = { sample() {}, finish() { return []; }, top() { return 100; } };
     if (!Ctx) return empty;
     let ctx, node, buf;
     try {
@@ -3523,7 +3658,12 @@ body {
     } catch (e) { return empty; }
 
     const levels = [];
+    // Самое громкое место за всю запись. Замеры ниже нормируются на
+    // него, поэтому сама эта величина нужна отдельно: по ней куски
+    // одной записи приводятся к общей шкале громкости.
+    let loudest = 0;
     return {
+      top() { return loudest || 100; },
       sample() {
         try {
           node.getByteTimeDomainData(buf);
@@ -3541,6 +3681,7 @@ body {
         // Растягиваем замеры на PEAK_COUNT столбиков и нормируем по
         // самому громкому месту: иначе тихая запись выглядит пустой
         const top = Math.max.apply(null, levels);
+        loudest = top;
         if (top < 2) return [];            // была тишина — рисовать нечего
         const out = [];
         for (let i = 0; i < PEAK_COUNT; i++) {
@@ -3558,7 +3699,24 @@ body {
     };
   }
 
-  function startRecording(card, audioBar, ui) {
+  /**
+   * Записать голос на карточку.
+   *
+   * append — дописать продолжение к тому, что уже есть. Новый кусок
+   * ложится в хранилище отдельным ключом и приписывается к списку
+   * кусков карточки; длина и рисунок звука складываются с прежними.
+   */
+  function startRecording(card, audioBar, ui, append) {
+    // Сколько ещё можно записать. У дозаписи потолок общий с тем, что
+    // уже лежит на карточке, иначе пятиминутный предел обходился бы
+    // простым нажатием «дописать».
+    const already = append ? (card.audioLen || 0) : 0;
+    const room = Math.max(0, AUDIO_CAP - already);
+    if (append && room < 1) {
+      alert('На карточке уже пять минут звука — больше не поместится.');
+      ui.idle();
+      return;
+    }
     navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
       // Safari отдаёт mp4, Chrome — webm. Не навязываем формат: пусть
       // браузер выберет свой, иначе на одном из них запись не стартует.
@@ -3566,7 +3724,7 @@ body {
       try { rec = new self.MediaRecorder(stream); }
       catch (e) {
         stream.getTracks().forEach((t) => t.stop());
-        alert('Не удалось начать запись.'); return;
+        alert('Не удалось начать запись.'); ui.idle(); return;
       }
 
       const chunks = [];
@@ -3585,9 +3743,9 @@ body {
       let elapsed = 0, since = Date.now();
       const tick = setInterval(() => {
         const now = rec.state === 'recording' ? elapsed + (Date.now() - since) / 1000 : elapsed;
-        ui.timer.textContent = mmss(now);
+        ui.tick(mmss(now), now);
         if (rec.state === 'recording') live.sample();   // тишину на паузе не пишем
-        if (now >= 300) stopRecording();          // потолок 5 минут на карточку
+        if (now >= room) stopRecording();     // потолок 5 минут на карточку
       }, 200);
 
       rec.onpause = () => { elapsed += (Date.now() - since) / 1000; };
@@ -3601,22 +3759,71 @@ body {
         stream.getTracks().forEach((t) => t.stop());
         activeRecorder = null;
         ui.idle();
-        ui.pauseBtn.classList.remove('paused', 'recording');
+        if (ui.pauseBtn) ui.pauseBtn.classList.remove('paused', 'recording');
 
         const snapped = live.finish();
+        const loud = live.top();
 
         const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-        if (!blob.size) return;
+        if (!blob.size) {
+          // Пусто — но плеер уже написал «Сохраняю…». Возвращаем его в
+          // нормальный вид, иначе подпись зависла бы навсегда
+          if (append) { clear(audioBar); buildPlayer(audioBar, card); }
+          return;
+        }
+
+        // ---- дозапись: новый кусок в конец, всё остальное складываем
+        if (append) {
+          const was = audioParts(card);
+          const slot = was.length;
+          if (slot >= AUDIO_PARTS_MAX) {
+            alert('К одной записи можно дописать не больше '
+              + (AUDIO_PARTS_MAX - 1) + ' продолжений.');
+            return;
+          }
+          const grew = Math.max(0.5, Math.round(elapsed * 100) / 100);
+          const key = partKey(card.id, slot);
+          AudioStore.put(key, blob)
+            .then(() => AudioStore.get(key))
+            .then((back) => {
+              if (!back || !back.size) {
+                alert('Продолжение не сохранилось. Попробуйте ещё раз.');
+                clear(audioBar); buildPlayer(audioBar, card);
+                return;
+              }
+              const hadLen = card.audioLen || 0;
+              let hadTop = 100;
+              was.forEach((p) => { if (p.top > hadTop) hadTop = p.top; });
+              card.parts = was.concat([{ len: grew, top: loud }]);
+              card.peaks = joinPeaks(card.peaks, hadLen, hadTop, snapped, grew, loud);
+              card.audioLen = Math.round((hadLen + grew) * 100) / 100;
+              card.audio = true;
+              save();
+              clear(audioBar); buildPlayer(audioBar, card);
+            })
+            .catch(() => {
+              alert('Не удалось сохранить продолжение.');
+              clear(audioBar); buildPlayer(audioBar, card);
+            });
+          return;
+        }
+
         AudioStore.put(card.id, blob)
           .then(() => AudioStore.get(card.id))
           .then((back) => {
           if (!back || !back.size) {
             alert('Запись не сохранилась. Попробуйте ещё раз.'); return;
           }
+          // Запись начата заново — прежние куски продолжения не при чём
+          const stale = audioKeys(card).slice(1);
+          stale.forEach((k) => { AudioStore.del(k).catch(() => {}); });
           card.audio = true;
           card.audioLen = Math.max(1, Math.round(elapsed));
           // Форма волны уже снята с микрофона — рисуем сразу
           card.peaks = snapped;
+          // Один кусок во всю длину. Сумма длин кусков обязана
+          // совпадать с общей длиной — по ней считается перемотка
+          card.parts = [{ len: card.audioLen, top: loud }];
           save();
           clear(audioBar); buildPlayer(audioBar, card);
           // Если с микрофона снять не удалось (старый браузер), пробуем
@@ -3634,6 +3841,10 @@ body {
       ui.live();
       rec.start();
     }).catch((err) => {
+      // Кнопка обязана вернуться в исходное состояние: иначе после
+      // отказа в микрофоне она осталась бы висеть значком «стоп»,
+      // и нажать на неё второй раз было бы уже нечем
+      ui.idle();
       const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
       alert(denied
         ? 'Доступ к микрофону запрещён. Разрешите его для этой страницы в настройках браузера.'
@@ -3765,12 +3976,18 @@ body {
   function stillPlayer(bar, card) {
     const face = playerFace(card);
     face.play.setAttribute('tabindex', '-1');
+    const more = el('button', {
+      class: 'audio-more',
+      attrs: { type: 'button', 'aria-label': 'Дописать к записи', tabindex: '-1' },
+      text: '●',
+    });
     const del = el('button', {
       class: 'audio-del',
       attrs: { type: 'button', 'aria-label': 'Удалить запись', tabindex: '-1' },
       text: '✕',
     });
-    bar.appendChild(el('div', { class: 'audio-row' }, [face.play, face.wave, del]));
+    bar.appendChild(el('div', { class: 'audio-row' },
+      [face.play, face.wave, more, del]));
     bar.appendChild(face.label);
   }
 
@@ -3782,8 +3999,26 @@ body {
     const total = face.total;
     let bars = face.bars;
 
-    const duration = () => (audio && isFinite(audio.duration) && audio.duration > 0)
-      ? audio.duration : total;
+    // Куски записи. Снаружи это одна дорожка с одним временем, внутри —
+    // несколько отдельных файлов, которые проигрываются подряд.
+    const list = audioParts(card);
+    const offs = [];            // с какой секунды начинается каждый кусок
+    let acc = 0;
+    list.forEach((p) => { offs.push(Math.round(acc * 100) / 100); acc += p.len; });
+    const chainLen = Math.round(acc * 100) / 100;
+    const many = list.length > 1;
+    let idx = 0;                // какой кусок сейчас в проигрывателе
+
+    const duration = () => {
+      // У склеенной записи длину знаем только мы: сам файл в
+      // проигрывателе — это один кусок, и спрашивать его бесполезно
+      if (many) return chainLen || total;
+      return (audio && isFinite(audio.duration) && audio.duration > 0)
+        ? audio.duration : total;
+    };
+
+    /** Сколько прошло с начала всей записи, а не текущего куска. */
+    const at = () => (audio ? (offs[idx] || 0) + (audio.currentTime || 0) : 0);
 
     const setTime = (cur) => {
       const dur = duration();
@@ -3825,7 +4060,7 @@ body {
     let raf = 0;
     const follow = () => {
       if (!audio || audio.paused) { raf = 0; return; }
-      setTime(audio.currentTime);
+      setTime(at());
       raf = requestAnimationFrame(follow);
     };
     const stopFollow = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
@@ -3834,62 +4069,119 @@ body {
       text: '✕',
       on: {
         click: () => {
+          if (taping) return;             // идёт дозапись — не до удаления
           if (!confirm('Удалить голосовую запись с этой карточки?')) return;
           stopFollow();
           if (audio) audio.pause();
-          AudioStore.del(card.id).catch(() => {});
-          card.audio = false; card.audioLen = 0; card.peaks = [];
+          forgetAudio(card);              // вместе со всеми продолжениями
           save(); clear(bar);
         },
       },
     });
 
-    let audio = null, url = null, loading = false;
+    let audio = null, loading = false;
+    const urls = [];            // ссылки на куски, чтобы не доставать дважды
+    let want = -1;              // куда перемотать, как только кусок загрузится
+
+    /** Ссылка на кусок i. null — куска нет в хранилище. */
+    function partUrl(i) {
+      if (urls[i]) return Promise.resolve(urls[i]);
+      return AudioStore.get(partKey(card.id, i)).then((blob) => {
+        if (!blob || !blob.size) return null;
+        urls[i] = URL.createObjectURL(blob);
+        return urls[i];
+      });
+    }
+
+    /**
+     * Поставить в проигрыватель кусок i.
+     *
+     * Элемент звука один на все куски, и это не мелочь. На iPhone
+     * проиграть можно только тот элемент, который человек уже разбудил
+     * нажатием; новый, созданный по ходу дела, Safari молча откажется
+     * запускать — продолжение оборвалось бы на первом же стыке.
+     * Поэтому меняем источник, а сам элемент оставляем прежним.
+     */
+    function goPart(i, autoplay) {
+      return partUrl(i).then((u) => {
+        if (!u) {                        // кусок потерялся — дальше нечего
+          play.textContent = '▶'; playing = false; stopFollow();
+          label.textContent = 'Продолжение записи не найдено';
+          return null;
+        }
+        idx = i;
+        audio.src = u;
+        // Без явной перезагрузки Safari какое-то время держит прежний
+        // кусок и отдаёт его время — черта прыгала бы назад
+        if (typeof audio.load === 'function') audio.load();
+        if (autoplay) {
+          const pr = audio.play();
+          if (pr && pr.catch) pr.catch(() => {});
+        }
+        return audio;
+      }).catch(() => null);
+    }
 
     /** Достать запись и подготовить проигрывание. */
     function ensureAudio() {
       if (audio) return Promise.resolve(audio);
       if (loading) return Promise.reject(new Error('busy'));
       loading = true;
-      return AudioStore.get(card.id).then((blob) => {
+      return partUrl(0).then((u) => {
         loading = false;
-        if (!blob || !blob.size) {
+        if (!u) {
           // Отметка врёт — снимаем её, чтобы карточка не обещала звук,
           // которого нет. Чаще всего так бывает после восстановления
           // резервной копии: в ней только текст, звука там нет.
           label.textContent = 'Запись не найдена — отметка снята';
-          card.audio = false; card.audioLen = 0; card.peaks = [];
+          forgetAudio(card);
           save();
           setTimeout(() => { clear(bar); }, 1200);
           return null;
         }
-        url = URL.createObjectURL(blob);
-        audio = new Audio(url);
+        idx = 0;
+        audio = new Audio(u);
         audio.preload = 'metadata';
-        audio.ontimeupdate = () => { if (audio.paused) setTime(audio.currentTime); };
-        audio.onloadedmetadata = () => setTime(audio.currentTime || 0);
+        audio.ontimeupdate = () => { if (audio.paused) setTime(at()); };
+        audio.onloadedmetadata = () => {
+          // Перемотку на другой кусок выставляем только здесь: пока он
+          // не загружен, браузер её просто не примет
+          if (want >= 0) {
+            try { audio.currentTime = want; } catch (e) { /* не принял */ }
+            want = -1;
+          }
+          setTime(at());
+        };
         audio.onplay = () => {
           play.textContent = '❚❚'; playing = true;
-          setTime(audio.currentTime); stopFollow(); follow();
+          setTime(at()); stopFollow(); follow();
         };
         audio.onpause = () => {
           play.textContent = '▶'; playing = false;
-          stopFollow(); setTime(audio.currentTime);
+          stopFollow(); setTime(at());
         };
         audio.onended = () => {
-          play.textContent = '▶'; playing = false; stopFollow(); setTime(0);
+          // Кусок кончился — сразу берём следующий, чтобы для человека
+          // это осталось одной непрерывной записью
+          if (many && idx + 1 < list.length) { goPart(idx + 1, true); return; }
+          play.textContent = '▶'; playing = false; stopFollow();
+          setTime(0);
+          if (many) goPart(0, false);   // вернуться к началу для повтора
         };
         audio.onerror = () => { label.textContent = 'Не удалось воспроизвести'; };
 
         // У старых записей формы волны нет — считаем сейчас и запоминаем,
-        // чтобы в следующий раз она появилась сразу
-        if (!card.peaks || card.peaks.length === 0) {
-          computePeaks(blob).then((peaks) => {
-            if (peaks && peaks.length) {
+        // чтобы в следующий раз она появилась сразу. Только для цельной
+        // записи: по одному первому куску рисунок всей волны не построить.
+        if (!many && (!card.peaks || card.peaks.length === 0)) {
+          AudioStore.get(card.id).then((blob) => {
+            if (!blob) return null;
+            return computePeaks(blob).then((peaks) => {
+              if (!peaks || !peaks.length) return;
               card.peaks = peaks; save();
               bars = drawBars(barBox, peaks, bars.length);
-              setTime(audio ? audio.currentTime : 0);
-            }
+              setTime(at());
+            });
           }).catch(() => {});
         }
         return audio;
@@ -3901,8 +4193,56 @@ body {
     }
 
     play.addEventListener('click', () => {
+      if (taping) return;                    // сейчас пишем, а не слушаем
       if (audio && !audio.paused) { audio.pause(); return; }
-      ensureAudio().then((a) => { if (a) a.play(); }).catch(() => {});
+      ensureAudio().then((a) => {
+        if (!a) return;
+        const pr = a.play();
+        if (pr && pr.catch) pr.catch(() => {});
+      }).catch(() => {});
+    });
+
+    // ------------------------------------------------------------------
+    // Дозапись: одно нажатие — продолжаю, второе — останавливаю.
+    // Кнопка стоит перед крестиком, чтобы удаление осталось с краю и
+    // палец не попадал по нему вместо продолжения.
+    // ------------------------------------------------------------------
+    let taping = false;
+    const more = el('button', {
+      class: 'audio-more',
+      attrs: { type: 'button', 'aria-label': 'Дописать к записи' },
+      text: '●',
+    });
+    const showTaping = (on) => {
+      taping = on;
+      more.classList.toggle('on', on);
+      more.textContent = on ? '■' : '●';
+      more.setAttribute('aria-label', on ? 'Остановить дозапись' : 'Дописать к записи');
+      play.disabled = on;
+      del.disabled = on;
+    };
+    more.addEventListener('click', () => {
+      if (taping) { stopRecording(); return; }
+      if (activeRecorder) return;            // где-то уже идёт запись
+      const sup = recordingSupport();
+      if (!sup.ok) { alert(RECORD_HELP[sup.why]); return; }
+      if (list.length >= AUDIO_PARTS_MAX) {
+        alert('К одной записи можно дописать не больше '
+          + (AUDIO_PARTS_MAX - 1) + ' продолжений.');
+        return;
+      }
+      stopFollow();
+      if (audio && !audio.paused) audio.pause();
+      showTaping(true);
+      label.textContent = 'Дописываю… 0:00';
+      startRecording(card, bar, {
+        tick: (text) => { label.textContent = 'Дописываю… ' + text; },
+        live: () => {},
+        // Кусок уже записан, но ещё не лёг в хранилище. Плеер соберут
+        // заново, когда лёг; до тех пор говорим, что происходит.
+        idle: () => { showTaping(false); label.textContent = 'Сохраняю…'; },
+        pauseBtn: null,
+      }, true);
     });
 
     // Перемотка нажатием и протягиванием по дорожке
@@ -3912,11 +4252,26 @@ body {
       const p = Math.max(0, Math.min(1, (clientX - box.left) / box.width));
       const dur = duration();
       if (!dur) return;
-      setTime(p * dur);
-      ensureAudio().then((a) => { if (a) a.currentTime = p * dur; }).catch(() => {});
+      const t = p * dur;
+      setTime(t);
+      ensureAudio().then((a) => {
+        if (!a) return;
+        if (!many) { a.currentTime = t; return; }
+        // Найти кусок, в который попала точка, и перемотать внутри него
+        let i = 0;
+        while (i + 1 < list.length && t >= offs[i + 1]) i++;
+        const local = Math.max(0, t - offs[i]);
+        if (i === idx) {
+          try { a.currentTime = local; } catch (e) { /* не принял */ }
+          return;
+        }
+        want = local;
+        goPart(i, !a.paused);
+      }).catch(() => {});
     };
     let seeking = false;
     wave.addEventListener('pointerdown', (ev) => {
+      if (taping) return;              // во время дозаписи перематывать нечего
       seeking = true;
       if (wave.setPointerCapture) wave.setPointerCapture(ev.pointerId);
       seekTo(ev.clientX);
@@ -3936,19 +4291,19 @@ body {
     // столбиков, сколько в неё влезает, и заново красим пройденную часть
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(() => {
-        if (face.refit()) { bars = face.bars; setTime(audio ? audio.currentTime : 0); }
+        if (face.refit()) { bars = face.bars; setTime(at()); }
       });
     }
 
-    // Ссылку на объект надо освободить, иначе память держится до
-    // перезагрузки страницы
+    // Ссылки на объекты надо освободить, иначе память держится до
+    // перезагрузки страницы. Кусков может быть несколько — отпускаем все.
     audioCleanup.push(() => {
       stopFollow();
       if (audio) { audio.pause(); }
-      if (url) URL.revokeObjectURL(url);
+      urls.forEach((u) => { if (u) URL.revokeObjectURL(u); });
     });
 
-    bar.appendChild(el('div', { class: 'audio-row' }, [play, wave, del]));
+    bar.appendChild(el('div', { class: 'audio-row' }, [play, wave, more, del]));
     bar.appendChild(label);
   }
 
@@ -4124,8 +4479,11 @@ body {
       card ? () => {
         const idx = deck.cards.findIndex((c) => c.id === card.id);
         // Вместе с карточкой убираем и её запись, иначе звук останется
-        // висеть в хранилище навсегда — никто уже на него не сошлётся
-        if (card.audio) AudioStore.del(card.id).catch(() => {});
+        // висеть в хранилище навсегда — никто уже на него не сошлётся.
+        // Кусков продолжения может быть несколько — убираем все.
+        if (card.audio) {
+          audioKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+        }
         deck.cards = deck.cards.filter((c) => c.id !== card.id);
         if (view.name === 'read') {
           if (deck.cards.length === 0) {
@@ -4318,10 +4676,18 @@ body {
       const next = (i) => {
         if (i >= withAudio.length) return Promise.resolve();
         const card = withAudio[i];
-        return AudioStore.get(card.id)
-          .then((blob) => (blob ? AudioStore.toText(blob) : null))
-          .then((text) => { if (text) clips[card.id] = text; })
-          .catch(() => { /* запись потерялась — переносим карточку без неё */ })
+        // Запись может состоять из нескольких кусков — в файл идут все.
+        // Иначе на другом устройстве продолжение просто пропало бы.
+        const keys = audioKeys(card);
+        const grab = (k) => {
+          if (k >= keys.length) return Promise.resolve();
+          return AudioStore.get(keys[k])
+            .then((blob) => (blob ? AudioStore.toText(blob) : null))
+            .then((text) => { if (text) clips[keys[k]] = text; })
+            .catch(() => { /* кусок потерялся — берём что есть */ })
+            .then(() => grab(k + 1));
+        };
+        return grab(0)
           .then(() => {
             done++;
             report('Собираю записи: ' + done + ' из '
@@ -4335,9 +4701,13 @@ body {
         // Помечаем файл: что это и сколько записей внутри. Иначе
         // резервную копию (только текст) не отличить от файла обмена —
         // оба лежат на рабочем столе с расширением .txt.
+        // Считаем карточки, а не куски: человеку важно, сколько записей
+        // уехало, а не из скольких файлов каждая из них собрана
+        let got = 0;
+        withAudio.forEach((c) => { if (clips[c.id]) got++; });
         return JSON.stringify(Object.assign({}, state, {
           kind: 'sync', syncedAt: Date.now(),
-          clipCount: Object.keys(clips).length,
+          clipCount: got,
           clipsExpected: withAudio.length,
           clips: clips,
         }), null, 2);
@@ -4797,7 +5167,7 @@ body {
           }
         }
         // Всё, что осталось в byText, в файле не значится
-        byText.forEach((c) => { if (c.audio) dropped.push(c.id); });
+        byText.forEach((c) => { if (c.audio) dropped.push(c); });
         sec.decks.push(deck);
       }
       // Колоды нашего раздела, которых в файле нет
@@ -4805,7 +5175,7 @@ body {
         const kept = new Set(inSec.decks.map((d) => d.name));
         mine.decks.forEach((d) => {
           if (kept.has(d.name)) return;
-          d.cards.forEach((c) => { if (c.audio) dropped.push(c.id); });
+          d.cards.forEach((c) => { if (c.audio) dropped.push(c); });
         });
       }
       sections.push(sec);
@@ -4815,14 +5185,16 @@ body {
     state.sections.forEach((sec) => {
       if (kept.has(sec.name)) return;
       sec.decks.forEach((d) => d.cards.forEach((c) => {
-        if (c.audio) dropped.push(c.id);
+        if (c.audio) dropped.push(c);
       }));
     });
 
     state.sections = sections;
     // Звук удалённых карточек — из хранилища. Иначе он остался бы лежать
     // мёртвым грузом: карточки нет, а место занято.
-    dropped.forEach((id) => { AudioStore.del(id).catch(() => {}); });
+    dropped.forEach((c) => {
+      audioKeys(c).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+    });
     return dropped.length;
   }
 
@@ -4861,6 +5233,7 @@ body {
             if (inCard.audio) {
               audioLinks.push({ from: inCard.id, card: mine, len: inCard.audioLen,
                                 peaks: sanitizePeaks(inCard.peaks),
+                                parts: sanitizeParts(inCard.parts),
                                 existing: true });
             }
             continue;
@@ -4876,7 +5249,8 @@ body {
           added++;
           if (inCard.audio) {
             audioLinks.push({ from: inCard.id, card: fresh, len: inCard.audioLen,
-                              peaks: sanitizePeaks(inCard.peaks) });
+                              peaks: sanitizePeaks(inCard.peaks),
+                              parts: sanitizeParts(inCard.parts) });
           }
         }
       }
@@ -4890,7 +5264,10 @@ body {
     // Сколько записей было в файле — нужно, чтобы честно объяснить
     // итог: «две записи в файле, обе уже есть» и «две записи в файле,
     // ни одна не легла» выглядят одинаково, а означают разное
-    const inFile = Object.keys(clips || {}).length;
+    // Считаем записи, а не куски: продолжение — часть той же записи,
+    // и «в файле три записи» вместо одной сбивало бы с толку
+    const inFile = Object.keys(clips || {})
+      .filter((k) => k.indexOf('~') < 0).length;
     let ok = 0, kept = 0, lastError = null;
     // Причины отказов копим поимённо. Гадать «наверное, кончилось
     // место» бессмысленно: в прошлый раз дело было совсем в другом,
@@ -4925,24 +5302,44 @@ body {
       };
 
       const take = () => {
-        const blob = AudioStore.fromText(clips[link.from]);
-        if (!blob || !blob.size) { why.parse++; cont(); return; }
+        // Запись могла приехать несколькими кусками. Берём подряд,
+        // пока куски есть: оборвавшийся хвост не должен мешать
+        // перенести хотя бы начало записи.
+        const want = Math.max(1, (link.parts && link.parts.length) || 1);
+        const blobs = [];
+        for (let k = 0; k < want; k++) {
+          const b = AudioStore.fromText(clips[partKey(link.from, k)]);
+          if (!b || !b.size) break;
+          blobs.push(b);
+        }
+        if (!blobs.length) { why.parse++; cont(); return; }
+
         // Отмечаем звук только после того, как убедились, что он
         // действительно читается обратно. Иначе карточка могла бы
         // заявлять запись, которой на деле нет.
-        AudioStore.put(link.card.id, blob)
-          .then(() => AudioStore.get(link.card.id))
-          .then((back) => {
+        const put = (k) => {
+          if (k < blobs.length) {
+            return AudioStore.put(partKey(link.card.id, k), blobs[k])
+              .then(() => put(k + 1));
+          }
+          return AudioStore.get(link.card.id).then((back) => {
             if (!back || !back.size) { why.verify++; cont(); return; }
             link.card.audio = true;
-            link.card.audioLen = link.len || 0;
+            const parts = (link.parts || []).slice(0, blobs.length);
+            link.card.parts = parts;
+            // Длину пересчитываем по тем кускам, что дошли: иначе
+            // дорожка обещала бы звук, которого на устройстве нет
+            link.card.audioLen = parts.length
+              ? Math.round(parts.reduce((s, p) => s + p.len, 0) * 100) / 100
+              : (link.len || 0);
             if (Array.isArray(link.peaks) && link.peaks.length) {
               link.card.peaks = link.peaks;
             }
             ok++;
             cont();
-          })
-          .catch((e) => { why.write++; lastError = e; cont(); });
+          });
+        };
+        put(0).catch((e) => { why.write++; lastError = e; cont(); });
       };
 
       if (!link.existing) { take(); return; }
