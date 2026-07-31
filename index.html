@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-dLHwnp2qCHChWl4dVM0aTqSgrRZ/w6SjLiJ8cpAlUEo=';
+               script-src 'sha256-U7gPe7nCh57iKSQaDwfmXcOeN3vao+E9EW8j2wFv7gY=';
                style-src 'sha256-V0tddd2gRcjbSdOKztONrVM1JRm4IKZDkG/O1DCaAd8=';
                img-src 'self' data:;
                media-src blob:;
@@ -1849,8 +1849,12 @@ body {
   // из одной сетки в другую. Соседи доезжают на новые места приёмом FLIP:
   // замерили «до», переставили, вернули сдвигом и сняли его с переходом.
   // ------------------------------------------------------------------
-  const HOLD_MS = 400;     // сколько держать, чтобы поднять
-  const HOLD_SLOP = 8;     // сдвинулись раньше — значит, это прокрутка
+  const HOLD_MS = 400;     // сколько держать пальцем, чтобы поднять
+  const HOLD_SLOP = 8;     // палец поехал раньше — значит, это прокрутка
+  // Мышью не «держат», ею сразу тянут. И держать нечего: мышь не
+  // прокручивает страницу перетаскиванием, разводить нечего с чем.
+  // Поэтому на компьютере элемент берётся с первым же движением.
+  const MOUSE_SLOP = 10;   // с какого сдвига мышь считается тянущей
   const LIFT_MS = 140;     // подъём элемента под пальцем
   const DROP_MS = 220;     // соседи расступаются и элемент опускается
   const EDGE = 64;         // у края экрана страница подкручивается сама
@@ -1916,7 +1920,18 @@ body {
    * тем, что делать, когда элемент уже подняли.
    */
   function attachHold(node, pick) {
-    let id = null, x0 = 0, y0 = 0;
+    let id = null, x0 = 0, y0 = 0, mouse = false;
+
+    /** Поднять элемент и забрать указатель себе. */
+    const begin = () => {
+      // Сначала поднимаем, и только потом забираем указатель: подъём
+      // переносит узел в другое место разметки, а перенос узла сбрасывает
+      // захват — в обратном порядке он бы просто потерялся
+      pick(id, x0, y0);
+      if (node.setPointerCapture) {
+        try { node.setPointerCapture(id); } catch (e) { /* не поддержано */ }
+      }
+    };
 
     node.addEventListener('pointerdown', (ev) => {
       if (!ev.isPrimary || drag) return;
@@ -1924,25 +1939,32 @@ body {
       const t = ev.target;
       if (t && t.closest && t.closest('.iconbtn')) return;
       id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
+      mouse = ev.pointerType === 'mouse';
       cancelHold();
-      holdTimer = setTimeout(() => {
-        holdTimer = null;
-        // Сначала поднимаем, и только потом забираем указатель себе:
-        // подъём переносит узел в другое место разметки, а перенос узла
-        // сбрасывает захват — в обратном порядке он бы просто потерялся
-        pick(id, x0, y0);
-        if (node.setPointerCapture) {
-          try { node.setPointerCapture(id); } catch (e) { /* не поддержано */ }
-        }
-      }, HOLD_MS);
+      // Ждём удержания только от пальца. Мышь начнёт тянуть сама, с
+      // первым движением: если требовать паузы и от неё, человек успевает
+      // повести мышь раньше срока, ожидание отменяется порогом сдвига — и
+      // не происходит ничего, а по отпусканию открывается карточка.
+      if (mouse) return;
+      holdTimer = setTimeout(() => { holdTimer = null; begin(); }, HOLD_MS);
     });
 
     node.addEventListener('pointermove', (ev) => {
       if (ev.pointerId !== id) return;
       if (drag && drag.id === id) { drag.move(ev.clientX, ev.clientY); return; }
+      const dx = Math.abs(ev.clientX - x0), dy = Math.abs(ev.clientY - y0);
+
+      if (mouse) {
+        // Строку карточки могут вести вбок — это другой жест, свой.
+        // Он объявляет о себе раньше: его порог меньше нашего.
+        if (rowGesture) { id = null; return; }
+        if (dx < MOUSE_SLOP && dy < MOUSE_SLOP) return;
+        begin();
+        drag.move(ev.clientX, ev.clientY);
+        return;
+      }
       // Палец поехал раньше времени — это прокрутка, а не перенос
-      if (Math.abs(ev.clientX - x0) > HOLD_SLOP
-        || Math.abs(ev.clientY - y0) > HOLD_SLOP) cancelHold();
+      if (dx > HOLD_SLOP || dy > HOLD_SLOP) cancelHold();
     });
 
     node.addEventListener('pointerup', (ev) => {
