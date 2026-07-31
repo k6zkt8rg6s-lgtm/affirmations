@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-3g5RhcQuc3mVIYjq1tm1PDPhmKCaK6B0uOLkRdw0IHI=';
+               script-src 'sha256-uhLjcHwtda7BGBOQleJKRpY+5AFhppd49OGRrdVYRtQ=';
                style-src 'sha256-l6V+MmaEJ+ecvK0/tvbwo9g2UYYhQXPhMsVnpe4+/V4=';
                img-src 'self' data:;
                media-src blob:;
@@ -1039,7 +1039,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 00:00';
+  const BUILD = '01.08.2026, 00:10';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1162,9 +1162,14 @@ body {
       const len = Number(p.len);
       if (!isFinite(len) || len <= 0) continue;
       const top = Number(p.top);
+      // head — сколько тишины в начале куска. Её добавляет сжатие, и
+      // между кусками она слышна как провал. Меряется один раз при
+      // первом проигрывании и хранится, чтобы пропускать её и потом.
+      const head = Number(p.head);
       out.push({
         len: Math.round(Math.min(len, 3600) * 100) / 100,
         top: (isFinite(top) && top > 0) ? Math.min(Math.round(top), 127) : 100,
+        head: (isFinite(head) && head > 0) ? Math.min(Math.round(head * 1000) / 1000, 1) : 0,
       });
     }
     return out;
@@ -1180,7 +1185,7 @@ body {
   function audioParts(card) {
     const list = sanitizeParts(card && card.parts);
     if (list.length) return list;
-    return [{ len: (card && card.audioLen) || 0, top: 100 }];
+    return [{ len: (card && card.audioLen) || 0, top: 100, head: 0 }];
   }
 
   /**
@@ -4139,6 +4144,19 @@ body {
     function engine() {
       if (ctx) return ctx;
       try { ctx = new Ctx(); } catch (e) { ctx = null; }
+      // Движок сам сообщает, когда его усыпили. Это самый честный
+      // признак ухода в фон: неважно, нажали кнопку блокировки,
+      // перешли в другое приложение или позвонили — если он уснул,
+      // звук надо срочно передавать обычному проигрывателю.
+      if (ctx && ctx.addEventListener) {
+        try {
+          ctx.addEventListener('statechange', () => {
+            if (ctx && ctx.state !== 'running' && running && hooks.asleep) {
+              hooks.asleep();
+            }
+          });
+        } catch (e) { /* не поддерживается — обойдёмся событиями страницы */ }
+      }
       return ctx;
     }
 
@@ -4151,7 +4169,7 @@ body {
     let running = false;
     let sources = [];
     let turn = 0;             // номер захода: старые источники не мешают новым
-    const hooks = { end: null, fail: null };
+    const hooks = { end: null, fail: null, asleep: null };
 
     function decodeOne(i) {
       return AudioStore.get(partKey(card.id, i))
@@ -4298,6 +4316,15 @@ body {
       },
       total() { return total; },
       playing() { return running; },
+      /**
+       * Не усыплён ли движок.
+       *
+       * Телефон может заморозить приложение, не дав ему ни одного
+       * события: обработчики просто не выполнялись. Тогда движок
+       * считает, что играет, а звука давно нет. Проверять надо у
+       * самого движка, а не у нашей отметки.
+       */
+      awake() { return !!ctx && ctx.state === 'running'; },
       ready() { return ready; },
       /** Настоящие длины кусков — их стоит запомнить на карточке. */
       lengths() { return pieces.map((p) => Math.round(p.len * 100) / 100); },
@@ -4320,6 +4347,8 @@ body {
       heads() { return pieces.map((p) => p.from); },
       onEnd(fn) { hooks.end = fn; },
       onFail(fn) { hooks.fail = fn; },
+      /** Движок усыпили — звук надо срочно передать другому. */
+      onAsleep(fn) { hooks.asleep = fn; },
       close() {
         stopAll();
         pieces.length = 0;
@@ -4364,16 +4393,25 @@ body {
         ? audio.duration : total;
     };
 
-    // После передачи звука в фон обычный проигрыватель играет целые
-    // файлы — вместе с тишиной, которую бесшовный путь срезал. Чтобы
-    // время на дорожке осталось прежним, держим поправку на эту тишину.
-    let heads = null;
+    // Сколько тишины в начале каждого куска. Обычный проигрыватель
+    // играет целые файлы — вместе с ней, — поэтому и он теперь начинает
+    // кусок не с нуля, а с этого места. Значение меряется один раз при
+    // разборе звука и хранится на карточке.
+    let heads = list.map((p) => p.head || 0);
+
+    // Кто сейчас распоряжается звуком.
+    //
+    // Пока экран горит — движок: он сшивает куски без стыка. Как только
+    // приложение уходит в фон, звук переходит к обычному проигрывателю,
+    // и обратно уже не возвращается. Всё остальное — время, ползунок,
+    // кнопка — спрашивает именно у хозяина, а не угадывает.
+    let owner = many ? 'smooth' : 'element';
 
     /** Сколько прошло с начала всей записи, а не текущего куска. */
     const at = () => {
-      if (seamless() && smooth.playing()) return smooth.time();
-      if (!audio) return seamless() ? smooth.time() : 0;
-      const back = heads ? (heads[idx] || 0) : 0;
+      if (owner === 'smooth') return seamless() ? smooth.time() : 0;
+      if (!audio) return 0;
+      const back = heads[idx] || 0;
       return Math.max(0, (offs[idx] || 0) - back + (audio.currentTime || 0));
     };
 
@@ -4416,8 +4454,8 @@ body {
     // во время проигрывания обновляем покадрово.
     let raf = 0;
     const follow = () => {
-      if (seamless()) {
-        if (!smooth.playing()) { raf = 0; return; }
+      if (owner === 'smooth') {
+        if (!seamless() || !smooth.playing()) { raf = 0; return; }
       } else if (!audio || audio.paused) { raf = 0; return; }
       setTime(at());
       raf = requestAnimationFrame(follow);
@@ -4500,7 +4538,12 @@ body {
       requestAnimationFrame(step);
     }
 
-    /** Зарядить кусок i в свободный элемент — заранее, а не на стыке. */
+    /**
+     * Зарядить кусок i в свободный элемент — заранее, а не на стыке.
+     *
+     * Заодно сразу отматываем его на то место, где начинается голос:
+     * тишину в начале файла слышно как провал между кусками.
+     */
     function preload(i) {
       if (!many || i < 0 || i >= list.length) return;
       const spare = pool[1 - live];
@@ -4511,6 +4554,8 @@ body {
         spare.src = u;
         spare.preload = 'auto';
         if (typeof spare.load === 'function') spare.load();
+        const skip = heads[i] || 0;
+        if (skip > 0.01) { try { spare.currentTime = skip; } catch (e) { /* позже */ } }
       }).catch(() => {});
     }
 
@@ -4580,6 +4625,13 @@ body {
         }
         idx = i;
         audio.__part = i;
+        // Куда встать внутри куска, решаем ДО загрузки.
+        //
+        // Здесь была ошибка: это стояло после load(), а load() сразу
+        // сообщает, что кусок готов, — и к моменту, когда мы называли
+        // место, его уже никто не спрашивал. Тишина в начале куска так
+        // и не пропускалась.
+        if (want < 0 && (heads[i] || 0) > 0.01) want = heads[i];
         audio.src = u;
         // Без явной перезагрузки Safari какое-то время держит прежний
         // кусок и отдаёт его время — черта прыгала бы назад
@@ -4617,7 +4669,7 @@ body {
         const wire = (a) => {
           a.preload = 'auto';
           a.ontimeupdate = () => {
-            if (a !== audio) return;
+            if (a !== audio || owner !== 'element') return;
             // Страховка на случай, когда экран погас или приложение ушло
             // в фон: покадровые вызовы там останавливаются, и нарастание
             // громкости могло бы замереть на нуле — продолжение записи
@@ -4629,6 +4681,7 @@ body {
           };
           a.onloadedmetadata = () => {
             if (a !== audio) return;
+            // Перемотку выставляем всегда: кусок могли зарядить заранее
             // Перемотку на другой кусок выставляем только здесь: пока он
             // не загружен, браузер её просто не примет
             if (want >= 0) {
@@ -4637,10 +4690,12 @@ body {
             }
             setTime(at());
           };
-          a.onplay = () => { if (a === audio) markPlaying(); };
-          a.onpause = () => { if (a === audio) markStopped(); };
+          // Пока звук у движка, элемент подаёт голос только для
+          // подготовки — трогать кнопку и подпись он не должен
+          a.onplay = () => { if (a === audio && owner === 'element') markPlaying(); };
+          a.onpause = () => { if (a === audio && owner === 'element') markStopped(); };
           a.onended = () => {
-            if (a !== audio) return;
+            if (a !== audio || owner !== 'element') return;
             // Кусок кончился — сразу передаём звук следующему, чтобы для
             // человека это осталось одной непрерывной записью
             if (many && idx + 1 < list.length) { handOver(idx + 1); return; }
@@ -4651,7 +4706,9 @@ body {
             if (many) goPart(0, false);   // вернуться к началу для повтора
           };
           a.onerror = () => {
-            if (a === audio) label.textContent = 'Не удалось воспроизвести';
+            if (a === audio && owner === 'element') {
+              label.textContent = 'Не удалось воспроизвести';
+            }
           };
           return a;
         };
@@ -4774,6 +4831,39 @@ body {
     // зато запись доигрывает до конца, а не обрывается на полуслове.
     // Экран в этот момент всё равно погашен — щелчка никто не увидит.
     // ------------------------------------------------------------------
+    /**
+     * Подготовить передачу заранее, ещё пока играет движок.
+     *
+     * Это оказалось важнее всего остального. Когда человек нажимает
+     * кнопку блокировки, телефон замораживает приложение почти сразу —
+     * времени сходить в хранилище за записью уже нет. Если готовиться
+     * в этот момент, передача просто не успеет, и звук оборвётся.
+     *
+     * Поэтому проигрыватели заводятся и заряжаются заранее, пока экран
+     * ещё горит. В момент блокировки остаётся одно действие: сказать
+     * «играй» — и это происходит мгновенно.
+     */
+    let armed = false;
+    function armBackground() {
+      if (armed || !many) return;
+      armed = true;
+      ensureAudio().then((a) => {
+        if (!a) { armed = false; return; }
+        try { a.muted = true; } catch (e) { /* нельзя */ }
+        const pr = a.play();
+        const calm = () => {
+          try { a.pause(); a.muted = false; } catch (e) { /* нельзя */ }
+        };
+        if (pr && pr.then) pr.then(calm).catch(() => { calm(); armed = false; });
+        else calm();
+        wakeSpare();
+      }).catch(() => { armed = false; });
+    }
+
+    /**
+     * Отдать звук обычному проигрывателю. Ни одного ожидания внутри:
+     * всё, что нужно, уже подготовлено.
+     */
     function handToBackground() {
       if (!seamless() || !smooth.playing()) return false;
       const spot = smooth.locate(smooth.time());
@@ -4781,26 +4871,58 @@ body {
       heads = smooth.heads();
       smooth.pause();
       stopFollow();
-      ensureAudio().then((a) => {
-        if (!a) return;
-        try { a.volume = 1; } catch (e) { /* громкость не наша */ }
-        want = spot.at;
-        goPart(spot.i, true);
-        wakeSpare();
-      }).catch(() => {});
+      if (!audio) { armBackground(); return false; }   // не успели подготовиться
+      owner = 'element';
+      try { audio.muted = false; audio.volume = 1; } catch (e) { /* нельзя */ }
+      want = spot.at;
+      goPart(spot.i, true);
       return true;
     }
 
+    /**
+     * Приложение ушло с экрана. Ловим это тремя разными способами, и
+     * все три нужны.
+     *
+     *   visibilitychange — уход на домашний экран и переход в другое
+     *     приложение;
+     *   pagehide — иногда единственное, что приходит при блокировке
+     *     экрана кнопкой;
+     *   сам движок — он сообщает, что его усыпили, и это самый честный
+     *     признак: неважно, почему это случилось.
+     *
+     * Лишние срабатывания не страшны: если звук уже передан, повторный
+     * вызов ничего не делает.
+     */
+    const gone = () => {
+      handToBackground();
+    };
     const onVisible = () => {
       if (typeof document === 'undefined') return;
-      if (document.hidden || document.visibilityState === 'hidden') {
-        handToBackground();
-        return;
-      }
+      if (document.hidden || document.visibilityState === 'hidden') { gone(); return; }
       // Вернулись. Звук уже у обычного проигрывателя — там и оставляем:
       // передавать его обратно на ходу значит устроить ещё один шов
       // ради красоты, которой никто не заметит.
-      if (playing) { stopFollow(); follow(); }
+      //
+      // А если телефон заморозил нас, не успев ничего сообщить, звук мог
+      // и оборваться. Тогда молча поднимаем его с того же места.
+      if (playing) {
+        // Движок мог уснуть, пока приложение было заморожено, и
+        // сообщить об этом ему было нечем. Спрашиваем у него самого.
+        const died = owner === 'smooth'
+          && (!seamless() || !smooth.awake() || !smooth.playing());
+        if (died) {
+          const spot = smooth && smooth.ready()
+            ? smooth.locate(smooth.time()) : null;
+          if (spot && audio) {
+            owner = 'element';
+            heads = smooth.heads();
+            try { audio.muted = false; audio.volume = 1; } catch (e) { /* нельзя */ }
+            want = spot.at;
+            goPart(spot.i, true);
+          } else { markStopped(); }
+        }
+        stopFollow(); follow();
+      }
     };
     if (typeof document !== 'undefined' && document.addEventListener) {
       document.addEventListener('visibilitychange', onVisible);
@@ -4810,29 +4932,47 @@ body {
         }
       });
     }
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('pagehide', gone);
+      window.addEventListener('blur', gone);
+      audioCleanup.push(() => {
+        if (window.removeEventListener) {
+          window.removeEventListener('pagehide', gone);
+          window.removeEventListener('blur', gone);
+        }
+      });
+    }
 
     if (smooth) {
       smooth.onEnd(() => { markStopped(); smooth.seek(0); setTime(0); });
+      smooth.onAsleep(() => { handToBackground(); });
       smooth.onFail(() => {
         // Движок не справился — тихо отдаём звук прежнему способу.
         // Человек этого знать не должен: он просто нажал «играть».
         if (smooth) { try { smooth.close(); } catch (e) { /* уже */ } }
         smooth = null;
+        owner = 'element';
         playByElement();
       });
     }
 
     play.addEventListener('click', () => {
       if (taping) return;                    // сейчас пишем, а не слушаем
-      if (smooth && smooth.playing()) { smooth.pause(); markStopped(); return; }
-      if (audio && !audio.paused) { audio.pause(); return; }
-      if (smooth) {
+      if (owner === 'smooth' && smooth && smooth.playing()) {
+        smooth.pause(); markStopped(); return;
+      }
+      if (owner === 'element' && audio && !audio.paused) { audio.pause(); return; }
+      if (owner === 'smooth' && smooth) {
         // Разбор звука идёт после нажатия: до него движок спит, а на
         // iPhone разбудить его можно только рукой человека
         smooth.start().then((ok) => {
           if (!ok || !smooth) return;
           fixLengths();
           markPlaying();
+          // Пока экран горит, готовим передачу звука. При блокировке
+          // экрана телефон замораживает приложение почти мгновенно, и
+          // собираться в тот момент уже поздно.
+          armBackground();
         }).catch(() => {});
         return;
       }
@@ -4852,14 +4992,22 @@ body {
       if (fixed || !seamless()) return;
       fixed = true;
       const real = smooth.lengths();
+      const tops = smooth.heads();
       if (real.length !== list.length) return;
       let sum = 0;
       real.forEach((v) => { sum += v; });
       sum = Math.round(sum * 100) / 100;
-      if (Math.abs(sum - (card.audioLen || 0)) < 0.15) return;
       const prev = audioParts(card);
-      card.parts = real.map((len, i) => ({ len: len, top: prev[i] ? prev[i].top : 100 }));
+      const same = Math.abs(sum - (card.audioLen || 0)) < 0.02
+        && prev.every((p, i) => Math.abs((p.head || 0) - tops[i]) < 0.01);
+      if (same) return;
+      card.parts = real.map((len, i) => ({
+        len: len,
+        top: prev[i] ? prev[i].top : 100,
+        head: Math.round(tops[i] * 1000) / 1000,
+      }));
       card.audioLen = sum;
+      heads = tops.slice();
       save();
     }
 
@@ -4916,7 +5064,7 @@ body {
       setTime(t);
       // Бесшовный путь перематывает сам: куски заново выкладываются на
       // шкалу от нужной секунды, без всякой догрузки
-      if (seamless()) { smooth.seek(t); return; }
+      if (owner === 'smooth' && seamless()) { smooth.seek(t); return; }
       ensureAudio().then((a) => {
         if (!a) return;
         if (!many) { a.currentTime = t; return; }
