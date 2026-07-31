@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-ghD1mk3jNlD82et5xAxf1uuXESiDDSmYb9kJ9jEAOvM=';
-               style-src 'sha256-KnSmrC1JVhMa1MXwJ5B8Xxkuu1V2MFchljqQlTP6lcE=';
+               script-src 'sha256-x8Tz3hjw64fpGPsntQ5uGMDSmHuzVGH7pztr8EbCX6U=';
+               style-src 'sha256-gJgewdgMvWkuY7CjjZrVdZhtwwV2DK4sKeUZx+s4UuA=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -278,27 +278,36 @@ body {
   padding: 0 6px;
   pointer-events: none;
 }
+/* Столбик громкости. Ширина считается кодом от ширины дорожки, здесь
+   только вид: скруглённые концы, чтобы тишина читалась как пунктир, а
+   не как обрубленные палочки. */
 .wave-bars i {
-  flex: 1;
-  min-width: 0;
-  background: rgba(43, 36, 8, .30);
-  border-radius: 1px;
+  flex: 1 1 2px;
+  min-width: 1.5px;
+  background: rgba(43, 36, 8, .38);
+  border-radius: 999px;
   transition: background .1s linear;
 }
 /* На пройденной части столбики остаются тёмными, только чуть плотнее.
    Светлыми они были потому, что заливка была почти чёрной; теперь она
    светлая, и белые столбики на ней просто исчезли бы. */
-.wave-bars i.played { background: rgba(43, 36, 8, .42); }
+.wave-bars i.played { background: rgba(43, 36, 8, .58); }
 /* Край наполнения — тонкая тёмная черта: видно точное место.
    Не чистый чёрный: рядом со светлой заливкой он бил бы по глазам. */
+/* Черта проигрывания. Прозрачность ставится кодом: пока запись не пошла,
+   черты не видно — иначе она стояла бы у самого края и читалась как
+   тёмная точка, будто там что-то есть. */
 .wave-head {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 3px;
+  bottom: 3px;
   left: 0;
   width: 2px;
   margin-left: -1px;
-  background: rgba(43, 36, 8, .5);
+  border-radius: 999px;
+  background: rgba(43, 36, 8, .55);
+  opacity: 0;
+  transition: opacity .15s ease;
   pointer-events: none;
 }
 /* Дошли до конца — сосуд полон, край растворяется */
@@ -955,7 +964,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '31.07.2026, 20:05';
+  const BUILD = '31.07.2026, 21:33';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -3636,20 +3645,53 @@ body {
     if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop();
   }
 
+  // Столбик занимает 2 px и ещё пиксель на просвет. По этому шагу и
+  // считается, сколько их поместится.
+  const BAR_STEP = 3;
+  const BAR_MIN = 24;      // меньше — уже не рисунок звука, а частокол
+
+  /**
+   * Сколько столбиков поместится в дорожке такой ширины.
+   *
+   * Здесь была ошибка, из-за которой на телефоне дорожка выглядела
+   * пустой. Столбиков всегда рисовалось 190 — столько, сколько замеров
+   * хранится у карточки. На компьютере дорожка широкая, и они помещались.
+   * На телефоне она около 190 px: каждому столбику доставалось меньше
+   * пикселя, и они попросту не рисовались. Выглядело как пустой сосуд.
+   */
+  function barsThatFit(width) {
+    const w = Math.max(0, Number(width) || 0);
+    if (!w) return PEAK_COUNT;
+    return Math.max(BAR_MIN, Math.min(PEAK_COUNT, Math.floor((w - 12) / BAR_STEP)));
+  }
+
   /**
    * Столбики громкости в сосуде. Возвращает их списком: по нему потом
    * подсвечивается уже прозвучавшая часть.
+   *
+   * count — сколько столбиков нарисовать. Замеров у карточки всегда
+   * PEAK_COUNT, поэтому при меньшем числе столбиков каждый берёт среднее
+   * по своему куску: так рисунок звука сохраняется целиком, а не
+   * прореживается через одного.
    */
-  function drawBars(barBox, peaks) {
+  function drawBars(barBox, peaks, count) {
     clear(barBox);
+    const n = Math.max(1, Math.floor(count || PEAK_COUNT));
     const bars = [];
     const src = (peaks && peaks.length) ? peaks : null;
-    for (let i = 0; i < PEAK_COUNT; i++) {
+    for (let i = 0; i < n; i++) {
+      let v = 8;
+      if (src) {
+        const from = Math.floor(i * src.length / n);
+        const to = Math.max(from + 1, Math.floor((i + 1) * src.length / n));
+        let sum = 0;
+        for (let k = from; k < to && k < src.length; k++) sum += src[k];
+        v = Math.round(sum / (to - from));
+      }
+      const b = el('i');
       // Пока формы волны нет — ровная тонкая линия, а не пустота:
       // так видно, что дорожка есть и по ней можно перематывать
-      const v = src ? src[Math.floor(i * src.length / PEAK_COUNT)] : 8;
-      const b = el('i');
-      b.style.setProperty('height', Math.max(6, v) + '%');
+      b.style.setProperty('height', Math.max(8, v) + '%');
       barBox.appendChild(b);
       bars.push(b);
     }
@@ -3686,8 +3728,27 @@ body {
       text: total ? '00:00,00 / ' + mmsscc(total) : 'Запись',
     });
 
-    return { play, wave, fill, barBox, head, label, total,
-             bars: drawBars(barBox, card.peaks) };
+    const face = { play, wave, fill, barBox, head, label, total,
+                   bars: drawBars(barBox, card.peaks) };
+
+    /**
+     * Пересчитать число столбиков под настоящую ширину дорожки.
+     *
+     * Пока дорожка не вставлена в страницу, ширины у неё нет, поэтому
+     * первый раз рисуем «сколько есть», а со следующего кадра — сколько
+     * действительно помещается.
+     */
+    face.refit = () => {
+      const want = barsThatFit(wave.clientWidth || 0);
+      if (want === face.bars.length) return false;
+      face.bars = drawBars(barBox, card.peaks, want);
+      return true;
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => { face.refit(); });
+    }
+
+    return face;
   }
 
   /**
@@ -3726,6 +3787,10 @@ body {
 
     const setTime = (cur) => {
       const dur = duration();
+      // Черта показывает, докуда доиграло. Пока не нажали «играть», она
+      // стояла бы в самом начале и читалась как тёмная точка у края
+      // сосуда — будто там что-то есть. Прячем до первого звука.
+      head.style.setProperty('opacity', (playing || cur > 0) ? '1' : '0');
       // Общую длину берём из карточки: у записей «на лету» браузер
       // нередко отдаёт Infinity, и без запаса получилось бы «0:03 / NaN»
       label.textContent = dur
@@ -3822,7 +3887,7 @@ body {
           computePeaks(blob).then((peaks) => {
             if (peaks && peaks.length) {
               card.peaks = peaks; save();
-              bars = drawBars(barBox, peaks);
+              bars = drawBars(barBox, peaks, bars.length);
               setTime(audio ? audio.currentTime : 0);
             }
           }).catch(() => {});
@@ -3866,6 +3931,14 @@ body {
     wave.addEventListener('pointercancel', () => { seeking = false; });
 
     if (total) setTime(0);   // без длины подпись остаётся «Запись»
+    else head.style.setProperty('opacity', '0');
+    // Со следующего кадра ширина дорожки уже известна — берём столько
+    // столбиков, сколько в неё влезает, и заново красим пройденную часть
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        if (face.refit()) { bars = face.bars; setTime(audio ? audio.currentTime : 0); }
+      });
+    }
 
     // Ссылку на объект надо освободить, иначе память держится до
     // перезагрузки страницы
