@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-7okLLR8ao1YqmujRu5WNyOxnjiotk5FWMldHeZzczmI=';
-               style-src 'sha256-5kfMmhdq8v1KCGoXh0snTuBTTBZDINlzbB4nGoURu48=';
+               script-src 'sha256-DZSwG2uQpyjUzrLqAG/1Fi6kHG1aIC2+UaBRBzSF3Wk=';
+               style-src 'sha256-Pv1ldr3rSAsw0PlVtefs7k9zYtrEaFFPItE0cWTnDKY=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -106,6 +106,12 @@ body {
      увеличение текста двумя пальцами. */
   touch-action: pan-y pinch-zoom;
 }
+
+/* В списке карточек два пальца означают «назад», а не масштаб.
+   Увеличение там только мешает: экран едет вслед за руками, и если
+   система заодно начнёт менять размер, движение выходит рваным.
+   На остальных экранах увеличение двумя пальцами остаётся. */
+.page.no-zoom { touch-action: pan-y; }
 
 /* Полоска «готова новая версия».
    Приложение открывается из памяти устройства, поэтому свежая версия
@@ -1087,7 +1093,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 10:53';
+  const BUILD = '01.08.2026, 11:05';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -2154,12 +2160,14 @@ body {
       }),
     ]));
 
-    // Свайп слева направо возвращает на главный экран. Экран едет за
-    // пальцем, поэтому сразу видно, что жест поймался, и его можно
-    // отменить, не доводя до конца. Кнопка «‹» остаётся на месте.
-    const page = el('div', { class: 'page' });
+    // Возврат на главный экран — двумя пальцами вправо, в любом месте
+    // экрана. Одним пальцем здесь занято: движение вправо по строке
+    // открывает удаление карточки, влево — перенос в другую колоду.
+    // Экран едет за руками, поэтому сразу видно, что жест поймался, и
+    // его можно отменить, не доводя до конца. Кнопка «‹» на месте.
+    const page = el('div', { class: 'page no-zoom' });
     page.appendChild(frag);
-    attachBackSwipe(page, () => go({ name: 'home' }));
+    attachBackSwipe(page, () => go({ name: 'home' }), true);
     return page;
   }
 
@@ -2170,9 +2178,21 @@ body {
    * перехватывает сама система под свой жест «назад» в Safari, и наш
    * туда просто не долетает.
    */
-  function attachBackSwipe(node, onBack) {
+  /**
+   * Жест «назад» — экран уезжает вслед за рукой.
+   *
+   * pair — вести двумя пальцами. Так сделано в колоде: одним пальцем
+   * там теперь открывается удаление карточки, и если бы «назад» тоже
+   * ловился одним, каждое движение вправо значило бы сразу две вещи.
+   * Два пальца ни с чем не путаются: на строке карточки такого жеста
+   * нет, а прокрутке он не мешает.
+   */
+  function attachBackSwipe(node, onBack, pair) {
     let id = null, x0 = 0, y0 = 0, dx = 0, axis = null, swiped = false;
     let tPrev = 0, xPrev = 0, speed = 0;
+    // Сколько пальцев сейчас на экране. Считаем по касаниям: у события
+    // указателя такого числа нет, а знать его надо до первого движения.
+    let touches = 0;
 
     // Слушаем корневой элемент, а не сам экран. Экран колоды короткий:
     // три карточки — и ниже пусто. Если вешать на него, в пустой области
@@ -2181,7 +2201,11 @@ body {
     const now = () => Date.now();
 
     const down = (ev) => {
-      if (!ev.isPrimary || sliding || drag || rowGesture) return;
+      if (sliding || drag || rowGesture) return;
+      // Жест двумя пальцами ведёт ВТОРОЙ палец: он ложится последним, и
+      // только к этому мгновению понятно, что пальцев два. Обычный жест
+      // ведёт первый — как и раньше.
+      if (pair ? touches !== 2 : !ev.isPrimary) return;
       // Кнопки НЕ исключаем: весь экран колоды состоит из кнопок-карточек,
       // и с таким запретом жест не начинался бы почти нигде. Вместо этого
       // ниже гасим нажатие, если палец поехал вбок.
@@ -2199,6 +2223,9 @@ body {
       // одно движение пальцем не может значить сразу «назад»,
       // «переставить» и «открыть кнопку»
       if (drag || rowGesture) return;
+      // Палец подняли — жест распался. Доводить его одним пальцем нельзя:
+      // это уже другое движение.
+      if (pair && touches !== 2) { id = null; snapBack(); return; }
       const mx = ev.clientX - x0, my = ev.clientY - y0;
       if (axis === null) {
         if (Math.abs(mx) < SWIPE_START && Math.abs(my) < SWIPE_START) return;
@@ -2236,6 +2263,15 @@ body {
       node.style.setProperty('opacity', String(Math.max(0.55, 1 - dx / 900)));
     };
 
+    /** Отпустить экран обратно, ничего не делая. */
+    const snapBack = () => {
+      node.style.setProperty('transition',
+        'transform ' + SLIDE_MS + 'ms ' + SLIDE_EASE + ', opacity '
+        + Math.round(SLIDE_MS * 0.7) + 'ms linear');
+      node.style.setProperty('transform', 'translateX(0)');
+      node.style.setProperty('opacity', '1');
+    };
+
     const finish = (ev) => {
       if (ev.pointerId !== id) return;
       id = null;
@@ -2265,11 +2301,34 @@ body {
       ev.stopPropagation();
     };
 
+    // Пальцы считаем по касаниям: событие указателя приходит на каждый
+    // палец отдельно и их общего числа не знает
+    const countTouches = (ev) => {
+      touches = (ev.touches && ev.touches.length) || 0;
+    };
+    /**
+     * Щипок в списке карточек не должен ничего увеличивать.
+     *
+     * Два пальца здесь означают «назад», и если система заодно начнёт
+     * менять масштаб, экран поедет вместе с ним. Safari сообщает о
+     * щипке своим событием — гасим его; остальным браузерам хватает
+     * touch-action в стилях.
+     */
+    const noZoom = (ev) => { if (ev.cancelable) ev.preventDefault(); };
+
     host.addEventListener('pointerdown', down);
     host.addEventListener('pointermove', move);
     host.addEventListener('pointerup', finish);
     host.addEventListener('pointercancel', finish);
     host.addEventListener('click', killClick, true);
+    if (pair) {
+      host.addEventListener('touchstart', countTouches, { passive: true });
+      host.addEventListener('touchmove', countTouches, { passive: true });
+      host.addEventListener('touchend', countTouches, { passive: true });
+      host.addEventListener('touchcancel', countTouches, { passive: true });
+      host.addEventListener('gesturestart', noZoom);
+      host.addEventListener('gesturechange', noZoom);
+    }
 
     backSwipeCleanup = () => {
       host.removeEventListener('pointerdown', down);
@@ -2277,6 +2336,14 @@ body {
       host.removeEventListener('pointerup', finish);
       host.removeEventListener('pointercancel', finish);
       host.removeEventListener('click', killClick, true);
+      if (pair) {
+        host.removeEventListener('touchstart', countTouches);
+        host.removeEventListener('touchmove', countTouches);
+        host.removeEventListener('touchend', countTouches);
+        host.removeEventListener('touchcancel', countTouches);
+        host.removeEventListener('gesturestart', noZoom);
+        host.removeEventListener('gesturechange', noZoom);
+      }
     };
   }
 
