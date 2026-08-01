@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-Sglb+HsZdx055GzWHJo5WCwiFbTvOhlbSfRNjaNms0A=';
+               script-src 'sha256-8e0kwcDU7GrfHRBRVv5FsC5+iKcMkfeXqpgtDOBPYF4=';
                style-src 'sha256-xE0xKBRr4Bw6rID4fDjQ99/I9/sp294+LHbAwBUb8WM=';
                img-src 'self' data:;
                media-src blob:;
@@ -1054,7 +1054,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 09:44';
+  const BUILD = '01.08.2026, 10:01';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -5605,9 +5605,44 @@ body {
    */
   function openSync(startWith) {
     const wrap = el('div', { class: 'modal' });
-    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
     const sheet = el('div', { class: 'sheet' });
     const status = el('div', { class: 'sync-status' });
+
+    // Окно появляется не всегда.
+    //
+    // По стрелке «↑» человек ждёт одного: выбрать место и сохранить.
+    // Раньше следом за системным окном сохранения всплывало ещё и наше,
+    // «Обмен между устройствами», — оно висело за спиной у системного и
+    // только мешало. Теперь окно показывается лишь тогда, когда есть
+    // что сказать: обзор загружаемого файла или итог.
+    let shown = false;
+    const quiet = startWith === 'save' || startWith === 'load';
+    const present = () => {
+      if (shown) return;
+      shown = true;
+      if (!wrap.parentNode) document.body.appendChild(wrap);
+    };
+    const close = () => {
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      if (fileInput.parentNode) fileInput.parentNode.removeChild(fileInput);
+      shown = false;
+    };
+    /** Тихо уйти: человек передумал, говорить не о чем. */
+    const quit = () => { close(); };
+    /** Итог одной строкой — и окно, чтобы его прочитали. */
+    const done = (text, kind) => {
+      clear(sheet);
+      sheet.appendChild(el('h3', { text: kind === 'bad' ? 'Не получилось' : 'Готово' }));
+      sheet.appendChild(status);
+      clear(status);
+      status.className = 'sync-status ' + (kind || 'ok');
+      status.appendChild(el('div', { text: text }));
+      sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn', attrs: { type: 'button' }, text: 'Закрыть',
+                       on: { click: () => { close(); render(); } } }),
+      ]));
+      present();
+    };
 
     // Без accept намеренно. Фильтр по типу тут только вредит: iPhone
     // тогда гасит нужный файл в окне выбора. Что за файл — решаем по
@@ -5635,6 +5670,7 @@ body {
     function takeText(raw, whatChosen) {
       const parsed = parseSync(raw);
       if (!parsed) {
+        present();
         report('Это не похоже на данные синхронизации.\nВыбрано: '
                + whatChosen
                + '\nНужен файл ' + SYNC_FILE + ' (или прежний '
@@ -5644,6 +5680,7 @@ body {
       }
       const clean = sanitizeState(parsed);
       if (clean.sections.length === 0) {
+        present();
         report('В данных нет разделов — загружать нечего.', 'bad'); return;
       }
       // Ничего не меняем сразу: сперва показываем, что внутри, и ждём
@@ -5734,13 +5771,32 @@ body {
       });
     }
 
+    /**
+     * Сохранить в файл.
+     *
+     * Место спрашиваем ПЕРВЫМ делом, ещё до сборки файла. Порядок здесь
+     * не косметический: разрешение открыть окно сохранения браузер даёт
+     * только пока «горячо» нажатие человека, а сборка файла с голосом
+     * занимает секунды. Спросив после, мы бы получили отказ — и файл
+     * молча падал бы в «Загрузки» вместо выбранной папки.
+     */
     function sendOut() {
-      buildPayload().then(deliver).catch(() => {
-        report('Не удалось собрать файл.', 'bad');
+      const ask = self.showSaveFilePicker
+        ? self.showSaveFilePicker({
+          suggestedName: SYNC_FILE,
+          types: [{ description: 'Аффирмации', accept: { 'text/plain': ['.txt'] } }],
+        }).catch(() => null)          // передумал — просто ничего не делаем
+        : Promise.resolve(null);
+
+      return ask.then((handle) => {
+        if (self.showSaveFilePicker && !handle) { quit(); return null; }
+        return buildPayload()
+          .then((text) => deliver(text, handle))
+          .catch(() => { done('Не удалось собрать файл.', 'bad'); });
       });
     }
 
-    function deliver(text) {
+    function deliver(text, handle) {
       if (typeof self.__capture === 'function') self.__capture(text);
       // Тип и расширение — обычный текст, а НЕ json.
       //
@@ -5770,14 +5826,28 @@ body {
         }
       } catch (e) { /* не смогли заглянуть — не страшно */ }
 
+      // Место человек выбрал заранее, ещё до сборки файла — пишем туда.
+      // Так на компьютере получается настоящее «Сохранить как»: папка,
+      // имя, кнопка «Сохранить», а не молчаливое падение в «Загрузки».
+      if (handle && handle.createWritable) {
+        handle.createWritable()
+          .then((w) => w.write(blob).then(() => w.close()))
+          .then(() => {
+            state.syncedAt = Date.now(); save(); render();
+            done('Файл сохранён, ' + size + '.' + warn);
+          })
+          .catch(() => { done('Не удалось записать файл.', 'bad'); });
+        return;
+      }
+
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         // Передаём ТОЛЬКО файл. Если добавить title или text, iOS
         // сохраняет их отдельным текстовым файлом рядом — и на диске
         // оказывается два файла вместо одного.
         navigator.share({ files: [file] })
           .then(() => { state.syncedAt = Date.now(); save(); render();
-                        report('Файл сохранён, ' + size + '.' + warn, 'ok'); })
-          .catch(() => { /* пользователь отменил — это не ошибка */ });
+                        done('Файл сохранён, ' + size + '.' + warn); })
+          .catch(() => { quit(); /* отменил — это не ошибка, молчим */ });
         return;
       }
       const url = URL.createObjectURL(blob);
@@ -5785,8 +5855,8 @@ body {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       state.syncedAt = Date.now(); save(); render();
-      report('Файл сохранён: ' + SYNC_FILE + ' (' + size + ').' + warn
-             + '\nПоложите его в папку iCloud Drive.', 'ok');
+      done('Файл сохранён: ' + SYNC_FILE + ' (' + size + ').' + warn
+           + '\nПоложите его в папку iCloud Drive.');
     }
 
     /** Крупное заметное сообщение вместо мелкой серой строчки. */
@@ -5794,6 +5864,9 @@ body {
       clear(status);
       status.className = 'sync-status ' + (kind || '');
       status.appendChild(el('div', { text: text }));
+      // Пришли сюда по стрелке — окно за спиной у системного не нужно.
+      // Об ошибке скажем отдельно, через done.
+      if (!quiet) present();
     }
 
     /** Показать, что внутри файла, и дождаться подтверждения. */
@@ -5810,6 +5883,7 @@ body {
         ? humanTime(parsed.syncedAt) : 'дата неизвестна';
 
       clear(sheet);
+      present();
       sheet.appendChild(el('h3', { text: 'Что в файле' }));
       sheet.appendChild(el('p', { class: 'hint',
         text: (source || 'данные') + ' · ' + when }));
@@ -6058,7 +6132,6 @@ body {
       el('button', { class: 'btn sec', attrs: { type: 'button' }, text: 'Закрыть',
                      on: { click: close } }),
     ]));
-    sheet.appendChild(fileInput);
 
     // Всё редкое — под складкой. Это нужно раз в полгода и не должно
     // мешать двум кнопкам наверху.
@@ -6088,13 +6161,15 @@ body {
     drawMain();
     wrap.appendChild(sheet);
     wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
-    document.body.appendChild(wrap);
-    // Нажали стрелку наверху — сразу делаем то, за чем пришли, а не
-    // показываем ещё одно окно с теми же двумя кнопками. Окно к этому
-    // моменту уже на экране: выбор файла из открепленного поля Safari
-    // иногда просто не показывает.
-    if (startWith === 'save') sendOut();
-    else if (startWith === 'load') fileInput.click();
+
+    // Поле выбора файла кладём прямо в страницу, а не в окно: окна
+    // может и не быть вовсе, а Safari не открывает выбор для поля,
+    // которое не в документе.
+    document.body.appendChild(fileInput);
+
+    if (startWith === 'save') { sendOut(); return; }
+    if (startWith === 'load') { fileInput.click(); return; }
+    present();
   }
 
   /**
