@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-MRoqBNcGx6BehoTRp+/JA2Ssm2yNKHQlq8GoTw8lty0=';
+               script-src 'sha256-ZszcUiGw3EsCWw836/7cwjPHHELtiEaBigc6S30t0Zc=';
                style-src 'sha256-Pv1ldr3rSAsw0PlVtefs7k9zYtrEaFFPItE0cWTnDKY=';
                img-src 'self' data:;
                media-src blob:;
@@ -1093,7 +1093,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 11:41';
+  const BUILD = '01.08.2026, 12:01';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1178,6 +1178,85 @@ body {
   // движение при обычной прокрутке — обычное дело. С коротким порогом
   // приложение выбрасывало бы из колоды само по себе.
   const PAD_BACK = 90;
+
+  // ------------------------------------------------------------------
+  // Один жест по трекпаду — одно действие. Замок против инерции.
+  //
+  // Здесь и была ошибка «одним свайпом перескакиваю через карточку».
+  // У трекпада нет конца жеста: пальцы уже подняты, а macOS ещё секунду
+  // досылает затухающую прокрутку — «инерцию». Приложение считало её
+  // новым движением, набирало порог второй раз и листало ещё раз.
+  //
+  // Пауза после срабатывания не помогала: она жила внутри читалки, а
+  // читалка через треть секунды перерисовывается на новую карточку —
+  // вместе с ней пауза начиналась с нуля, ровно посреди инерции.
+  // Поэтому замок вынесен сюда, наружу: перерисовка его не трогает.
+  //
+  // Снимаем замок не по часам, а по тишине: пока события идут, жест
+  // считается тем же самым. Сколько там длится инерция — неважно.
+  const PAD_QUIET = 260;      // тишина, после которой жест считается новым
+
+  const PAD_PUSH = 1.5;       // во столько раз рука прибавляет силу разом
+  const PAD_PUSH_MIN = 8;     // и слабее этого толчком не считаем
+
+  let padHeld = false;        // жест уже сработал, ждём тишины
+  let padHeldTimer = null;
+  let padLast = 0;            // сила прошлого события в этом потоке
+
+  /** Поток ещё идёт — отодвигаем снятие замка. */
+  function padAlive() {
+    if (padHeldTimer) clearTimeout(padHeldTimer);
+    padHeldTimer = setTimeout(() => {
+      padHeldTimer = null; padHeld = false; padLast = 0;
+    }, PAD_QUIET);
+  }
+
+  /** Замок после сработавшего жеста: до конца потока больше ничего. */
+  function padLock(force) {
+    padHeld = true;
+    padLast = force || 0;
+    padAlive();
+  }
+
+  /**
+   * Относится ли это событие к уже сработавшему жесту.
+   *
+   * Отличить инерцию от руки просто: инерция только затухает, событие за
+   * событием, сама собой сильнее она не станет. А пальцы, легшие на
+   * трекпад снова, дают резкий скачок силы. По нему замок и снимается —
+   * поэтому он держит инерцию, но не держит человека, который листает
+   * второй раз подряд.
+   */
+  function padBlocks(force) {
+    if (!padHeld) return false;
+    const push = force >= PAD_PUSH_MIN && force >= padLast * PAD_PUSH;
+    padLast = force;
+    if (push) {                        // это уже следующий свайп
+      if (padHeldTimer) { clearTimeout(padHeldTimer); padHeldTimer = null; }
+      padHeld = false; padLast = 0;
+      return false;
+    }
+    padAlive();
+    return true;
+  }
+
+  // Хвост инерции не должен доставаться браузеру.
+  //
+  // Наши обработчики живут на экране: сработал жест — экран сменился, и
+  // вместе с ним их не стало. А инерция всё ещё идёт, и Safari принимает
+  // её за своё «назад по истории»: одно движение — и человек вылетает из
+  // приложения. Поэтому, пока замок держит, горизонтальную прокрутку
+  // гасим на самом верху, раньше всех остальных. Вертикальную не трогаем:
+  // это обычная прокрутка списка.
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('wheel', (ev) => {
+      if (!padHeld) return;
+      const ax = Math.abs(ev.deltaX || 0);
+      if (ax < 1 || ax <= Math.abs(ev.deltaY || 0)) return;
+      if (ev.cancelable !== false && ev.preventDefault) ev.preventDefault();
+      padAlive();
+    }, { passive: false, capture: true });
+  }
 
   const AUDIO_PARTS_MAX = 12;
   const AUDIO_CAP = 300;    // потолок звука на карточку, секунды
@@ -2308,13 +2387,19 @@ body {
     };
 
     const onWheel = (ev) => {
-      if (padDone || sliding || drag || rowGesture) return;
       const ax = Math.abs(ev.deltaX || 0), ay = Math.abs(ev.deltaY || 0);
       // Вертикаль — обычная прокрутка списка, не мешаем
-      if (ax <= ay || ax < 1) { padReset(); return; }
+      if (ax <= ay || ax < 1) { if (!padHeld) padReset(); return; }
       // Свой жест ведём сами: иначе Safari уведёт из приложения назад
-      // по истории браузера, и человек окажется неизвестно где
+      // по истории браузера, и человек окажется неизвестно где.
+      //
+      // Гасим ДО всех проверок. Инерция после сработавшего жеста — это
+      // такие же события; отпустить их значит отдать браузеру, и он
+      // уйдёт по истории уже сам, без спроса.
       if (ev.cancelable && ev.preventDefault) ev.preventDefault();
+      // Хвост уже сработавшего жеста — не второе движение
+      if (padBlocks(ax)) return;
+      if (padDone || sliding || drag || rowGesture) return;
 
       padSum += -(ev.deltaX || 0);        // вправо — это минус
       if (padSum < 0) padSum = 0;         // влево уходить некуда
@@ -2326,6 +2411,7 @@ body {
 
       if (padSum >= PAD_BACK) {
         padDone = true;
+        padLock(ax);                      // хвост инерции уже ничего не сделает
         if (padTimer) { clearTimeout(padTimer); padTimer = null; }
         const w = node.offsetWidth || 400;
         node.style.setProperty('transition',
@@ -3845,35 +3931,40 @@ body {
     //
     // Две сложности, которые приходится учитывать:
     //  * событий приходит десятки подряд, поэтому копим сумму сдвига;
-    //  * после отрыва пальцев macOS ещё долго досылает «инерцию»,
-    //    поэтому после срабатывания ставим паузу, иначе один жест
-    //    перелистнёт сразу несколько карточек.
-    let wheelAcc = 0, wheelUntil = 0, wheelTimer = null;
+    //  * после отрыва пальцев macOS ещё долго досылает затухающую
+    //    «инерцию». Её держит общий замок (padLock рядом с PAD_BACK),
+    //    и держит по тишине, а не по часам: прежняя пауза жила здесь,
+    //    внутри читалки, и обнулялась вместе с перерисовкой на новую
+    //    карточку — ровно посреди инерции. Отсюда и был перескок через
+    //    карточку с одного свайпа.
+    let wheelAcc = 0, wheelTimer = null;
     const WHEEL_TRIGGER = 90;
-    const WHEEL_COOLDOWN = 550;
 
     stage.addEventListener('wheel', (ev) => {
       if (!loop) return;                                       // одна карточка — листать нечего
-      if (Math.abs(ev.deltaX) <= Math.abs(ev.deltaY)) return;  // это вертикальная прокрутка
-      ev.preventDefault();
-      const now = Date.now();
-      if (now < wheelUntil) return;                            // ещё идёт инерция
+      const force = Math.abs(ev.deltaX || 0);
+      if (force <= Math.abs(ev.deltaY || 0) || force < 1) return;  // это вертикальная прокрутка
+      if (ev.cancelable !== false && ev.preventDefault) ev.preventDefault();
+      if (padBlocks(force)) return;                            // хвост прошлого жеста
 
       wheelAcc += ev.deltaX;
-      clearTimeout(wheelTimer);
-      wheelTimer = setTimeout(() => { wheelAcc = 0; }, 180);   // пауза — начинаем заново
+      if (wheelTimer) clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => {                          // пауза — начинаем заново
+        wheelTimer = null; wheelAcc = 0;
+      }, 180);
 
       if (Math.abs(wheelAcc) < WHEEL_TRIGGER) {
         // Пока порог не набран, показываем сдвиг всей каретки: видно, что
         // жест ловится и какая карточка подъезжает
-        place(Math.max(-70, Math.min(70, -wheelAcc)), 0);
+        if (!sliding) place(Math.max(-70, Math.min(70, -wheelAcc)), 0);
         return;
       }
 
       // Пальцы влево по трекпаду дают deltaX > 0 — это «вперёд»
       const dir = wheelAcc > 0 ? 1 : -1;
       wheelAcc = 0;
-      wheelUntil = now + WHEEL_COOLDOWN;
+      if (wheelTimer) { clearTimeout(wheelTimer); wheelTimer = null; }
+      padLock(force);
       step(dir);
     }, { passive: false });
 
