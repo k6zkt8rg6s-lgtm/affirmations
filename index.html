@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-H57PhidHO3LI/ZsY3IQqyA5FFIIyvdwntnf5X6FwI3c=';
+               script-src 'sha256-ww0AnFR/EQl7OLpxAixo8YgG42lZII6nvxqlocUPe8A=';
                style-src 'sha256-Pv1ldr3rSAsw0PlVtefs7k9zYtrEaFFPItE0cWTnDKY=';
                img-src 'self' data:;
                media-src blob:;
@@ -1093,7 +1093,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 11:22';
+  const BUILD = '01.08.2026, 11:30';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1170,6 +1170,14 @@ body {
   // жеста iPhone: рука попадает не глядя, а обычные нажатия по списку
   // не задевает — карточки начинаются заметно правее.
   const EDGE_BACK = 28;
+
+  // Сколько надо провести двумя пальцами по трекпаду, чтобы вернуться.
+  //
+  // Больше, чем пальцем по экрану, и намеренно. Трекпад отдаёт движение
+  // мелкими порциями, они складываются быстро, а случайное горизонтальное
+  // движение при обычной прокрутке — обычное дело. С коротким порогом
+  // приложение выбрасывало бы из колоды само по себе.
+  const PAD_BACK = 90;
 
   const AUDIO_PARTS_MAX = 12;
   const AUDIO_CAP = 300;    // потолок звука на карточку, секунды
@@ -2281,6 +2289,60 @@ body {
       node.style.setProperty('opacity', String(Math.max(0.55, 1 - dx / 900)));
     };
 
+    // ------------------------------------------------------------------
+    // Трекпад на компьютере.
+    //
+    // Два пальца по трекпаду — это не касания: браузер не присылает ни
+    // одного касания и ни одного второго указателя. Он присылает
+    // горизонтальную прокрутку. Поэтому на компьютере тот же жест
+    // приходится ловить совсем другим событием.
+    //
+    // Движение пальцев вправо даёт отрицательный сдвиг: содержимое
+    // уезжает влево, показывая то, что было слева, — ровно как «назад».
+    // ------------------------------------------------------------------
+    let padSum = 0, padTimer = null, padDone = false;
+
+    const padReset = () => {
+      padSum = 0; padDone = false;
+      if (padTimer) { clearTimeout(padTimer); padTimer = null; }
+    };
+
+    const onWheel = (ev) => {
+      if (padDone || sliding || drag || rowGesture) return;
+      const ax = Math.abs(ev.deltaX || 0), ay = Math.abs(ev.deltaY || 0);
+      // Вертикаль — обычная прокрутка списка, не мешаем
+      if (ax <= ay || ax < 1) { padReset(); return; }
+      // Свой жест ведём сами: иначе Safari уведёт из приложения назад
+      // по истории браузера, и человек окажется неизвестно где
+      if (ev.cancelable && ev.preventDefault) ev.preventDefault();
+
+      padSum += -(ev.deltaX || 0);        // вправо — это минус
+      if (padSum < 0) padSum = 0;         // влево уходить некуда
+
+      node.style.setProperty('transition', 'none');
+      const shown = Math.min(padSum, 220);
+      node.style.setProperty('transform', 'translateX(' + shown.toFixed(1) + 'px)');
+      node.style.setProperty('opacity', String(Math.max(0.55, 1 - shown / 900)));
+
+      if (padSum >= PAD_BACK) {
+        padDone = true;
+        if (padTimer) { clearTimeout(padTimer); padTimer = null; }
+        const w = node.offsetWidth || 400;
+        node.style.setProperty('transition',
+          'transform ' + SLIDE_MS + 'ms ' + SLIDE_EASE + ', opacity '
+          + Math.round(SLIDE_MS * 0.7) + 'ms linear');
+        node.style.setProperty('transform', 'translateX(' + w + 'px)');
+        node.style.setProperty('opacity', '0');
+        pageEnter = -1;
+        setTimeout(onBack, Math.round(SLIDE_MS * 0.55));
+        return;
+      }
+      // Пальцы остановились, не дотянув, — отпускаем экран назад.
+      // Конца у прокрутки нет, поэтому судим по паузе.
+      if (padTimer) clearTimeout(padTimer);
+      padTimer = setTimeout(() => { padTimer = null; padReset(); snapBack(); }, 120);
+    };
+
     /** Отпустить экран обратно, ничего не делая. */
     const snapBack = () => {
       node.style.setProperty('transition',
@@ -2340,6 +2402,8 @@ body {
     host.addEventListener('pointercancel', finish);
     host.addEventListener('click', killClick, true);
     if (pair) {
+      // Не passive: жест наш, и системную навигацию по истории надо гасить
+      host.addEventListener('wheel', onWheel, { passive: false });
       host.addEventListener('touchstart', countTouches, { passive: true });
       host.addEventListener('touchmove', countTouches, { passive: true });
       host.addEventListener('touchend', countTouches, { passive: true });
@@ -2355,6 +2419,8 @@ body {
       host.removeEventListener('pointercancel', finish);
       host.removeEventListener('click', killClick, true);
       if (pair) {
+        padReset();
+        host.removeEventListener('wheel', onWheel);
         host.removeEventListener('touchstart', countTouches);
         host.removeEventListener('touchmove', countTouches);
         host.removeEventListener('touchend', countTouches);
