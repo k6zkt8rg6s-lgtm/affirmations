@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-2xCyA5RN7Q/cUpycLG6ZxslWP3QLcTntSqnkp85ObUQ=';
-               style-src 'sha256-8Gcqc2CBbY6R4H1EbLUglVLrGzkLNnthJbqxhfuYVE0=';
+               script-src 'sha256-7okLLR8ao1YqmujRu5WNyOxnjiotk5FWMldHeZzczmI=';
+               style-src 'sha256-5kfMmhdq8v1KCGoXh0snTuBTTBZDINlzbB4nGoURu48=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -592,6 +592,9 @@ body {
   width: 96px;
   display: flex;
 }
+/* Вторая кнопка — у левого края. Строка уезжает вправо, и открывается
+   удаление. Две стороны, два действия: рука их не перепутает. */
+.row-actions.left { right: auto; left: 0; }
 .row-move {
   flex: 1;
   border: 0;
@@ -611,6 +614,26 @@ body {
 .row-move:active { background: var(--ink); }
 .row-move-icon { font-size: 18px; line-height: 1; }
 .row-move-text { font-size: 12px; letter-spacing: .2px; }
+
+/* Удаление — красным. Единственное действие в списке, которое нельзя
+   отменить, и выглядеть как остальные оно не должно. */
+.row-kill {
+  flex: 1;
+  border: 0;
+  border-radius: 0;
+  background: var(--danger);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+.row-kill:active { background: #9C2C20; }
 
 /* Сама строка едет поверх кнопки. Фон обязателен и непрозрачен: сквозь
    строку кнопка просвечивать не должна. */
@@ -1064,7 +1087,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 10:24';
+  const BUILD = '01.08.2026, 10:53';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1736,7 +1759,28 @@ body {
     return s ? (s.decks.find((d) => d.id === deckId) || null) : null;
   }
 
+  // ------------------------------------------------------------------
+  // Где человек стоял на каждом экране.
+  //
+  // Когда все разделы раскрыты, главный экран длиннее телефона: пока
+  // доберёшься до нижней колоды, прокрутишь половину списка. Зайти в
+  // неё и вернуться — и приложение выбрасывало в самое начало, а
+  // искать это место приходилось заново, каждый раз.
+  //
+  // Ключ у каждого экрана свой: у главного один, у каждой колоды —
+  // свой. Поэтому возврат приводит туда, где стоял, а вход в другую
+  // колоду начинается сверху, как и должен.
+  // ------------------------------------------------------------------
+  const spots = {};
+  const spotKey = (v) => (v.name === 'deck' ? 'deck:' + v.deckId
+    : v.name === 'read' ? 'read:' + v.deckId : 'home');
+
   function go(next) {
+    // Запоминаем место ДО перерисовки: после неё страница уже другой
+    // высоты, и спрашивать у неё поздно
+    if (typeof window !== 'undefined') {
+      spots[spotKey(view)] = window.scrollY || window.pageYOffset || 0;
+    }
     view = Object.assign({ name: 'home', sectionId: null, deckId: null, index: 0 }, next);
     render();
   }
@@ -2046,7 +2090,17 @@ body {
       // нумерация сама остаётся сплошной
       const row = el('button', {
         class: 'mini', attrs: { type: 'button' },
-        on: { click: () => go({ name: 'read', sectionId: section.id, deckId: deck.id, index: i }) },
+        // Пока у строки открыта кнопка, нажатие по ней карточку не
+        // открывает — оно только закрывает строку. Проверка стоит
+        // здесь, в самом обработчике: он повешен раньше сторожа из
+        // attachRowSwipe и остановить его снаружи уже нельзя.
+        on: { click: () => {
+          if (openRow === row) return;
+          // Это же нажатие только что закрыло строку — открывать
+          // карточку им нельзя, иначе передумать не выйдет
+          if (justClosed === row) { justClosed = null; return; }
+          go({ name: 'read', sectionId: section.id, deckId: deck.id, index: i });
+        } },
       }, [
         el('span', { class: 'mini-num', text: String(i + 1) }),
         swatch,
@@ -2067,7 +2121,23 @@ body {
         el('span', { class: 'row-move-icon', text: '→' }),
         el('span', { class: 'row-move-text', text: 'В колоду' }),
       ]);
+      // Вторая кнопка — с другой стороны и с другим смыслом. Строка
+      // уезжает вправо, и слева открывается удаление. Две стороны, два
+      // действия: перепутать их движением руки нельзя.
+      const kill = el('button', {
+        class: 'row-kill', attrs: { type: 'button', 'aria-label':
+          'Удалить карточку' },
+        on: { click: () => {
+          closeRow(true);
+          if (!confirm('Удалить карточку «' + shortText(card.text) + '»?')) return;
+          dropCard(deck, card);
+        } },
+      }, [
+        el('span', { class: 'row-move-icon', text: '✕' }),
+        el('span', { class: 'row-move-text', text: 'Удалить' }),
+      ]);
       const holder = el('div', { class: 'card-row' }, [
+        el('div', { class: 'row-actions left' }, [kill]),
         el('div', { class: 'row-actions' }, [move]),
         row,
       ]);
@@ -2939,6 +3009,12 @@ body {
   // ------------------------------------------------------------------
   const ACTION_W = 96;      // ширина открывающейся кнопки
   let openRow = null;       // сейчас открыта не больше одной строки
+  let openSide = 0;         // -1 строка ушла влево, +1 вправо
+  // Строка, которую только что закрыли нажатием. Нужна из-за порядка
+  // обработчиков: сторож успевает закрыть строку раньше, чем до того же
+  // нажатия доберётся открытие карточки, и то видит уже «ничего не
+  // открыто». Без этой отметки карточка открывалась бы вместо отмены.
+  let justClosed = null;
   let rowGesture = false;   // идёт свайп по строке — жест «назад» молчит
 
   /** Закрыть открытую строку, если она есть. */
@@ -2946,9 +3022,16 @@ body {
     if (!openRow) return;
     const n = openRow;
     openRow = null;
+    openSide = 0;
     n.style.setProperty('transition',
       instant ? 'none' : 'transform ' + DROP_MS + 'ms ' + SLIDE_EASE);
     n.style.setProperty('transform', 'translate3d(0,0,0)');
+  }
+
+  /** Короткий кусок текста для вопроса «удалить?». */
+  function shortText(s) {
+    const one = String(s || '').split('\n')[0].trim();
+    return one.length > 40 ? one.slice(0, 40) + '…' : one;
   }
 
   /**
@@ -2967,7 +3050,7 @@ body {
       release();
       id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
       axis = null; speed = 0; eatClick = false;
-      was = (openRow === row) ? -ACTION_W : 0;
+      was = (openRow === row) ? openSide * ACTION_W : 0;
       dx = was;
       tPrev = Date.now(); xPrev = ev.clientX;
       // Слушаем окно, а не строку: мышью курсор легко уходит со строки
@@ -3000,10 +3083,9 @@ body {
         speed = Math.abs(ev.clientX - xPrev) / (tNow - tPrev);
         tPrev = tNow; xPrev = ev.clientX;
       }
-      // Дальше кнопки строка не уходит, а вправо от нуля идёт туго:
-      // открывать там нечего
-      dx = Math.max(-ACTION_W, was + mx);
-      if (dx > 0) dx = (was + mx) * 0.2;
+      // Дальше кнопки строка не уходит ни в одну сторону: за ней
+      // открывать больше нечего
+      dx = Math.max(-ACTION_W, Math.min(ACTION_W, was + mx));
       row.style.setProperty('transform',
         'translate3d(' + dx.toFixed(1) + 'px,0,0)');
     };
@@ -3018,18 +3100,32 @@ body {
       // сама, а на телефоне вдобавок открылась бы карточка.
       eatClick = true;
       // Открываем, если протянули больше половины кнопки или махнули
-      // быстро; иначе строка возвращается на место
+      // быстро; иначе строка возвращается на место.
+      //
+      // Сторона решает, какая кнопка откроется: ушла влево — «В колоду»
+      // справа, ушла вправо — «Удалить» слева. Знак берём у самого
+      // смещения, а не у движения пальца: строка могла быть уже
+      // открыта, и тогда палец её просто дотягивает.
       const moved = Math.abs(dx - was);
-      const wantOpen = dx < 0
-        && (Math.abs(dx) > ACTION_W / 2 || (moved >= SWIPE_FLICK && speed >= SWIPE_SPEED));
+      const far = Math.abs(dx) > ACTION_W / 2;
+      const flick = moved >= SWIPE_FLICK && speed >= SWIPE_SPEED;
+      // Быстрый взмах открывает строку только из закрытого положения.
+      // Если строка уже открыта, решает одно: дотянули её за половину
+      // кнопки или нет. Иначе взмах обратно оставлял бы кнопку
+      // открытой — рука тянет закрыть, а оно не закрывается.
+      let side = 0;
+      if (far) side = dx < 0 ? -1 : 1;
+      else if (flick && was === 0) side = (dx < 0 ? -1 : dx > 0 ? 1 : 0);
+      const wantOpen = side !== 0;
       row.style.setProperty('transition',
         'transform ' + DROP_MS + 'ms ' + SLIDE_EASE);
       if (wantOpen) {
         openRow = row;
+        openSide = side;
         row.style.setProperty('transform',
-          'translate3d(' + (-ACTION_W) + 'px,0,0)');
+          'translate3d(' + (side * ACTION_W) + 'px,0,0)');
       } else {
-        if (openRow === row) openRow = null;
+        if (openRow === row) { openRow = null; openSide = 0; }
         row.style.setProperty('transform', 'translate3d(0,0,0)');
       }
     };
@@ -3052,6 +3148,8 @@ body {
       if (openRow !== row) return;
       ev.preventDefault();
       ev.stopPropagation();
+      if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+      justClosed = row;
       closeRow();
     }, true);
   }
@@ -5349,6 +5447,10 @@ body {
   function modal(title, fields, onSave, onDelete) {
     const wrap = el('div', { class: 'modal' });
     const inputs = {};
+    // Где стояла страница до открытия окна. Клавиатура на iPhone двигает
+    // её вверх, и после закрытия вернуть надо именно сюда.
+    const wasAt = (typeof window !== 'undefined')
+      ? (window.scrollY || window.pageYOffset || 0) : 0;
 
     const sheet = el('div', { class: 'sheet' }, [el('h3', { text: title })]);
 
@@ -5402,8 +5504,10 @@ body {
       const act = document.activeElement;
       if (act && typeof act.blur === 'function') act.blur();
       if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
-      // Экран мог уехать вслед за клавиатурой — ставим его на место
-      if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
+      // Экран мог уехать вслед за клавиатурой — ставим его на место.
+      // Именно на то место, где человек был, а не в начало списка:
+      // редактировали десятую колоду снизу — туда и возвращаемся.
+      if (typeof window.scrollTo === 'function') window.scrollTo(0, wasAt);
     };
 
     const actions = el('div', { class: 'sheet-actions' }, [
@@ -5510,23 +5614,35 @@ body {
                             marks: marks });
         }
       },
-      card ? () => {
-        const idx = deck.cards.findIndex((c) => c.id === card.id);
-        // Вместе с карточкой убираем и её запись, иначе звук останется
-        // висеть в хранилище навсегда — никто уже на него не сошлётся.
-        // Кусков продолжения может быть несколько — убираем все.
-        if (card.audio) {
-          audioKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
-        }
-        deck.cards = deck.cards.filter((c) => c.id !== card.id);
-        if (view.name === 'read') {
-          if (deck.cards.length === 0) {
-            go({ name: 'deck', sectionId: view.sectionId, deckId: view.deckId });
-          } else {
-            view.index = Math.max(0, Math.min(idx, deck.cards.length - 1));
-          }
-        }
-      } : null);
+      card ? () => dropCard(deck, card, true) : null);
+  }
+
+  /**
+   * Убрать карточку из колоды — насовсем.
+   *
+   * Одно место на два пути: кнопка в окне правки и свайп по строке
+   * вправо. Разойдись они — однажды один из путей забыл бы про голос,
+   * и запись осталась бы висеть в хранилище навсегда.
+   */
+  function dropCard(deck, card, quiet) {
+    const idx = deck.cards.findIndex((c) => c.id === card.id);
+    // Вместе с карточкой убираем и её запись, иначе звук останется
+    // висеть в хранилище: карточки нет, а место занято. Кусков
+    // продолжения может быть несколько — убираем все.
+    if (card.audio) {
+      audioKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+    }
+    deck.cards = deck.cards.filter((c) => c.id !== card.id);
+    if (view.name === 'read') {
+      if (deck.cards.length === 0) {
+        go({ name: 'deck', sectionId: view.sectionId, deckId: view.deckId });
+      } else {
+        view.index = Math.max(0, Math.min(idx, deck.cards.length - 1));
+      }
+    }
+    // Окно правки закроется само и перерисует экран следом — второй
+    // раз рисовать незачем
+    if (!quiet) { save(); render(); }
   }
 
   // ------------------------------------------------------------------
@@ -6629,7 +6745,28 @@ body {
     else if (view.name === 'deck') content = renderDeck();
     else content = renderHome();
     root.appendChild(content);
-    window.scrollTo(0, 0);
+
+    // Возвращаемся туда, где стояли на этом экране. Если человек здесь
+    // ещё не был — начинаем сверху, как и раньше.
+    const here = spotKey(view);
+    const back = spots[here] || 0;
+    window.scrollTo(0, back);
+    // Второй заход на следующем кадре. Сразу после подмены содержимого
+    // страница ещё не набрала высоту, и Safari молча зажимает прокрутку
+    // до того, что успело поместиться, — на длинном списке это
+    // возвращало в начало, хотя место мы помнили верно.
+    if (back && typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        // Экран мог смениться, пока кадр ждал своей очереди: быстрое
+        // двойное нажатие — и доводка сработала бы уже на другом экране,
+        // утащив человека неизвестно куда
+        if (spotKey(view) !== here) return;
+        const now = window.scrollY || window.pageYOffset || 0;
+        // Не спорим с человеком: если он уже успел тронуть страницу
+        // пальцем, оставляем как есть
+        if (Math.abs(now - back) > 2 && now <= 2) window.scrollTo(0, back);
+      });
+    }
 
     // Экран въезжает с той стороны, куда ушёл предыдущий. Смещение
     // ставим сразу, а снимаем на следующем кадре: в одном кадре браузер
