@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-p1d0adW4AFV3LY9hqTMc9fwZI2YOx2m6o3goM2waE+8=';
-               style-src 'sha256-Pv1ldr3rSAsw0PlVtefs7k9zYtrEaFFPItE0cWTnDKY=';
+               script-src 'sha256-EzMQMOIHIAuiJxp6Fz+y6q9acXtg5SVGbZ5dSfUYRwc=';
+               style-src 'sha256-z4GWSVaTuJuGzFV2+KyAj907LjwEwnkoGmwhVBtT4Ro=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -647,7 +647,10 @@ body {
   position: relative;
   z-index: 1;
   width: 100%;
-  will-change: transform;
+  /* will-change здесь тоже нет. Строк в колоде бывают десятки, и
+     готовый слой на каждую — это десятки слоёв в списке, который
+     человек прокручивает. Слой просит сам свайп, для одной строки и
+     только пока она едет. */
 }
 
 /* Колода, в которую переносим. Список выбора — те же строки, но нажатие
@@ -938,11 +941,14 @@ body {
    отдаёт нам — иначе жест конфликтует со скроллом списка. */
 .page {
   touch-action: pan-y pinch-zoom;
-  will-change: transform;
-  transform: translateX(0);
   /* Обёртка тянется на всю высоту: жест ловится и в пустой области под
      списком, и экран уезжает целиком, а не только та часть, где текст */
   min-height: 100%;
+  /* Ни transform, ни will-change в покое здесь нет — и это важно.
+     Экран длиннее окна, и постоянный слой во всю его высоту Safari
+     держит на видеоядре всё время. Прокрутка колесом мыши по такому
+     слою на компьютере просто переставала работать. Сдвиг и подготовку
+     слоя ставит сам жест, на те доли секунды, пока экран едет. */
 }
 
 /* Блок синхронизации: кнопка и под ней пояснение, куда идут данные */
@@ -1093,7 +1099,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 12:22';
+  const BUILD = '01.08.2026, 18:28';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1213,6 +1219,27 @@ body {
   // потом снова наберёт силу: инерция только затухает, а рука, легшая на
   // трекпад снова, силу прибавляет. Смотрим не на отдельные события, а на
   // сглаженную силу — иначе одиночный выброс сойдёт за новое движение.
+  // Насколько горизонталь должна перевешивать вертикаль, чтобы движение
+  // считалось нашим.
+  //
+  // Просто «больше» тут мало. У мыши с наклоняемым колесом и у Magic
+  // Mouse при обычной прокрутке вбок постоянно набегают единицы, а то и
+  // десятки. По правилу «больше» приложение забирало такие события себе
+  // и гасило их — человек крутит колесо, а страница стоит.
+  const PAD_SIDE = 1.4;
+
+  /**
+   * Горизонтальный сдвиг события — но только если движение ЯВНО
+   * горизонтальное. Иначе ноль: это обычная прокрутка, и трогать её
+   * нельзя ни на одном экране.
+   */
+  function padSide(ev) {
+    const dx = (ev && ev.deltaX) || 0;
+    const ax = Math.abs(dx), ay = Math.abs((ev && ev.deltaY) || 0);
+    if (ax < 1 || ax < ay * PAD_SIDE) return 0;
+    return dx;
+  }
+
   const PAD_SMOOTH = 0.3;     // вес нового события в сглаженной силе
   const PAD_FADE = 0.25;      // во столько раз поток должен ослабнуть
   const PAD_FADE_MIN = 6;     // либо просто стать слабее этого
@@ -1237,11 +1264,13 @@ body {
   function padFree() {
     if (padHeldTimer) { clearTimeout(padHeldTimer); padHeldTimer = null; }
     padHeld = false; padAvg = 0; padTop = 0; padLow = 0; padFaded = false;
+    padWatch(false);
   }
 
   /** Замок после сработавшего жеста: до конца потока больше ничего. */
   function padLock(force) {
     padHeld = true;
+    padWatch(true);
     padSince = Date.now();
     padAvg = force || 0;
     padTop = padAvg;
@@ -1283,16 +1312,25 @@ body {
   // вместе с ним их не стало. А инерция всё ещё идёт, и Safari принимает
   // её за своё «назад по истории»: одно движение — и человек вылетает из
   // приложения. Поэтому, пока замок держит, горизонтальную прокрутку
-  // гасим на самом верху, раньше всех остальных. Вертикальную не трогаем:
-  // это обычная прокрутка списка.
-  if (typeof document !== 'undefined' && document.addEventListener) {
-    document.addEventListener('wheel', (ev) => {
-      if (!padHeld) return;
-      const ax = Math.abs(ev.deltaX || 0);
-      if (ax < 1 || ax <= Math.abs(ev.deltaY || 0)) return;
-      if (ev.cancelable !== false && ev.preventDefault) ev.preventDefault();
-      padAlive();
-    }, { passive: false, capture: true });
+  // гасим на самом верху, раньше всех остальных.
+  //
+  // Обработчик ставится ТОЛЬКО на время замка и сразу снимается. Висеть
+  // на всём документе постоянно ему нельзя: непассивный обработчик
+  // колеса на документе заставляет браузер вести каждую прокрутку через
+  // основной поток. На трекпаде это незаметно, а колесо мыши от этого
+  // спотыкается — страница просто перестаёт прокручиваться.
+  let padGuardOn = false;
+  function padGuard(ev) {
+    if (!padHeld || !padSide(ev)) return;   // вертикаль — не наше дело
+    if (ev.cancelable !== false && ev.preventDefault) ev.preventDefault();
+    padAlive();
+  }
+  function padWatch(on) {
+    if (typeof document === 'undefined' || !document.addEventListener) return;
+    if (on === padGuardOn) return;
+    padGuardOn = on;
+    if (on) document.addEventListener('wheel', padGuard, { passive: false, capture: true });
+    else document.removeEventListener('wheel', padGuard, true);
   }
 
   const AUDIO_PARTS_MAX = 12;
@@ -2225,19 +2263,24 @@ body {
       const swatch = el('span', { class: 'mini-swatch' });
       swatch.style.setProperty('background-color', card.color);
       swatch.style.setProperty('border-color', CARD_EDGE[card.color] || card.color);
+      // Пока у строки открыта кнопка, нажатие по ней ничего не делает —
+      // оно только закрывает строку. Проверка стоит здесь, в самих
+      // обработчиках: они повешены раньше сторожа из attachRowSwipe, и
+      // остановить их снаружи уже нельзя.
+      const busy = () => {
+        if (openRow === row) return true;
+        // Это же нажатие только что закрыло строку — открывать
+        // карточку им нельзя, иначе передумать не выйдет
+        if (justClosed === row) { justClosed = null; return true; }
+        return false;
+      };
+
       // Номер не хранится, а считается от начала списка: после переноса
       // нумерация сама остаётся сплошной
-      const row = el('button', {
-        class: 'mini', attrs: { type: 'button' },
-        // Пока у строки открыта кнопка, нажатие по ней карточку не
-        // открывает — оно только закрывает строку. Проверка стоит
-        // здесь, в самом обработчике: он повешен раньше сторожа из
-        // attachRowSwipe и остановить его снаружи уже нельзя.
+      const open = el('button', {
+        class: 'mini-open', attrs: { type: 'button' },
         on: { click: () => {
-          if (openRow === row) return;
-          // Это же нажатие только что закрыло строку — открывать
-          // карточку им нельзя, иначе передумать не выйдет
-          if (justClosed === row) { justClosed = null; return; }
+          if (busy()) return;
           go({ name: 'read', sectionId: section.id, deckId: deck.id, index: i });
         } },
       }, [
@@ -2245,8 +2288,32 @@ body {
         swatch,
         paintText(el('span', { class: 'mini-text' }), card.text, card.marks),
         card.audio ? el('span', { class: 'mini-audio', text: '♪' }) : null,
-        card.fav ? el('span', { class: 'mini-heart', text: '♥' }) : null,
       ]);
+
+      // Сердечко прямо в списке. Раньше в избранное можно было положить
+      // только из самой карточки: открой, отметь, вернись. Здесь оно
+      // отмечается на месте, одним нажатием, и карточка при этом никуда
+      // из колоды не девается — просто появляется ещё и в «Избранном»
+      // на главном экране.
+      const heart = el('button', {
+        class: 'iconbtn heart' + (card.fav ? ' on' : ''),
+        attrs: {
+          type: 'button',
+          'aria-pressed': String(!!card.fav),
+          'aria-label': card.fav ? 'Убрать из избранного' : 'В избранное',
+        },
+        text: card.fav ? '♥' : '♡',
+        on: { click: () => {
+          if (busy()) return;
+          card.fav = !card.fav;
+          save();
+          render();
+        } },
+      });
+
+      // Строка — не кнопка, а контейнер: внутри две независимые зоны.
+      // Иначе нажатие на сердечко открывало бы заодно и карточку.
+      const row = el('div', { class: 'mini' }, [open, heart]);
 
       // Обёртка нужна двум разным жестам сразу. Кнопка «В колоду» лежит
       // под строкой у правого края и открывается, когда строка уезжает
@@ -2383,6 +2450,10 @@ body {
         if (axis === 'x' && host.setPointerCapture) {
           try { host.setPointerCapture(id); } catch (e) { /* не поддержано */ }
         }
+        // Слой под сдвиг просим только теперь, когда жест начался.
+        // Держать его всё время нельзя: экран длиннее окна, и постоянный
+        // слой во всю его высоту ломает прокрутку колесом мыши.
+        if (axis === 'x') node.style.setProperty('will-change', 'transform');
       }
       if (axis !== 'x') return;
       if (ev.cancelable) ev.preventDefault();
@@ -2424,9 +2495,11 @@ body {
     };
 
     const onWheel = (ev) => {
-      const ax = Math.abs(ev.deltaX || 0), ay = Math.abs(ev.deltaY || 0);
-      // Вертикаль — обычная прокрутка списка, не мешаем
-      if (ax <= ay || ax < 1) { if (!padHeld) padReset(); return; }
+      // Вертикаль и пологая диагональ — обычная прокрутка списка. Такое
+      // событие мы не трогаем вовсе: ни гасим, ни считаем.
+      const side = padSide(ev);
+      if (!side) { if (!padHeld) padReset(); return; }
+      const ax = Math.abs(side);
       // Свой жест ведём сами: иначе Safari уведёт из приложения назад
       // по истории браузера, и человек окажется неизвестно где.
       //
@@ -2438,9 +2511,10 @@ body {
       if (padBlocks(ax)) return;
       if (padDone || sliding || drag || rowGesture) return;
 
-      padSum += -(ev.deltaX || 0);        // вправо — это минус
+      padSum += -side;                    // вправо — это минус
       if (padSum < 0) padSum = 0;         // влево уходить некуда
 
+      node.style.setProperty('will-change', 'transform');
       node.style.setProperty('transition', 'none');
       const shown = Math.min(padSum, 220);
       node.style.setProperty('transform', 'translateX(' + shown.toFixed(1) + 'px)');
@@ -2473,6 +2547,8 @@ body {
         + Math.round(SLIDE_MS * 0.7) + 'ms linear');
       node.style.setProperty('transform', 'translateX(0)');
       node.style.setProperty('opacity', '1');
+      // Слой снимать не нужно: экран всё равно собирается заново при
+      // следующем переходе, а до тех пор он тут ровно один
     };
 
     const finish = (ev) => {
@@ -3351,6 +3427,10 @@ body {
           if (row.setPointerCapture) {
             try { row.setPointerCapture(id); } catch (e) { /* не поддержано */ }
           }
+          // Слой готовим только этой строке и только сейчас: в колоде
+          // строк бывают десятки, и держать слой у каждой значит
+          // нагрузить видеоядро всем списком сразу
+          row.style.setProperty('will-change', 'transform');
           row.style.setProperty('transition', 'none');
         }
       }
@@ -3405,6 +3485,8 @@ body {
       } else {
         if (openRow === row) { openRow = null; openSide = 0; }
         row.style.setProperty('transform', 'translate3d(0,0,0)');
+        // Слой остаётся у одной этой строки — той, которую вели рукой.
+        // Список заново собирается при любом переходе, и там его нет.
       }
     };
     const onUp = finish;
@@ -3978,13 +4060,17 @@ body {
     const WHEEL_TRIGGER = 90;
 
     stage.addEventListener('wheel', (ev) => {
-      if (!loop) return;                                       // одна карточка — листать нечего
-      const force = Math.abs(ev.deltaX || 0);
-      if (force <= Math.abs(ev.deltaY || 0) || force < 1) return;  // это вертикальная прокрутка
+      if (!loop) return;                       // одна карточка — листать нечего
+      // Вертикаль и пологая диагональ — это прокрутка длинного текста
+      // внутри карточки. Не гасим и не считаем: иначе колесо мыши в
+      // карточке перестаёт работать вовсе.
+      const side = padSide(ev);
+      if (!side) return;
+      const force = Math.abs(side);
       if (ev.cancelable !== false && ev.preventDefault) ev.preventDefault();
       if (padBlocks(force)) return;                            // хвост прошлого жеста
 
-      wheelAcc += ev.deltaX;
+      wheelAcc += side;
       if (wheelTimer) clearTimeout(wheelTimer);
       wheelTimer = setTimeout(() => {                          // пауза — начинаем заново
         wheelTimer = null; wheelAcc = 0;
