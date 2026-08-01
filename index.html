@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-dO5yCv/iNXy4H/X+/HsPDVDs10UMCHTgt4ApbYxqnus=';
+               script-src 'sha256-PQ2ckoQxEDSToRMHbU3ajwR0TWTO87/0p6WG32goLHw=';
                style-src 'sha256-HzU8Up5qWxDNtuXngag1EFcfVrqFli/aF0eTdOoQwlU=';
                img-src 'self' data:;
                media-src blob:;
@@ -1171,7 +1171,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 19:17';
+  const BUILD = '01.08.2026, 19:33';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1336,13 +1336,11 @@ body {
   function padFree() {
     if (padHeldTimer) { clearTimeout(padHeldTimer); padHeldTimer = null; }
     padHeld = false; padAvg = 0; padTop = 0; padLow = 0; padFaded = false;
-    padWatch(false);
   }
 
   /** Замок после сработавшего жеста: до конца потока больше ничего. */
   function padLock(force) {
     padHeld = true;
-    padWatch(true);
     padSince = Date.now();
     padAvg = force || 0;
     padTop = padAvg;
@@ -1378,32 +1376,14 @@ body {
     return true;
   }
 
-  // Хвост инерции не должен доставаться браузеру.
+  // Отдельного сторожа на документе больше нет — и не будет.
   //
-  // Наши обработчики живут на экране: сработал жест — экран сменился, и
-  // вместе с ним их не стало. А инерция всё ещё идёт, и Safari принимает
-  // её за своё «назад по истории»: одно движение — и человек вылетает из
-  // приложения. Поэтому, пока замок держит, горизонтальную прокрутку
-  // гасим на самом верху, раньше всех остальных.
-  //
-  // Обработчик ставится ТОЛЬКО на время замка и сразу снимается. Висеть
-  // на всём документе постоянно ему нельзя: непассивный обработчик
-  // колеса на документе заставляет браузер вести каждую прокрутку через
-  // основной поток. На трекпаде это незаметно, а колесо мыши от этого
-  // спотыкается — страница просто перестаёт прокручиваться.
-  let padGuardOn = false;
-  function padGuard(ev) {
-    if (!padHeld || !padSide(ev)) return;   // вертикаль — не наше дело
-    if (ev.cancelable !== false && ev.preventDefault) ev.preventDefault();
-    padAlive();
-  }
-  function padWatch(on) {
-    if (typeof document === 'undefined' || !document.addEventListener) return;
-    if (on === padGuardOn) return;
-    padGuardOn = on;
-    if (on) document.addEventListener('wheel', padGuard, { passive: false, capture: true });
-    else document.removeEventListener('wheel', padGuard, true);
-  }
+  // Он гасил хвост инерции, чтобы Safari не увёл из приложения назад по
+  // своей истории. Но ради этого приходилось держать на документе
+  // обработчик, способный отменять события, а такой обработчик ломает
+  // прокрутку колесом на всей странице. Прокрутка нужнее: замок ниже и
+  // так не даёт хвосту инерции ничего перелистнуть, а больше он ничего
+  // и не делал.
 
   const AUDIO_PARTS_MAX = 12;
   const AUDIO_CAP = 300;    // потолок звука на карточку, секунды
@@ -2570,19 +2550,22 @@ body {
       if (padTimer) { clearTimeout(padTimer); padTimer = null; }
     };
 
+    // Обработчик пассивный: он только смотрит и ничего не отменяет.
+    //
+    // Это не мелочь, а главное в нём. Обработчик колеса на корне
+    // накрывает всю площадь приложения, и обычный, отменяющий, заставлял
+    // Safari вести прокрутку этой площади вручную. Внутри колоды над
+    // списком карточек прокрутка от этого умирала, а после первого
+    // захода в колоду и обратно — и на главном экране над колодами.
+    // Живыми оставались только пустые поля по бокам, куда площадь
+    // приложения не достаёт. Пассивному обработчику Safari прокрутку
+    // отдаёт полностью и быстрым путём.
     const onWheel = (ev) => {
       // Вертикаль и пологая диагональ — обычная прокрутка списка. Такое
       // событие мы не трогаем вовсе: ни гасим, ни считаем.
       const side = padSide(ev);
       if (!side) { if (!padHeld) padReset(); return; }
       const ax = Math.abs(side);
-      // Свой жест ведём сами: иначе Safari уведёт из приложения назад
-      // по истории браузера, и человек окажется неизвестно где.
-      //
-      // Гасим ДО всех проверок. Инерция после сработавшего жеста — это
-      // такие же события; отпустить их значит отдать браузеру, и он
-      // уйдёт по истории уже сам, без спроса.
-      if (ev.cancelable && ev.preventDefault) ev.preventDefault();
       // Хвост уже сработавшего жеста — не второе движение
       if (padBlocks(ax)) return;
       if (padDone || sliding || drag || rowGesture) return;
@@ -2661,15 +2644,6 @@ body {
     const countTouches = (ev) => {
       touches = (ev.touches && ev.touches.length) || 0;
     };
-    /**
-     * Щипок в списке карточек не должен ничего увеличивать.
-     *
-     * Два пальца здесь означают «назад», и если система заодно начнёт
-     * менять масштаб, экран поедет вместе с ним. Safari сообщает о
-     * щипке своим событием — гасим его; остальным браузерам хватает
-     * touch-action в стилях.
-     */
-    const noZoom = (ev) => { if (ev.cancelable) ev.preventDefault(); };
 
     host.addEventListener('pointerdown', down);
     host.addEventListener('pointermove', move);
@@ -2677,14 +2651,16 @@ body {
     host.addEventListener('pointercancel', finish);
     host.addEventListener('click', killClick, true);
     if (pair) {
-      // Не passive: жест наш, и системную навигацию по истории надо гасить
-      host.addEventListener('wheel', onWheel, { passive: false });
+      // Колесо и щипок слушает один постоянный обработчик на корне (он
+      // поставлен при запуске). Здесь мы только говорим ему, что на этом
+      // экране жест наш. Навешивать и снимать обработчик колеса при
+      // каждом заходе нельзя — из-за этого и умирала прокрутка.
+      padWheelNow = onWheel;
+      noZoomNow = true;
       host.addEventListener('touchstart', countTouches, { passive: true });
       host.addEventListener('touchmove', countTouches, { passive: true });
       host.addEventListener('touchend', countTouches, { passive: true });
       host.addEventListener('touchcancel', countTouches, { passive: true });
-      host.addEventListener('gesturestart', noZoom);
-      host.addEventListener('gesturechange', noZoom);
     }
 
     backSwipeCleanup = () => {
@@ -2695,18 +2671,21 @@ body {
       host.removeEventListener('click', killClick, true);
       if (pair) {
         padReset();
-        host.removeEventListener('wheel', onWheel);
+        padWheelNow = null;
+        noZoomNow = false;
         host.removeEventListener('touchstart', countTouches);
         host.removeEventListener('touchmove', countTouches);
         host.removeEventListener('touchend', countTouches);
         host.removeEventListener('touchcancel', countTouches);
-        host.removeEventListener('gesturestart', noZoom);
-        host.removeEventListener('gesturechange', noZoom);
       }
     };
   }
 
   let backSwipeCleanup = null;
+  // Чей сейчас жест «назад» по трекпаду и выключен ли щипок. Постоянные
+  // обработчики на корне смотрят только на эти две переменные.
+  let padWheelNow = null;
+  let noZoomNow = false;
 
 
   // ------------------------------------------------------------------
@@ -4143,7 +4122,6 @@ body {
       const side = padSide(ev);
       if (!side) return;
       const force = Math.abs(side);
-      if (ev.cancelable !== false && ev.preventDefault) ev.preventDefault();
       if (padBlocks(force)) return;                            // хвост прошлого жеста
 
       wheelAcc += side;
@@ -4165,7 +4143,10 @@ body {
       if (wheelTimer) { clearTimeout(wheelTimer); wheelTimer = null; }
       padLock(force);
       step(dir);
-    }, { passive: false });
+      // Пассивный и здесь. Читалка занимает весь экран, и обработчик,
+      // способный отменять события, отнял бы у Safari быстрый путь
+      // прокрутки — а внутри карточки прокручивается длинный текст.
+    }, { passive: true });
 
     stage.addEventListener('pointerleave', () => {
       if (dragId === null && !sliding) place(0, Math.round(SLIDE_MS * 0.4));
@@ -7349,6 +7330,34 @@ body {
   root.addEventListener('touchmove', (ev) => {
     if (drag && ev.cancelable) ev.preventDefault();
   }, { passive: false });
+
+  // Колесо и трекпад. Один обработчик на всё время работы приложения —
+  // и обязательно пассивный.
+  //
+  // Здесь была та самая пропавшая прокрутка. Обработчик колеса на корне
+  // накрывает всю площадь приложения. Обычный, способный отменить
+  // событие, заставляет Safari вести прокрутку этой площади вручную —
+  // и над списком карточек она попросту вставала. Мы вешали такой
+  // обработчик при входе в колоду и снимали при выходе, но Safari, судя
+  // по всему, площадь обратно не отпускал: после первого захода в
+  // колоду и возврата прокрутка умирала и на главном экране — над
+  // колодами и разделами, а по пустым полям, куда приложение не
+  // достаёт, продолжала работать.
+  //
+  // Пассивный обработчик ничего отменить не может — и именно поэтому
+  // Safari отдаёт ему события, не трогая прокрутку. Жест «назад» по
+  // трекпаду он по-прежнему видит и отрабатывает.
+  root.addEventListener('wheel', (ev) => {
+    if (padWheelNow) padWheelNow(ev);
+  }, { passive: true });
+
+  // Щипок двумя пальцами в списке карточек ничего не увеличивает.
+  // Обработчик тоже один и постоянный, а решает переменная.
+  const noZoomEver = (ev) => {
+    if (noZoomNow && ev.cancelable && ev.preventDefault) ev.preventDefault();
+  };
+  root.addEventListener('gesturestart', noZoomEver);
+  root.addEventListener('gesturechange', noZoomEver);
 
   // Нажатие. После переноса браузер нередко досылает click по тому
   // элементу, который несли, — раздел свернулся бы, а колода открылась.
