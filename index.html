@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-htuAugqtREnraCiC5YVb09J9j2qWVJbt1rIuSRxzQb0=';
+               script-src 'sha256-Sglb+HsZdx055GzWHJo5WCwiFbTvOhlbSfRNjaNms0A=';
                style-src 'sha256-xE0xKBRr4Bw6rID4fDjQ99/I9/sp294+LHbAwBUb8WM=';
                img-src 'self' data:;
                media-src blob:;
@@ -1054,7 +1054,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 09:13';
+  const BUILD = '01.08.2026, 09:44';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1517,8 +1517,15 @@ body {
       del: (id) => tx('readwrite', (s) => s.delete(id)),
       /** Все ключи хранилища. Нужны, чтобы находить осиротевшие записи:
        *  карточки уже нет, а её звук занимает место. */
+      /**
+       * Все ключи хранилища — или null, если спросить не вышло.
+       *
+       * Разница между «пусто» и «не смогли спросить» здесь важнее
+       * всего: приняв одно за другое, приложение решит, что записей
+       * нет, и снимет отметки с живых карточек.
+       */
       keys: () => tx('readonly', (s) => s.getAllKeys())
-        .then((r) => (Array.isArray(r) ? r : [])).catch(() => []),
+        .then((r) => (Array.isArray(r) ? r : null)).catch(() => null),
       available: () => !!self.indexedDB,
 
       /** Запись → строка, пригодная для файла синхронизации. */
@@ -1586,35 +1593,59 @@ body {
   function healAudioFlags(onDone) {
     const done = (n) => { if (typeof onDone === 'function') onDone(n); };
     if (!AudioStore.available()) { done(0); return; }
-    const suspects = [];
+
+    const cards = [];
     for (const sec of state.sections) {
       for (const deck of sec.decks) {
-        for (const card of deck.cards) if (card.audio) suspects.push(card);
+        for (const card of deck.cards) cards.push(card);
       }
     }
-    if (!suspects.length) { done(0); return; }
+    if (!cards.length) { done(0); return; }
 
-    let fixed = 0;
-    const step = (i) => {
-      if (i >= suspects.length) {
-        if (fixed) { save(); render(); }
-        done(fixed);
-        return;
-      }
-      const card = suspects[i];
-      AudioStore.get(card.id).then((blob) => {
-        // Пустой объект считаем отсутствующим: именно так выглядит
-        // запись, которая не долежала до конца сделки с хранилищем
-        if (!blob || !blob.size) {
-          // Заодно подчищаем куски продолжения: без первого они всё
-          // равно ни к чему не относятся и просто заняли бы место
-          forgetAudio(card);
+    // Спрашиваем у хранилища ВЕСЬ список ключей разом.
+    //
+    // Раньше здесь опрашивали записи по одной, и это оказалось опасно:
+    // хранилище на iPhone иногда отвечает пустотой на совершенно живую
+    // запись — особенно сразу после запуска. Один такой промах, и
+    // карточка теряла голос. Общий список надёжнее: он либо приходит
+    // целиком, либо не приходит вовсе, и тогда мы просто ничего не
+    // трогаем.
+    AudioStore.keys().then((keys) => {
+      if (!Array.isArray(keys)) { done(0); return; }
+      // Пустое хранилище при непустых отметках — почти наверняка осечка,
+      // а не то, что все записи разом исчезли. Молчим и ждём следующего
+      // запуска: снять отметки мы всегда успеем, вернуть их — нет.
+      const claim = cards.filter((c) => c.audio).length;
+      if (!keys.length && claim > 0) { done(0); return; }
+
+      const have = new Set(keys);
+      let fixed = 0, back = 0;
+      cards.forEach((card) => {
+        const real = have.has(card.id);
+        if (card.audio && !real) {
+          // Отметку снимаем, но САМИ ЗАПИСИ НЕ ТРОГАЕМ. Здесь была
+          // ошибка, из-за которой голос пропадал безвозвратно: заодно
+          // с отметкой удалялось и содержимое. Отметку вернуть можно,
+          // запись — уже ничем.
+          card.audio = false;
           fixed++;
+          return;
         }
-        step(i + 1);
-      }).catch(() => step(i + 1));   // хранилище недоступно — не трогаем
-    };
-    step(0);
+        if (!card.audio && real) {
+          // Запись на месте, а карточка о ней забыла — возвращаем.
+          // Так голос находится сам, без всякого участия человека.
+          card.audio = true;
+          if (!card.audioLen) {
+            const parts = sanitizeParts(card.parts);
+            card.audioLen = parts.length
+              ? Math.round(parts.reduce((s, p) => s + p.len, 0) * 100) / 100 : 1;
+          }
+          back++;
+        }
+      });
+      if (fixed || back) { save(); render(); }
+      done(fixed + back);
+    }).catch(() => done(0));   // хранилище недоступно — не трогаем
   }
 
   /** Можно ли вообще записывать здесь и сейчас. */
@@ -1702,15 +1733,31 @@ body {
   function renderHome() {
     const frag = document.createDocumentFragment();
 
+    // Три кнопки, и у каждой одно дело.
+    //
+    // Раньше здесь были «↻» и «⋯», а за ними — два разных окна, в
+    // каждом своё сохранение и своя загрузка. Разобраться, какая из
+    // четырёх кнопок нужна, было невозможно. Теперь наверху ровно то,
+    // ради чего сюда заходят: отдать, взять и обновить само приложение.
     frag.appendChild(el('div', { class: 'topbar' }, [
       el('h1', { text: 'Аффирмации' }),
       el('button', {
-        class: 'iconbtn', attrs: { 'aria-label': 'Синхронизация', type: 'button' },
-        text: '↻', on: { click: openSync },
+        class: 'iconbtn', attrs: {
+          'aria-label': 'Сохранить в файл', title: 'Сохранить в файл',
+          type: 'button' },
+        text: '↑', on: { click: () => openSync('save') },
       }),
       el('button', {
-        class: 'iconbtn', attrs: { 'aria-label': 'Настройки', type: 'button' },
-        text: '⋯', on: { click: openSettings },
+        class: 'iconbtn', attrs: {
+          'aria-label': 'Взять из файла', title: 'Взять из файла',
+          type: 'button' },
+        text: '↓', on: { click: () => openSync('load') },
+      }),
+      el('button', {
+        class: 'iconbtn', attrs: {
+          'aria-label': 'Обновить приложение', title: 'Обновить приложение',
+          type: 'button' },
+        text: '↻', on: { click: openRefresh },
       }),
     ]));
 
@@ -4808,8 +4855,13 @@ body {
           // Отметка врёт — снимаем её, чтобы карточка не обещала звук,
           // которого нет. Чаще всего так бывает после восстановления
           // резервной копии: в ней только текст, звука там нет.
+          //
+          // Снимаем ТОЛЬКО отметку. Удалять при этом что-либо из
+          // хранилища нельзя: хранилище на iPhone способно ответить
+          // пустотой на живую запись, и тогда мы своими руками
+          // уничтожили бы голос, который на самом деле цел.
           label.textContent = 'Запись не найдена — отметка снята';
-          forgetAudio(card);
+          card.audio = false;
           save();
           setTimeout(() => { clear(bar); }, 1200);
           return null;
@@ -5464,79 +5516,81 @@ body {
   // ------------------------------------------------------------------
   // Настройки: резервная копия
   // ------------------------------------------------------------------
-  function openSettings() {
-    const wrap = el('div', { class: 'modal' });
-    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
-
-    const fileInput = el('input', {
-      // Фильтра по типу нет намеренно — по той же причине, что и в
-      // окне синхронизации: с ним iPhone гасит нужный файл. Что внутри,
-      // проверяем по содержимому.
-      attrs: { type: 'file' },
-      style: { display: 'none' },
-    });
-    fileInput.addEventListener('change', () => {
-      const f = fileInput.files && fileInput.files[0];
-      if (!f) return;
-      if (f.size > 5 * 1024 * 1024) { alert('Файл слишком большой.'); return; }
-      const reader = new FileReader();
-      reader.onload = () => {
-        let parsed = null;
-        try { parsed = JSON.parse(String(reader.result)); }
-        catch (e) { alert('Это не похоже на файл резервной копии.'); return; }
-        // Тот же разбор, что и для хранилища: чужой файл не должен
-        // протащить в приложение ничего, кроме текста
-        const clean = sanitizeState(parsed);
-        if (clean.sections.length === 0) { alert('В файле нет разделов.'); return; }
-        if (!confirm('Заменить всё содержимое данными из файла?')) return;
-        state = clean; save(); close(); go({ name: 'home' });
-        // В резервной копии только текст. Карточки из неё уверены, что
-        // у них есть звук, — сверяем с хранилищем и снимаем лишние
-        // отметки, иначе «играть» упрётся в пустоту.
-        healAudioFlags((n) => {
-          if (n) {
-            alert('Восстановлено из копии.\n\nВ копии нет голосовых '
-              + 'записей — отметка о звуке снята у ' + n
-              + ' карточек. Сами записи остались на том устройстве, где '
-              + 'их сделали; перенести их можно через синхронизацию.');
-          }
-        });
-      };
-      reader.readAsText(f);
-    });
-
-    const sheet = el('div', { class: 'sheet' }, [
-      el('h3', { text: 'Настройки' }),
-      el('p', { class: 'hint', text:
-        'Все карточки хранятся только на этом устройстве. Приложение не '
-        + 'обращается в интернет и никуда ничего не отправляет.' }),
-      el('div', { class: 'sheet-actions' }, [
-        el('button', { class: 'btn sec', attrs: { type: 'button' },
-                       text: 'Сохранить копию', on: { click: exportBackup } }),
-        el('button', { class: 'btn sec', attrs: { type: 'button' },
-                       text: 'Загрузить копию', on: { click: () => fileInput.click() } }),
-      ]),
-      el('p', { class: 'hint', text:
-        'Копия — обычный файл на вашем компьютере. Пригодится, если очистить '
-        + 'данные браузера: без копии карточки восстановить будет нельзя.' }),
-      el('div', { class: 'sheet-actions' }, [
-        el('button', { class: 'btn', attrs: { type: 'button' }, text: 'Закрыть',
-                       on: { click: close } }),
-      ]),
-      fileInput,
-    ]);
-
-    wrap.appendChild(sheet);
-    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
-    document.body.appendChild(wrap);
-  }
-
   function humanTime(ts) {
     const d = new Date(ts);
     if (isNaN(d.getTime())) return '—';
     const pad = (n) => String(n).padStart(2, '0');
     return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear()
       + ', ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  /** Отметка сборки — по ней видно, какая версия открыта. */
+  const stamp = () => el('p', { class: 'hint build-stamp', text: buildLabel() });
+
+  /**
+   * Забрать свежую оболочку приложения из интернета.
+   *
+   * Приложение хранит себя на устройстве, чтобы открываться мгновенно.
+   * Обратная сторона: когда в интернете появляется исправленная версия,
+   * само оно об этом узнаёт не сразу. Эта кнопка выбрасывает сохранённое
+   * и перечитывает всё заново.
+   *
+   * Карточки и голосовые записи это не трогает совсем: они лежат в
+   * другом месте — в хранилище устройства, а не в памяти страницы.
+   */
+  function fetchFreshApp(say) {
+    const tell = (t) => { if (typeof say === 'function') say(t); };
+    tell('Забираю свежую версию…');
+    const jobs = [];
+    if (typeof caches !== 'undefined' && caches.keys) {
+      jobs.push(caches.keys()
+        .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+        .catch(() => {}));
+    }
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      jobs.push(navigator.serviceWorker.getRegistrations()
+        .then((regs) => Promise.all(regs.map((r) => r.unregister())))
+        .catch(() => {}));
+    }
+    return Promise.all(jobs).then(() => {
+      if (typeof location !== 'undefined' && location.reload) location.reload();
+    });
+  }
+
+  /** Окно кнопки «↻»: одно действие и честное предупреждение. */
+  function openRefresh() {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const status = el('div', { class: 'sync-status' });
+    const sheet = el('div', { class: 'sheet' }, [
+      el('h3', { text: 'Обновить приложение' }),
+      el('p', { class: 'hint', text:
+        'Заберёт из интернета последнюю версию самого приложения — с '
+        + 'исправлениями и новыми возможностями.' }),
+      el('p', { class: 'hint', text:
+        'Карточки и голосовые записи останутся на месте: они хранятся '
+        + 'отдельно от приложения и при обновлении не трогаются.' }),
+      status,
+      el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Отмена', on: { click: close } }),
+        el('button', {
+          class: 'btn big', attrs: { type: 'button' },
+          text: '↻  Обновить',
+          on: { click: () => {
+            fetchFreshApp((t) => {
+              clear(status);
+              status.className = 'sync-status wait';
+              status.appendChild(el('div', { text: t }));
+            });
+          } },
+        }),
+      ]),
+      stamp(),
+    ]);
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
   }
 
   /**
@@ -5549,7 +5603,7 @@ body {
    * достаточно, чтобы переносить карточки между устройствами через ту же
    * облачную папку, без сервера и без учётной записи.
    */
-  function openSync() {
+  function openSync(startWith) {
     const wrap = el('div', { class: 'modal' });
     const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
     const sheet = el('div', { class: 'sheet' });
@@ -5934,7 +5988,6 @@ body {
     }
 
     /** Отметка сборки внизу окна: по ней видно, что за версия открыта. */
-    const stamp = () => el('p', { class: 'hint build-stamp', text: buildLabel() });
 
     /**
      * Заставить приложение перечитать себя заново.
@@ -5946,26 +5999,6 @@ body {
      * почему, снаружи не видно. Эта кнопка выбрасывает всё накопленное и
      * перечитывает страницу.
      */
-    const refreshApp = () => {
-      report('Выбрасываю накопленное и перечитываю…', 'wait');
-      const jobs = [];
-      if (typeof caches !== 'undefined' && caches.keys) {
-        jobs.push(caches.keys()
-          .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
-          .catch(() => {}));
-      }
-      if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
-        jobs.push(navigator.serviceWorker.getRegistrations()
-          .then((regs) => Promise.all(regs.map((r) => r.unregister())))
-          .catch(() => {}));
-      }
-      Promise.all(jobs).then(() => {
-        // Карточки и записи это не трогает: они лежат в хранилище
-        // браузера, а не в кеше страницы
-        if (typeof location !== 'undefined' && location.reload) location.reload();
-      });
-    };
-
     function drawMain() {
     clear(sheet);
     sheet.appendChild(el('h3', { text: 'Обмен между устройствами' }));
@@ -6033,13 +6066,15 @@ body {
       el('summary', { text: 'Ещё' }),
       el('p', { class: 'hint', text:
         'Голосовые записи лежат внутри того же файла — из-за них он '
-        + 'заметно тяжелее, это нормально.' }),
+        + 'заметно тяжелее, это нормально. Сохранённый файл заодно '
+        + 'служит и резервной копией: карточки и голос хранятся только '
+        + 'на устройстве, и без него восстановить их будет нечем.' }),
       pasteBlock,
       el('div', { class: 'sync-row' }, [
         el('button', {
           class: 'btn sec', attrs: { type: 'button' },
           text: 'Обновить приложение',
-          on: { click: refreshApp },
+          on: { click: () => fetchFreshApp((t) => report(t, 'wait')) },
         }),
         el('p', { class: 'hint', text:
           'Если на одном устройстве новая версия приложения, а на другом '
@@ -6054,6 +6089,12 @@ body {
     wrap.appendChild(sheet);
     wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
     document.body.appendChild(wrap);
+    // Нажали стрелку наверху — сразу делаем то, за чем пришли, а не
+    // показываем ещё одно окно с теми же двумя кнопками. Окно к этому
+    // моменту уже на экране: выбор файла из открепленного поля Safari
+    // иногда просто не показывает.
+    if (startWith === 'save') sendOut();
+    else if (startWith === 'load') fileInput.click();
   }
 
   /**
@@ -6351,19 +6392,6 @@ body {
     step(0);
   }
 
-  function exportBackup() {
-    // Тот же расчёт, что и у файла обмена: обычный текст iPhone даёт
-    // выбрать, а .json — нет
-    const blob = new Blob([JSON.stringify(
-      Object.assign({}, state, { kind: 'backup' }), null, 2)],
-      { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = el('a', { attrs: { href: url, download: 'affirmations-только-текст.txt' } });
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
 
   // ------------------------------------------------------------------
   // Полоска «готова новая версия».
