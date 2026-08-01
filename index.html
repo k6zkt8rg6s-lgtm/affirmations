@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-MA0QwdRLM/xNMg24zwBrL6qvMyVU72XLiI6eAJp7c7w=';
-               style-src 'sha256-XUjLjoQFeZ6n1efW55LujgA2G6qqW/l73UnDKY5n/xU=';
+               script-src 'sha256-htuAugqtREnraCiC5YVb09J9j2qWVJbt1rIuSRxzQb0=';
+               style-src 'sha256-xE0xKBRr4Bw6rID4fDjQ99/I9/sp294+LHbAwBUb8WM=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -791,6 +791,14 @@ body {
 .btn.sec { background: rgba(0, 0, 0, .06); color: var(--ink); }
 .btn.danger { background: var(--danger); }
 .btn:active { opacity: .85; }
+/* Две главные кнопки обмена. Крупные и во всю ширину: между ними и
+   выбирают, а стрелка сразу показывает направление. */
+.btn.big {
+  width: 100%;
+  min-height: 52px;
+  font-size: 17px;
+  letter-spacing: .2px;
+}
 
 .add-tile {
   border: 1.5px dashed rgba(0, 0, 0, .22);
@@ -1046,7 +1054,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 00:25';
+  const BUILD = '01.08.2026, 09:13';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -5795,15 +5803,14 @@ body {
       // «Только добавить» остаётся для другого случая: когда карточки
       // писались на двух устройствах и нужно свести их вместе.
       sheet.appendChild(el('p', { class: 'hint', text:
-        'Как в файле — устройство станет точно таким же, лишнее уйдёт. '
-        + 'Только добавить — прежний способ: появится то, чего здесь нет, '
-        + 'остальное останется.' }));
+        'Обновить — устройство станет точно таким же, как в файле, вместе '
+        + 'с голосом. Это обычный способ перенести последнюю версию.' }));
       sheet.appendChild(el('div', { class: 'sheet-actions' }, [
         el('button', { class: 'btn sec', attrs: { type: 'button' },
                        text: 'Отмена', on: { click: drawMain } }),
         el('button', {
-          class: 'btn', attrs: { type: 'button' },
-          text: 'Сделать как в файле',
+          class: 'btn big', attrs: { type: 'button' },
+          text: 'Обновить',
           on: { click: () => askMirror(parsed, clean, source) },
         }),
       ]));
@@ -5923,7 +5930,7 @@ body {
           el('button', { class: 'btn', attrs: { type: 'button' }, text: 'Закрыть',
                          on: { click: () => { close(); render(); } } }),
         ]));
-      });
+      }, mode);
     }
 
     /** Отметка сборки внизу окна: по ней видно, что за версия открыта. */
@@ -5961,26 +5968,28 @@ body {
 
     function drawMain() {
     clear(sheet);
-    sheet.appendChild(el('h3', { text: 'Синхронизация' }));
-    sheet.appendChild(el('p', { class: 'hint', text:
-      'Перенос карточек и голосовых записей между устройствами через файл '
-      + 'в iCloud Drive.' }));
+    sheet.appendChild(el('h3', { text: 'Обмен между устройствами' }));
 
-    // Слова «выгрузить» и «загрузить» отличаются одной буквой и легко
-    // путаются. Пишем прямо, в какую сторону идут данные.
+    // Две кнопки, и больше ничего.
+    //
+    // Раньше здесь было много слов и несколько кнопок вперемешку, и
+    // самое частое затруднение было простое: непонятно, какая из них в
+    // какую сторону. Теперь направление видно по стрелке и сказано
+    // одной строкой — что именно произойдёт.
     sheet.appendChild(el('div', { class: 'sync-row' }, [
-      el('button', { class: 'btn', attrs: { type: 'button' },
-                     text: '↑  Сохранить в файл', on: { click: sendOut } }),
-      el('p', { class: 'hint', text:
-        'Отсюда — в файл. Делайте на том устройстве, где вносили изменения.' }),
-    ]));
-    sheet.appendChild(el('div', { class: 'sync-row' }, [
-      el('button', { class: 'btn sec', attrs: { type: 'button' },
+      el('button', { class: 'btn big', attrs: { type: 'button' },
                      text: '↓  Взять из файла',
                      on: { click: () => fileInput.click() } }),
       el('p', { class: 'hint', text:
-        'Из файла — сюда. Делайте на втором устройстве. Ваши карточки '
-        + 'не стираются, добавляются только недостающие.' }),
+        'Обновить это устройство: взять последнюю версию, сохранённую '
+        + 'на другом.' }),
+    ]));
+    sheet.appendChild(el('div', { class: 'sync-row' }, [
+      el('button', { class: 'btn sec big', attrs: { type: 'button' },
+                     text: '↑  Сохранить в файл', on: { click: sendOut } }),
+      el('p', { class: 'hint', text:
+        'Сохранить эту версию — карточки и голос — чтобы взять её на '
+        + 'другом устройстве.' }),
     ]));
 
     // Запасной путь на случай, если окно выбора файла опять заупрямится.
@@ -5991,7 +6000,7 @@ body {
       attrs: { rows: '3', placeholder: 'Или вставьте сюда текст файла',
                autocomplete: 'off', autocorrect: 'off', spellcheck: 'false' },
     });
-    sheet.appendChild(el('details', { class: 'fallback' }, [
+    const pasteBlock = el('details', { class: 'fallback' }, [
       el('summary', { text: 'Не получается выбрать файл?' }),
       el('p', { class: 'hint', text:
         'Откройте файл на другом устройстве, скопируйте всё содержимое '
@@ -6006,36 +6015,39 @@ body {
           takeText(v, 'вставленный текст');
         } },
       }),
-    ]));
+    ]);
     sheet.appendChild(status);
     if (state.syncedAt) {
       sheet.appendChild(el('p', { class: 'hint',
-        text: 'Последний раз: ' + humanTime(state.syncedAt) }));
+        text: 'Последний обмен: ' + humanTime(state.syncedAt) }));
     }
-    sheet.appendChild(el('p', { class: 'hint', text:
-      'Голосовые записи переносятся вместе с карточками. Из-за них файл '
-      + 'заметно тяжелее — это нормально. Если запись уже есть на этом '
-      + 'устройстве, она сохраняется, чужая её не затирает.' }));
     sheet.appendChild(el('div', { class: 'sheet-actions' }, [
       el('button', { class: 'btn sec', attrs: { type: 'button' }, text: 'Закрыть',
                      on: { click: close } }),
     ]));
     sheet.appendChild(fileInput);
 
-    // Обновление приложения. Отдельно от переноса карточек: это про сам
-    // код приложения, а не про данные.
-    sheet.appendChild(el('div', { class: 'sync-row' }, [
-      el('button', {
-        class: 'btn sec', attrs: { type: 'button' },
-        text: 'Обновить приложение',
-        on: { click: refreshApp },
-      }),
+    // Всё редкое — под складкой. Это нужно раз в полгода и не должно
+    // мешать двум кнопкам наверху.
+    sheet.appendChild(el('details', { class: 'fallback' }, [
+      el('summary', { text: 'Ещё' }),
       el('p', { class: 'hint', text:
-        'Если на одном устройстве новое, а на другом старое — нажмите здесь. '
-        + 'Приложение перечитает себя заново. Карточки и записи не пострадают: '
-        + 'они хранятся отдельно от самого приложения.' }),
+        'Голосовые записи лежат внутри того же файла — из-за них он '
+        + 'заметно тяжелее, это нормально.' }),
+      pasteBlock,
+      el('div', { class: 'sync-row' }, [
+        el('button', {
+          class: 'btn sec', attrs: { type: 'button' },
+          text: 'Обновить приложение',
+          on: { click: refreshApp },
+        }),
+        el('p', { class: 'hint', text:
+          'Если на одном устройстве новая версия приложения, а на другом '
+          + 'старая. Карточки и записи не пострадают — они хранятся '
+          + 'отдельно от самого приложения.' }),
+      ]),
+      stamp(),
     ]));
-    sheet.appendChild(stamp());
     }
 
     drawMain();
@@ -6114,13 +6126,20 @@ body {
             byText.delete(inCard.text.trim());
             keep.color = inCard.color;
             keep.fav = inCard.fav;
-            if (!keep.peaks || !keep.peaks.length) {
-              keep.peaks = sanitizePeaks(inCard.peaks);
-            }
+            // Оформление тоже из файла.
+            //
+            // Здесь была потеря, из-за которой устройства не сходились:
+            // выделил слово жирным на телефоне, перенёс на компьютер —
+            // текст тот же, а оформление осталось прежним. «Как в
+            // файле» значит и оформление как в файле.
+            keep.marks = sanitizeMarks(inCard.marks, keep.text.length);
+            keep.peaks = sanitizePeaks(inCard.peaks);
             deck.cards.push(keep);
           } else {
             deck.cards.push({ id: uid(), text: inCard.text, color: inCard.color,
                               fav: inCard.fav, audio: false, audioLen: 0,
+                              parts: [],
+                              marks: sanitizeMarks(inCard.marks, inCard.text.length),
                               peaks: sanitizePeaks(inCard.peaks) });
           }
         }
@@ -6199,8 +6218,13 @@ body {
           if (deck.cards.length >= LIMITS.cardsPerDeck) break;
           // Форму волны переносим сразу: пересчитать её из файла на
           // iPhone нечем, а без неё дорожка выглядела бы пустой
+          // Оформление переносим вместе с текстом: без него карточка
+          // приезжает на другое устройство «раздетой», и человек видит
+          // разное на двух экранах при одном и том же тексте
           const fresh = { id: uid(), text: inCard.text, color: inCard.color,
                           fav: inCard.fav, audio: false, audioLen: 0,
+                          parts: [],
+                          marks: sanitizeMarks(inCard.marks, inCard.text.length),
                           peaks: sanitizePeaks(inCard.peaks) };
           deck.cards.push(fresh);
           byText.set(key, fresh);
@@ -6217,7 +6241,7 @@ body {
   }
 
   /** Разложить голосовые записи из файла по карточкам. */
-  function importClips(links, clips, status, addedCards, onDone) {
+  function importClips(links, clips, status, addedCards, onDone, mode) {
     const todo = links.filter((l) => typeof clips[l.from] === 'string');
     // Сколько записей было в файле — нужно, чтобы честно объяснить
     // итог: «две записи в файле, обе уже есть» и «две записи в файле,
@@ -6301,6 +6325,17 @@ body {
       };
 
       if (!link.existing) { take(); return; }
+      // «Сделать как в файле» значит именно как в файле — вместе с
+      // голосом.
+      //
+      // Здесь была ошибка, из-за которой устройства и не могли
+      // обменяться последней версией. Своя запись считалась дороже
+      // чужой всегда, при любом способе загрузки. Перезаписал голос на
+      // телефоне, перенёс на компьютер — текст обновился, а звук
+      // остался прежний, потому что «свой». Теперь при замене
+      // побеждает файл, а при обычном добавлении — как и было, своё.
+      if (mode === 'mirror') { take(); return; }
+
       // Карточка была на устройстве. Своя запись дороже чужой — но
       // «своя» значит настоящая, а не отметка о ней.
       AudioStore.get(link.card.id).then((mine) => {
