@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-OVOrJzO+NjMBIZclxuvd9yOq2ywDBPP7vFlA9l6nXeE=';
-               style-src 'sha256-z4GWSVaTuJuGzFV2+KyAj907LjwEwnkoGmwhVBtT4Ro=';
+               script-src 'sha256-47zWJUDeeT9fmt3JmwuoT8+EZ8MP7/rFzdqId6hDhzc=';
+               style-src 'sha256-zGEX/nZPQ6D8ON+cY6wiWuh1VKnd2kRYZjyU+M3jZtM=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -587,7 +587,12 @@ body {
    без него она торчала бы сбоку всегда. */
 .card-row {
   position: relative;
+  /* hidden заводит внутри область прокрутки, и колесо над строкой
+     достаётся ей, а не странице. clip просто отрезает по краю и
+     областью прокрутки не становится. Старый Safari clip не знает и
+     возьмёт строку выше — вид от этого не меняется. */
   overflow: hidden;
+  overflow: clip;
   border-radius: var(--radius-m);
 }
 .row-actions {
@@ -690,6 +695,14 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
+  /* Здесь и пряталась пропавшая прокрутка в списке карточек.
+     Текст обрезан двумя строками, и содержимого в этой рамке больше, чем
+     видно. Для Safari это готовая область прокрутки: колесо над ней он
+     отдаёт ей, а она обрезана и никуда не едет. Прокрутка «не работала
+     над карточками» и оживала, стоило увести указатель на поля.
+     Убираем текст из-под указателя: нажатие всё равно ловит кнопка
+     строки, а колесо уходит странице, как и положено. */
+  pointer-events: none;
 }
 .mini-num { color: var(--ink-soft); font-size: 14px; flex: none; }
 
@@ -1099,7 +1112,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 18:40';
+  const BUILD = '01.08.2026, 18:48';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -4171,10 +4184,10 @@ body {
   // следующий шаг короче: пальцу не приходится ждать, а движение всё
   // равно видно.
   const SLIDE_FAST = 210;
-  // Въезд нового экрана. Короче, чем ход карточки: пока он идёт, страница
-  // лежит на отдельном слое и прокрутка на компьютере включается не
-  // сразу. Треть секунды тут была заметна, пятая доля — нет.
-  const ENTER_MS = 200;
+  // Появление нового экрана. Только прозрачность и очень коротко:
+  // страница не должна ни на мгновение оказаться на отдельном слое,
+  // иначе прокрутка на компьютере включается через раз.
+  const ENTER_MS = 140;
   // Сколько свайпов подряд помним, пока идёт ход. Больше трёх за раз
   // человек не делает, а без предела быстрая серия унесла бы через всю
   // колоду.
@@ -7232,41 +7245,31 @@ body {
       });
     }
 
-    // Экран въезжает с той стороны, куда ушёл предыдущий. Смещение
-    // ставим сразу, а снимаем на следующем кадре: в одном кадре браузер
-    // не увидит промежуточного состояния и анимации не получится.
+    // Новый экран проявляется, а не въезжает сдвигом.
+    //
+    // Сдвиг тут был красивее, но дорого стоил: пока страница сдвинута,
+    // Safari держит под неё отдельный слой во всю высоту, а прокрутка по
+    // такому слою включается не сразу. Человек возвращается на главный,
+    // сразу крутит колесо — и первые две-три попытки уходят впустую.
+    //
+    // Уходящий экран по-прежнему уезжает вбок: движение видно, а
+    // приходящий появляется мгновенно и прокручивается с первого раза.
     if (pageEnter !== 0) {
-      const dir = pageEnter;
       pageEnter = 0;
       const target = root.firstChild;
       if (target && target.style) {
-        const w = target.offsetWidth || 400;
-        target.style.setProperty('will-change', 'transform');
         target.style.setProperty('transition', 'none');
-        target.style.setProperty('transform',
-          'translateX(' + (dir > 0 ? w * 0.4 : -w * 0.4) + 'px)');
-        target.style.setProperty('opacity', '0.4');
+        target.style.setProperty('opacity', '0.35');
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             target.style.setProperty('transition',
-              'transform ' + ENTER_MS + 'ms ' + SLIDE_EASE
-              + ', opacity ' + Math.round(ENTER_MS * 0.6) + 'ms linear');
-            target.style.setProperty('transform', 'translateX(0)');
+              'opacity ' + ENTER_MS + 'ms linear');
             target.style.setProperty('opacity', '1');
-            // И обязательно прибираем за собой.
-            //
-            // Пока на экране висит хоть какой-то transform, Safari держит
-            // под него отдельный слой во всю высоту страницы — а страница
-            // длиннее окна. Прокрутка по такому слою на компьютере
-            // включается с запозданием: колесо крутишь, а список стоит.
-            // Раньше эти строки оставались навсегда, и «подтормаживает
-            // при входе в колоду и при возврате» — ровно отсюда.
+            // Прибираем за собой: висящий переход тоже держит слой
             setTimeout(() => {
               if (root.firstChild !== target) return;   // экран уже сменился
               target.style.setProperty('transition', 'none');
-              target.style.setProperty('transform', 'none');
               target.style.setProperty('opacity', '1');
-              target.style.setProperty('will-change', 'auto');
             }, ENTER_MS + 60);
           });
         });
