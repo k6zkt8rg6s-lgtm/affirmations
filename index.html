@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-EzMQMOIHIAuiJxp6Fz+y6q9acXtg5SVGbZ5dSfUYRwc=';
+               script-src 'sha256-OVOrJzO+NjMBIZclxuvd9yOq2ywDBPP7vFlA9l6nXeE=';
                style-src 'sha256-z4GWSVaTuJuGzFV2+KyAj907LjwEwnkoGmwhVBtT4Ro=';
                img-src 'self' data:;
                media-src blob:;
@@ -1099,7 +1099,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 18:28';
+  const BUILD = '01.08.2026, 18:40';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1951,6 +1951,10 @@ body {
   const spots = {};
   const spotKey = (v) => (v.name === 'deck' ? 'deck:' + v.deckId
     : v.name === 'read' ? 'read:' + v.deckId : 'home');
+  // Какой экран сейчас на виду. Нужно, чтобы отличить переход на другой
+  // экран от простой перерисовки того же самого: место запоминается для
+  // перехода, а при перерисовке трогать прокрутку нельзя.
+  let shownKey = null;
 
   function go(next) {
     // Запоминаем место ДО перерисовки: после неё страница уже другой
@@ -4167,6 +4171,10 @@ body {
   // следующий шаг короче: пальцу не приходится ждать, а движение всё
   // равно видно.
   const SLIDE_FAST = 210;
+  // Въезд нового экрана. Короче, чем ход карточки: пока он идёт, страница
+  // лежит на отдельном слое и прокрутка на компьютере включается не
+  // сразу. Треть секунды тут была заметна, пятая доля — нет.
+  const ENTER_MS = 200;
   // Сколько свайпов подряд помним, пока идёт ход. Больше трёх за раз
   // человек не делает, а без предела быстрая серия унесла бы через всю
   // колоду.
@@ -7167,6 +7175,11 @@ body {
 
   // ------------------------------------------------------------------
   function render() {
+    // Где человек стоит прямо сейчас — спросить надо ДО подмены
+    // содержимого: после неё страница уже другой высоты, и браузер
+    // успевает зажать прокрутку.
+    const wasAt = (typeof window !== 'undefined'
+      && (window.scrollY || window.pageYOffset)) || 0;
     if (readerKeyHandler) {
       document.removeEventListener('keydown', readerKeyHandler);
       readerKeyHandler = null;
@@ -7190,8 +7203,17 @@ body {
 
     // Возвращаемся туда, где стояли на этом экране. Если человек здесь
     // ещё не был — начинаем сверху, как и раньше.
+    //
+    // Но только при переходе на ДРУГОЙ экран. Перерисовка того же самого
+    // (отметили избранное, свернули раздел, поправили карточку) прокрутку
+    // трогать не должна: место, запомненное при уходе с экрана, к этому
+    // мгновению давно другое, и человека уносило вниз ни с того ни с
+    // сего. Так и было с сердечком в «Избранном»: снимаешь отметку — и
+    // экран сам уезжает вниз.
     const here = spotKey(view);
-    const back = spots[here] || 0;
+    const back = here === shownKey ? wasAt : (spots[here] || 0);
+    shownKey = here;
+    spots[here] = back;
     window.scrollTo(0, back);
     // Второй заход на следующем кадре. Сразу после подмены содержимого
     // страница ещё не набрала высоту, и Safari молча зажимает прокрутку
@@ -7219,6 +7241,7 @@ body {
       const target = root.firstChild;
       if (target && target.style) {
         const w = target.offsetWidth || 400;
+        target.style.setProperty('will-change', 'transform');
         target.style.setProperty('transition', 'none');
         target.style.setProperty('transform',
           'translateX(' + (dir > 0 ? w * 0.4 : -w * 0.4) + 'px)');
@@ -7226,10 +7249,25 @@ body {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             target.style.setProperty('transition',
-              'transform ' + SLIDE_MS + 'ms ' + SLIDE_EASE
-              + ', opacity ' + Math.round(SLIDE_MS * 0.6) + 'ms linear');
+              'transform ' + ENTER_MS + 'ms ' + SLIDE_EASE
+              + ', opacity ' + Math.round(ENTER_MS * 0.6) + 'ms linear');
             target.style.setProperty('transform', 'translateX(0)');
             target.style.setProperty('opacity', '1');
+            // И обязательно прибираем за собой.
+            //
+            // Пока на экране висит хоть какой-то transform, Safari держит
+            // под него отдельный слой во всю высоту страницы — а страница
+            // длиннее окна. Прокрутка по такому слою на компьютере
+            // включается с запозданием: колесо крутишь, а список стоит.
+            // Раньше эти строки оставались навсегда, и «подтормаживает
+            // при входе в колоду и при возврате» — ровно отсюда.
+            setTimeout(() => {
+              if (root.firstChild !== target) return;   // экран уже сменился
+              target.style.setProperty('transition', 'none');
+              target.style.setProperty('transform', 'none');
+              target.style.setProperty('opacity', '1');
+              target.style.setProperty('will-change', 'auto');
+            }, ENTER_MS + 60);
           });
         });
       }
