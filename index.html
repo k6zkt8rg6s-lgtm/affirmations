@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-OprhRiBpXJlGKtvXh08VxQYi3vXbWtK7c0uNydWEecE=';
-               style-src 'sha256-xE0xKBRr4Bw6rID4fDjQ99/I9/sp294+LHbAwBUb8WM=';
+               script-src 'sha256-2xCyA5RN7Q/cUpycLG6ZxslWP3QLcTntSqnkp85ObUQ=';
+               style-src 'sha256-8Gcqc2CBbY6R4H1EbLUglVLrGzkLNnthJbqxhfuYVE0=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -799,6 +799,16 @@ body {
   font-size: 17px;
   letter-spacing: .2px;
 }
+/* «Больше не напоминать» — действие есть, но голоса ему не надо */
+.btn.quiet {
+  width: 100%;
+  margin-top: 10px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-weight: 400;
+  font-size: 14px;
+  min-height: 38px;
+}
 
 .add-tile {
   border: 1.5px dashed rgba(0, 0, 0, .22);
@@ -1054,7 +1064,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 10:14';
+  const BUILD = '01.08.2026, 10:24';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1320,6 +1330,10 @@ body {
       out.syncedAt = raw.syncedAt;
     }
     out.favCollapsed = raw.favCollapsed === true;
+    // Подсказку про настройку Safari показываем один раз: человек её
+    // прочитал и либо включил, либо решил обойтись. Напоминать при
+    // каждом сохранении — навязчиво.
+    out.hideSaveHint = raw.hideSaveHint === true;
     for (const s of raw.sections.slice(0, LIMITS.sections)) {
       if (!s || typeof s !== 'object') continue;
       const section = {
@@ -5791,7 +5805,75 @@ body {
      * занимает секунды. Спросив после, мы бы получили отказ — и файл
      * молча падал бы в «Загрузки» вместо выбранной папки.
      */
+    /**
+     * Умеет ли этот браузер спросить, куда сохранять.
+     *
+     * Такое окно открывается только через отдельную возможность
+     * браузера. Она есть в Chrome и Edge; в Safari её нет ни на
+     * компьютере, ни на телефоне — и это не наше ограничение, а его.
+     * Проверено: на весну 2026 года так и осталось.
+     */
+    const canAskWhere = !!self.showSaveFilePicker;
+    const handheld = () => ((navigator.maxTouchPoints || 0) > 0);
+
+    /**
+     * Один раз объяснить, почему файл падает в «Загрузки» без вопроса,
+     * и как сделать, чтобы Safari спрашивал.
+     *
+     * Показывается только на компьютере и только там, где спросить про
+     * место мы не можем. После включения одной настройки Safari сам
+     * начнёт показывать настоящее окно с выбором папки — то самое, что
+     * и нужно. Второй путь: открыть приложение в Chrome, там окно
+     * выбора работает сразу.
+     */
+    function explainThenSave() {
+      clear(sheet);
+      sheet.appendChild(el('h3', { text: 'Safari не спрашивает, куда сохранять' }));
+      sheet.appendChild(el('p', { class: 'hint', text:
+        'Он молча кладёт файл в «Загрузки». Показать окно с выбором папки '
+        + 'из самой страницы нельзя — это ограничение Safari.' }));
+      sheet.appendChild(el('div', { class: 'sync-status ok' }, [
+        el('div', { text: 'Чтобы Safari каждый раз спрашивал:' }),
+        el('div', { text: '1. Safari → Настройки (⌘,)' }),
+        el('div', { text: '2. Вкладка «Основные»' }),
+        el('div', { text: '3. «Место загрузки» → «Спрашивать при каждой загрузке»' }),
+      ]));
+      sheet.appendChild(el('p', { class: 'hint', text:
+        'После этого стрелка «↑» будет открывать обычное окно сохранения '
+        + 'с выбором папки. Второй путь: открыть приложение в Chrome — '
+        + 'там выбор места работает сразу, без настроек.' }));
+      sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Отмена', on: { click: quit } }),
+        el('button', {
+          class: 'btn big', attrs: { type: 'button' }, text: 'Сохранить',
+          on: { click: () => { clear(sheet); saveNow(null); } },
+        }),
+      ]));
+      sheet.appendChild(el('button', {
+        class: 'btn sec quiet', attrs: { type: 'button' },
+        text: 'Больше не напоминать',
+        on: { click: () => {
+          state.hideSaveHint = true; save();
+          clear(sheet); saveNow(null);
+        } },
+      }));
+      present();
+    }
+
+    /** Собрать файл и отдать его — в выбранное место или как получится. */
+    function saveNow(handle) {
+      return buildPayload()
+        .then((text) => deliver(text, handle))
+        .catch(() => { done('Не удалось собрать файл.', 'bad'); });
+    }
+
     function sendOut() {
+      // На компьютере без окна выбора места — сперва объясняем, один раз
+      if (!canAskWhere && !handheld() && !state.hideSaveHint) {
+        explainThenSave();
+        return Promise.resolve(null);
+      }
       const ask = self.showSaveFilePicker
         ? self.showSaveFilePicker({
           suggestedName: SYNC_FILE,
@@ -5801,9 +5883,7 @@ body {
 
       return ask.then((handle) => {
         if (self.showSaveFilePicker && !handle) { quit(); return null; }
-        return buildPayload()
-          .then((text) => deliver(text, handle))
-          .catch(() => { done('Не удалось собрать файл.', 'bad'); });
+        return saveNow(handle);
       });
     }
 
@@ -5861,8 +5941,7 @@ body {
       //
       // Различаем по способу ввода: у телефона и планшета есть касания,
       // у настольной Safari их нет ни одного.
-      const handheld = (navigator.maxTouchPoints || 0) > 0;
-      if (handheld && navigator.canShare && navigator.canShare({ files: [file] })) {
+      if (handheld() && navigator.canShare && navigator.canShare({ files: [file] })) {
         // Передаём ТОЛЬКО файл. Если добавить title или text, iOS
         // сохраняет их отдельным текстовым файлом рядом — и на диске
         // оказывается два файла вместо одного.
@@ -5881,10 +5960,7 @@ body {
       // в «Загрузки» и не спрашивает — об этом честнее сказать сразу,
       // вместе с тем, как включить вопрос.
       done('Файл сохранён: ' + SYNC_FILE + ' (' + size + ').' + warn
-           + '\nИщите его в «Загрузках» и переложите в iCloud Drive.'
-           + '\n\nЧтобы Safari каждый раз спрашивал, куда сохранять: '
-           + 'Safari → Настройки → Основные → «Место загрузки» → '
-           + '«Спрашивать при каждой загрузке».');
+           + '\nЕсли Safari не спросил, куда, — ищите в «Загрузках».');
     }
 
     /** Крупное заметное сообщение вместо мелкой серой строчки. */
