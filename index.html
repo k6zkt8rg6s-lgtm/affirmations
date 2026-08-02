@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-PQ2ckoQxEDSToRMHbU3ajwR0TWTO87/0p6WG32goLHw=';
-               style-src 'sha256-HzU8Up5qWxDNtuXngag1EFcfVrqFli/aF0eTdOoQwlU=';
+               script-src 'sha256-OpiyPo/an806zizy3wr6hH7x2oGQAzW7lm8dQKfP2WY=';
+               style-src 'sha256-5UNbHgk9/c1NfUh1JpBaCEP0fxaGyA54pK8qj7sGu2w=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -219,6 +219,38 @@ body {
 }
 .iconbtn:active { background: rgba(0, 0, 0, .12); }
 .iconbtn.ghost { background: transparent; }
+
+/* Кнопка «свернуть или развернуть всё».
+   Значок — две галочки, расходящиеся от середины: сверху вверх, снизу
+   вниз. Знак этот привычен по спискам и папкам и читается сразу.
+
+   Нарисован рамками, а не картинкой и не шрифтом: чёткий на любом
+   экране, берёт цвет у кнопки и ничего не подгружает.
+
+   Вид не меняется от нажатия — так и просили. Кнопка одна и делает
+   одно: переключает. Что именно вышло, видно по самому экрану. */
+.iconbtn.fold { color: var(--ink); }
+.fold-mark {
+  display: block;
+  position: relative;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;      /* колесо и нажатие достаются кнопке */
+}
+.fold-mark::before,
+.fold-mark::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border: 1.7px solid currentColor;
+  border-left-color: transparent;
+  border-bottom-color: transparent;
+  border-radius: 1px;
+}
+.fold-mark::before { top: 1px; transform: translateX(-50%) rotate(-45deg); }
+.fold-mark::after { bottom: 1px; transform: translateX(-50%) rotate(135deg); }
 
 /* Сердечко: пустое — обычное, залитое — красное */
 .iconbtn.heart { background: transparent; font-size: 22px; color: var(--ink-soft); }
@@ -989,6 +1021,30 @@ body {
 .sheet-actions { display: flex; gap: 10px; margin-top: 16px; }
 .sheet-actions .btn { flex: 1; }
 
+/* Список за кнопкой «⋯». Строки крупные: сюда попадают редко, и каждая
+   строка должна читаться с одного взгляда — что она сделает и зачем. */
+.menu-list { display: flex; flex-direction: column; gap: 8px; }
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--hair);
+  background: var(--paper);
+  border-radius: 14px;
+  padding: 12px 14px;
+  min-height: var(--tap);
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--ink);
+}
+.menu-item:active { background: #F0EEE9; }
+.menu-sign { font-size: 22px; line-height: 1; width: 24px; text-align: center; flex: none; }
+.menu-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.menu-name { font-size: 16px; }
+.menu-hint { font-size: 13px; color: var(--ink-soft); }
+
 .hint { font-size: 13px; color: var(--ink-soft); margin: 10px 2px 0; }
 /* Отметка сборки. Нарочно тихая: она справочная, но должна быть видна —
    по ней проверяют, одна ли версия открыта на телефоне и на компьютере. */
@@ -1171,7 +1227,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '01.08.2026, 19:33';
+  const BUILD = '02.08.2026, 09:35';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -2024,31 +2080,40 @@ body {
   function renderHome() {
     const frag = document.createDocumentFragment();
 
-    // Три кнопки, и у каждой одно дело.
+    // Наверху две кнопки, и обе на каждый день.
     //
-    // Раньше здесь были «↻» и «⋯», а за ними — два разных окна, в
-    // каждом своё сохранение и своя загрузка. Разобраться, какая из
-    // четырёх кнопок нужна, было невозможно. Теперь наверху ровно то,
-    // ради чего сюда заходят: отдать, взять и обновить само приложение.
+    // Слева — «свернуть или развернуть всё»: список разделов длинный, и
+    // чаще всего нужно либо увидеть его целиком, либо свернуть до одних
+    // названий. Раньше это приходилось делать по разделу за раз.
+    //
+    // Справа — «⋯»: за ней прячутся три редких действия — отдать файл,
+    // взять файл и обновить само приложение. Каждым из них пользуются
+    // раз в неделю, а место наверху они занимали всё время.
+    const anyOpen = homeOpen();
     frag.appendChild(el('div', { class: 'topbar' }, [
       el('h1', { text: 'Аффирмации' }),
       el('button', {
-        class: 'iconbtn', attrs: {
-          'aria-label': 'Сохранить в файл', title: 'Сохранить в файл',
-          type: 'button' },
-        text: '↑', on: { click: () => openSync('save') },
-      }),
+        class: 'iconbtn fold', attrs: {
+          type: 'button',
+          // Подпись постоянная, как и сам значок: кнопка одна и делает
+          // одно — переключает. Что именно случится, видно по экрану, а
+          // не по кнопке. Для голосового чтения состояние передаётся
+          // отдельно, через aria-expanded, — на вид это не влияет.
+          'aria-label': 'Свернуть или развернуть все разделы',
+          title: 'Свернуть или развернуть все разделы',
+          'aria-expanded': String(anyOpen),
+        },
+        on: { click: () => toggleAllSections() },
+      }, [
+        // Две галочки, расходящиеся от середины. Рисуются рамками, без
+        // картинок и без SVG: так значок остаётся чётким на любом экране
+        // и берёт цвет у самой кнопки.
+        el('span', { class: 'fold-mark' }),
+      ]),
       el('button', {
         class: 'iconbtn', attrs: {
-          'aria-label': 'Взять из файла', title: 'Взять из файла',
-          type: 'button' },
-        text: '↓', on: { click: () => openSync('load') },
-      }),
-      el('button', {
-        class: 'iconbtn', attrs: {
-          'aria-label': 'Обновить приложение', title: 'Обновить приложение',
-          type: 'button' },
-        text: '↻', on: { click: openRefresh },
+          'aria-label': 'Ещё', title: 'Ещё', type: 'button' },
+        text: '⋯', on: { click: openMore },
       }),
     ]));
 
@@ -6186,6 +6251,81 @@ body {
     return Promise.all(jobs).then(() => {
       if (typeof location !== 'undefined' && location.reload) location.reload();
     });
+  }
+
+  /**
+   * Раскрыт ли на главном экране хоть один раздел.
+   *
+   * По этому и решает единственная кнопка наверху, что делать
+   * следующим нажатием: раскрыть всё или свернуть всё.
+   */
+  function homeOpen() {
+    if (state.sections.some((s) => !s.collapsed)) return true;
+    return collectFavourites().length > 0 && !state.favCollapsed;
+  }
+
+  /**
+   * Свернуть или развернуть все разделы разом.
+   *
+   * Раскрытость каждого раздела хранится там же, где и всё остальное, и
+   * сохраняется на устройстве. Поэтому и после закрытия приложения вид
+   * останется тем самым: развернули — вернётесь в развёрнутый, свернули
+   * — в свёрнутый. Раскрыли вручную один раздел — так он и откроется.
+   */
+  function toggleAllSections() {
+    const hide = homeOpen();          // что-то открыто — значит, сворачиваем
+    state.sections.forEach((s) => { s.collapsed = hide; });
+    state.favCollapsed = hide;
+    save();
+    render();
+  }
+
+  /**
+   * Окно кнопки «⋯»: три редких действия, убранных с глаз.
+   *
+   * Окно закрывается ДО того, как начнётся само действие, и обязательно
+   * в том же нажатии. Две причины. Первая: системное окно сохранения
+   * иначе всплывёт поверх нашего, и наше будет висеть за его спиной —
+   * этим уже жаловались. Вторая: браузер открывает выбор файла только
+   * «по горячему следу» нажатия, поэтому ни одной задержки между
+   * закрытием и делом быть не должно.
+   */
+  function openMore() {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const pick = (fn) => () => { close(); fn(); };
+
+    const item = (sign, name, hint, fn) => el('button', {
+      class: 'menu-item', attrs: { type: 'button', 'aria-label': name },
+      on: { click: pick(fn) },
+    }, [
+      el('span', { class: 'menu-sign', text: sign }),
+      el('span', { class: 'menu-body' }, [
+        el('span', { class: 'menu-name', text: name }),
+        el('span', { class: 'menu-hint', text: hint }),
+      ]),
+    ]);
+
+    const sheet = el('div', { class: 'sheet' }, [
+      el('h3', { text: 'Ещё' }),
+      el('div', { class: 'menu-list' }, [
+        item('↑', 'Сохранить в файл',
+          'Отдать всё: карточки и голосовые записи', () => openSync('save')),
+        item('↓', 'Взять из файла',
+          'Забрать данные с другого устройства', () => openSync('load')),
+        item('↻', 'Обновить приложение',
+          'Скачать свежую версию самого приложения', openRefresh),
+      ]),
+      el('div', { class: 'sheet-actions' }, [
+        el('button', {
+          class: 'btn sec', attrs: { type: 'button' },
+          text: 'Закрыть', on: { click: close },
+        }),
+      ]),
+    ]);
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
   }
 
   /** Окно кнопки «↻»: одно действие и честное предупреждение. */
