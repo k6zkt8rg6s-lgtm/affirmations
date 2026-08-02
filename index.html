@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-dy2nlsLl+uet0nubea+I9+XtlJXKGcvoSPxmVi9DPpg=';
-               style-src 'sha256-f84DZs9s/93AhSIUPDJhVHPKxer0p6edHa3PCJ69S58=';
+               script-src 'sha256-NezHPYDAskw17t2CEAL0XlBQW1ig2JzStEgR065PYE4=';
+               style-src 'sha256-oVz7rBU8fKPVcqHxaJfQBe/qOnEOo4O3ZLeOqru66aU=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -945,7 +945,20 @@ body {
   overflow: clip;
 }
 .reader-bar { display: flex; align-items: center; gap: 8px; min-height: var(--tap); }
-.reader-pos { flex: 1; text-align: center; color: var(--ink-soft); font-size: 14px; }
+/* Пустое место в ряду кнопок: крестик слева, кнопки справа */
+.reader-gap { flex: 1; }
+
+/* Номер карточки — отдельной строкой, ровно по центру экрана и прямо
+   над карточкой. Ширина во всю строку, поэтому середина текста совпадает
+   с серединой карточки и на телефоне, и на компьютере. */
+.reader-pos {
+  display: block;
+  width: 100%;
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 14px;
+  margin: 4px 0 8px;
+}
 
 .stage {
   flex: 1;
@@ -1357,7 +1370,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '02.08.2026, 23:55';
+  const BUILD = '02.08.2026, 23:58';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -4729,7 +4742,9 @@ body {
           text: '✕',
           on: { click: () => go({ name: 'deck', sectionId: view.sectionId, deckId: view.deckId }) },
         }),
-        el('span', { class: 'reader-pos', text: (i + 1) + ' / ' + total }),
+        // Пустое место между крестиком и кнопками. Номер карточки стоит
+        // не здесь, а строкой ниже, ровно над серединой карточки.
+        el('span', { class: 'reader-gap' }),
         makeLinkButton(card, linkRow),
         makeRecordControls(card, audioBar),
         makeAudioPicker(card, audioBar),
@@ -4749,6 +4764,10 @@ body {
         }),
       ]),
       linkRow,
+      // Какая карточка из скольких. Отдельной строкой и по центру —
+      // прямо над серединой карточки, а не в ряду кнопок: там он стоял
+      // между крестиком и кнопками и читался как ещё одна кнопка.
+      el('div', { class: 'reader-pos', text: (i + 1) + ' / ' + total }),
       stage,
       el('div', { class: 'reader-actions' }, [
         el('button', {
