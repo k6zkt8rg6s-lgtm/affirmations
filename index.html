@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-MnfZ6eG9EOG6PVwALYZ01ScoepYENznRsB5kOYtF6OU=';
-               style-src 'sha256-MMP9WAYQpIAU75ozvsQ1nh1SOq2P5HrO0gP2i+oqvm4=';
+               script-src 'sha256-kxECTont50CF856oo6OdwH9uQBVV6z9bH3kZ0OzEnLk=';
+               style-src 'sha256-y1iwNfLPQFmJO3hGZLWVPOWrnXaz9FIq84K4VaSydgE=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -775,13 +775,14 @@ body {
 .align-right .align-mark {
   background-position: right 0, right 3.8px, right 7.6px, right 11.4px;
 }
-/* «Как набрано»: приложение не выравнивает текст вовсе. Полоски разной
-   длины и без общей кромки — по значку видно, что строки идут своим
-   чередом. Растянутых пробелов здесь не бывает никогда: растягивать
-   строку до обоих краёв — это и есть «по ширине», а его больше нет. */
+/* «Как набрано»: приложение не выравнивает текст вовсе.
+   У остальных трёх значков одна кромка всегда ровная — по ней и видно,
+   к какому краю жмётся текст. Здесь ровной кромки нет ни слева, ни
+   справа: полоски разной длины и начинаются с разных мест. Так сразу
+   понятно, что это не «ещё раз слева», а «никак». */
 .align-none .align-mark {
-  background-size: 100% 1.7px, 55% 1.7px, 82% 1.7px, 68% 1.7px;
-  background-position: left 0, left 3.8px, left 7.6px, left 11.4px;
+  background-size: 14px 1.7px, 9px 1.7px, 16px 1.7px, 7px 1.7px;
+  background-position: 0 0, 3px 3.8px, 1px 7.6px, 5px 11.4px;
 }
 
 /* Цвет текста. Кружки, а не круг с оттенками: на карточке всё должно
@@ -1378,7 +1379,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '03.08.2026, 00:18';
+  const BUILD = '03.08.2026, 00:23';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
