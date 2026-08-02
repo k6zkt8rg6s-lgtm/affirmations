@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-OpiyPo/an806zizy3wr6hH7x2oGQAzW7lm8dQKfP2WY=';
-               style-src 'sha256-5UNbHgk9/c1NfUh1JpBaCEP0fxaGyA54pK8qj7sGu2w=';
+               script-src 'sha256-uVZEszSi0uOzurXLDbjmKNWVTWxzdXPNv0IRqNIi3jM=';
+               style-src 'sha256-MQKDVuNKWJSkCbSdNrdpFUu7Z53Mpo7YdDhh9feUvoI=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -251,6 +251,74 @@ body {
 }
 .fold-mark::before { top: 1px; transform: translateX(-50%) rotate(-45deg); }
 .fold-mark::after { bottom: 1px; transform: translateX(-50%) rotate(135deg); }
+
+/* Кнопка ссылки в ряду кнопок карточки.
+   Такая же, как соседние: прозрачная, без тёмного кружка, только силуэт.
+   Пока ссылки нет — бледная, будто набросана карандашом: место занято, а
+   внимания не просит. Появилась ссылка — красная. */
+.iconbtn.link { background: transparent; color: var(--ink-soft); opacity: .4; }
+.iconbtn.link.on { color: var(--heart); opacity: 1; }
+
+/* Звено цепи: две скруглённые петли под наклоном, с нахлёстом.
+   Нарисовано рамками — ни картинок, ни шрифтовых символов. */
+.link-mark {
+  display: block;
+  position: relative;
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+}
+.link-mark::before,
+.link-mark::after {
+  content: "";
+  position: absolute;
+  top: 5.5px;
+  width: 13px;
+  height: 9px;
+  border: 1.7px solid currentColor;
+  border-radius: 999px;
+  transform: rotate(-45deg);
+}
+.link-mark::before { left: 0; }
+.link-mark::after { right: 0; }
+
+/* Строка ссылки под рядом кнопок. В покое её нет вовсе. */
+.link-row { display: none; }
+.link-row.on {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 2px 0;
+}
+.link-input {
+  flex: 1 1 180px;
+  min-width: 0;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--sheet);
+  color: var(--ink);
+  font-family: inherit;
+  /* 16 px обязательны: при меньшем Safari на iPhone увеличивает страницу */
+  font-size: 16px;
+}
+.link-acts { display: flex; gap: 8px; flex: none; }
+.link-acts button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: 500 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  cursor: pointer;
+}
+.link-acts .link-open { color: var(--ink); }
+.link-acts .link-go { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.link-acts .link-drop { color: var(--danger); }
+.link-warn { flex: 1 1 100%; font-size: 13px; color: var(--danger); }
+.link-warn:empty { display: none; }
 
 /* Сердечко: пустое — обычное, залитое — красное */
 .iconbtn.heart { background: transparent; font-size: 22px; color: var(--ink-soft); }
@@ -667,6 +735,62 @@ body {
 .rich-btn[aria-label="Курсив"] { font-style: italic; }
 .rich-btn[aria-label="Подчёркнутый"] { text-decoration: underline; }
 .rich-btn[aria-label="Зачёркнутый"] { text-decoration: line-through; }
+
+/* Вторая строка панели: выравнивание. Кнопки те же по размеру, что и
+   буквы оформления, — рука тянется к одной высоте. */
+.rich-bar-2 { margin-top: 8px; }
+.rich-btn.align { display: inline-flex; align-items: center; justify-content: center; }
+
+/* Значок выравнивания — четыре полоски, нарисованные градиентом по фону.
+   Ни картинок, ни шрифтовых символов: те на разных устройствах разной
+   ширины, и ряд из четырёх кнопок выходил бы неровным. Короткая полоска
+   прижимается к своему краю — по ней и видно, что делает кнопка. */
+.align-mark {
+  display: block;
+  width: 18px;
+  height: 13px;
+  pointer-events: none;
+  background-image: linear-gradient(currentColor, currentColor),
+                    linear-gradient(currentColor, currentColor),
+                    linear-gradient(currentColor, currentColor),
+                    linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-size: 100% 1.7px, 62% 1.7px, 100% 1.7px, 62% 1.7px;
+  background-position: left 0, left 3.8px, left 7.6px, left 11.4px;
+}
+.align-center .align-mark {
+  background-position: center 0, center 3.8px, center 7.6px, center 11.4px;
+}
+.align-right .align-mark {
+  background-position: right 0, right 3.8px, right 7.6px, right 11.4px;
+}
+/* По ширине — все полоски во всю длину */
+.align-justify .align-mark {
+  background-size: 100% 1.7px, 100% 1.7px, 100% 1.7px, 100% 1.7px;
+  background-position: left 0, left 3.8px, left 7.6px, left 11.4px;
+}
+
+/* Цвет текста. Кружки, а не круг с оттенками: на карточке всё должно
+   остаться читаемым, а из круга легко достать блёклое или слепящее. */
+.ink-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 2px 2px;
+}
+.ink-dot {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--hair);
+  cursor: pointer;
+  padding: 0;
+}
+/* Выбранный обведён кольцом цвета чернил, а не заливкой: иначе не видно
+   самого цвета, ради которого кружок и нажимают */
+.ink-dot.on {
+  box-shadow: 0 0 0 2px var(--sheet), 0 0 0 4px var(--ink);
+}
 
 /* ---------- Список карточек внутри колоды ---------- */
 .card-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
@@ -1227,7 +1351,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '02.08.2026, 09:35';
+  const BUILD = '02.08.2026, 23:09';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1455,6 +1579,96 @@ body {
   // у карточки без оформления разбор заканчивается раньше и до этих
   // значений не добирается. Отсюда и «на телефоне работает, на
   // компьютере белый экран».
+  // Выравнивание текста карточки и его цвет.
+  //
+  // Стоят рядом с буквами оформления и по той же причине: сохранённые
+  // карточки читаются при самом запуске, и до этих значений очередь
+  // доходит раньше, чем до середины файла.
+  //
+  // Выравнивание одно на всю карточку, а не на абзац. Аффирмация — это
+  // две-три строки одной мысли, разнобой внутри неё только мешал бы; да
+  // и хранить пришлось бы отметку на каждый абзац, а её ещё переносить
+  // между устройствами. Здесь одно значение, и оно всегда сходится.
+  const ALIGNS = ['left', 'center', 'right', 'justify'];
+  const ALIGN_DEFAULT = 'center';        // как было до этой правки
+
+  // Цвета текста. Первый — обычный, тот же, что и раньше; остальные
+  // подобраны так, чтобы читаться на жёлтой карточке и не спорить с ней.
+  const INK_DEFAULT = '#2B2408';
+  const INK_COLORS = [
+    INK_DEFAULT,   // обычный, тёмно-коричневый
+    '#1C1B19',     // почти чёрный
+    '#6B6862',     // приглушённый серый
+    '#8C2F1E',     // кирпичный
+    '#B0451B',     // терракота
+    '#1F6B4A',     // хвойный
+    '#1C5C86',     // морской
+    '#5B3E8E',     // сливовый
+    '#FFFFFF',     // белый — для тёмных карточек
+  ];
+
+  /** Выравнивание из сохранённого — только одно из четырёх известных. */
+  function sanitizeAlign(v) {
+    return ALIGNS.indexOf(v) >= 0 ? v : ALIGN_DEFAULT;
+  }
+
+  /**
+   * Цвет текста из сохранённого.
+   *
+   * Только шестизначный код цвета и ничего кроме: значение попадает в
+   * стиль, и пускать туда произвольную строку нельзя.
+   */
+  function sanitizeInk(v) {
+    const s = String(v || '').trim();
+    return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toUpperCase() : INK_DEFAULT;
+  }
+
+  // Ссылка у карточки. Одна на карточку и отдельно от текста.
+  //
+  // В сам текст ссылку не вставляем принципиально. Текст человека здесь
+  // нигде не разбирается как разметка — это то, что защищает его от
+  // подсунутого кода, — и ради одной ссылки ломать это правило незачем.
+  const LINK_MAX = 2000;
+
+  /**
+   * Адрес из сохранённого или из строки ввода.
+   *
+   * Пропускаем только http и https. Всё остальное — javascript:, data:,
+   * file: и прочее — это способ выполнить чужой код или вытащить файл с
+   * устройства, и в приложении, которое возит данные между телефоном и
+   * компьютером файлом, такому месту нет.
+   *
+   * Адрес без начала («youtube.com/...») дописываем сами: человек
+   * копирует по-разному, а требовать «https://» — придирка.
+   */
+  function sanitizeLink(v) {
+    let s = String(v == null ? '' : v).trim();
+    if (!s) return '';
+    if (s.length > LINK_MAX) return '';
+    // Пробелы и переводы строк внутри адреса — это уже не адрес
+    if (/[\s<>"']/.test(s)) return '';
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) s = 'https://' + s;
+    const low = s.toLowerCase();
+    if (low.indexOf('http://') !== 0 && low.indexOf('https://') !== 0) return '';
+    // После начала должно быть хоть какое-то имя узла
+    const rest = s.slice(low.indexOf('//') + 2);
+    if (!rest || rest.charAt(0) === '/' || rest.indexOf('.') < 0) return '';
+    return s;
+  }
+
+  /** Открыть ссылку снаружи приложения — в браузере. */
+  function openLink(url) {
+    const safe = sanitizeLink(url);
+    if (!safe) return false;
+    // noopener обязателен: без него открытая страница получает доступ к
+    // окну приложения и может увести его куда угодно
+    if (typeof window !== 'undefined' && window.open) {
+      window.open(safe, '_blank', 'noopener,noreferrer');
+      return true;
+    }
+    return false;
+  }
+
   const MARKS = 'bius';        // b — жирный, i — курсив, u — подчёркнутый, s — зачёркнутый
   const MARK_LIMIT = 300;      // столько отметок на карточку хватит с запасом
 
@@ -1689,6 +1903,12 @@ body {
             // Разметкой это не становится нигде — рисуется через
             // createElement, поэтому подсунуть через отметки нечего.
             marks: sanitizeMarks(c.marks, text.length),
+            // Выравнивание и цвет текста — по одному значению на
+            // карточку. Оба проверяются по списку: попадают в стиль.
+            align: sanitizeAlign(c.align),
+            ink: sanitizeInk(c.ink),
+            // Ссылка: только http и https, всё прочее отбрасывается
+            link: sanitizeLink(c.link),
           });
         }
         section.decks.push(deck);
@@ -2902,6 +3122,127 @@ body {
   }
 
   /**
+   * Кнопка ссылки в ряду кнопок карточки.
+   *
+   * Стоит первой из правых — перед записью голоса. Пока ссылки нет,
+   * значок бледный, будто набросан карандашом: место занято, но в глаза
+   * не лезет. Появилась ссылка — становится красным, и по нему сразу
+   * видно, что за карточкой что-то есть.
+   *
+   * Нажатие открывает одну строку под кнопками: поле с адресом и рядом
+   * «Открыть», «ОК», «Удалить». Отдельного окна нет намеренно — ради
+   * одной строки закрывать собой карточку незачем.
+   */
+  function makeLinkButton(card, row) {
+    const btn = el('button', {
+      class: 'iconbtn ghost link' + (card.link ? ' on' : ''),
+      attrs: {
+        type: 'button',
+        'aria-label': card.link ? 'Ссылка карточки' : 'Добавить ссылку',
+        title: card.link ? 'Ссылка карточки' : 'Добавить ссылку',
+        'aria-pressed': 'false',
+      },
+    }, [el('span', { class: 'link-mark' })]);
+
+    /** Перерисовать саму кнопку под нынешнее состояние карточки. */
+    const dress = () => {
+      btn.className = 'iconbtn ghost link' + (card.link ? ' on' : '');
+      const name = card.link ? 'Ссылка карточки' : 'Добавить ссылку';
+      btn.setAttribute('aria-label', name);
+      btn.setAttribute('title', name);
+    };
+
+    const shut = () => {
+      clear(row);
+      row.className = 'link-row';
+      btn.setAttribute('aria-pressed', 'false');
+    };
+
+    const openRow = () => {
+      clear(row);
+      row.className = 'link-row on';
+      btn.setAttribute('aria-pressed', 'true');
+
+      const field = el('input', {
+        class: 'link-input',
+        attrs: {
+          type: 'url', inputmode: 'url', placeholder: 'https://…',
+          spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off',
+          'aria-label': 'Адрес ссылки', maxlength: String(LINK_MAX),
+        },
+      });
+      field.value = card.link || '';
+
+      const warn = el('span', { class: 'link-warn' });
+
+      /** Сохранить то, что в поле. */
+      const okay = () => {
+        const safe = sanitizeLink(field.value);
+        if (!safe && String(field.value || '').trim()) {
+          // Не молчим и не подчищаем втихую: человек должен понять,
+          // почему адрес не взяли
+          warn.textContent = 'Похоже, это не адрес сайта';
+          return;
+        }
+        card.link = safe;
+        save();
+        dress();
+        shut();
+      };
+
+      const buttons = [el('button', {
+        class: 'link-go', attrs: { type: 'button' }, text: 'ОК',
+        on: { click: okay },
+      })];
+
+      // «Открыть» и «Удалить» показываем, только когда есть что
+      // открывать и что удалять
+      if (card.link) {
+        buttons.unshift(el('button', {
+          class: 'link-open', attrs: { type: 'button' }, text: 'Открыть',
+          on: { click: () => { openLink(card.link); } },
+        }));
+        buttons.push(el('button', {
+          class: 'link-drop', attrs: { type: 'button' }, text: 'Удалить',
+          on: { click: () => { card.link = ''; save(); dress(); shut(); } },
+        }));
+      }
+
+      row.appendChild(field);
+      row.appendChild(el('div', { class: 'link-acts' }, buttons));
+      if (warn) row.appendChild(warn);
+      // Enter в поле — то же, что «ОК»
+      field.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Enter') return;
+        if (ev.preventDefault) ev.preventDefault();
+        okay();
+      });
+      if (field.focus) field.focus();
+    };
+
+    btn.addEventListener('click', () => {
+      if (row.className.indexOf('on') >= 0) { shut(); return; }
+      openRow();
+    });
+    return btn;
+  }
+
+  /**
+   * Поставить тексту карточки выравнивание и цвет.
+   *
+   * Оба значения проверены при чтении (sanitizeAlign, sanitizeInk), но
+   * проверяются и здесь: этот же вызов используется и для только что
+   * созданной карточки, до сохранения, — а туда значение приходит прямо
+   * из окна правки.
+   */
+  function dressText(node, card) {
+    if (!node || !node.style) return node;
+    node.style.setProperty('text-align', sanitizeAlign(card && card.align));
+    node.style.setProperty('color', sanitizeInk(card && card.ink));
+    return node;
+  }
+
+  /**
    * Поле текста аффирмации с оформлением.
    *
    * Обычное поле ввода тут не годится: в нём весь текст одного вида, и
@@ -2945,15 +3286,26 @@ body {
       return total;
     };
 
-    /** Что сейчас выделено внутри поля. */
-    const selection = () => {
+    /**
+     * Где сейчас курсор — даже если ничего не выделено.
+     *
+     * Возвращает { s, e }; при простом курсоре s и e совпадают. Это и
+     * есть точка ввода, и без неё нельзя правильно вставить перевод
+     * строки: раньше её просто не спрашивали.
+     */
+    const spot = () => {
       const sel = (typeof window !== 'undefined' && window.getSelection)
         ? window.getSelection() : null;
       if (!sel || !sel.rangeCount || !sel.anchorNode || !sel.focusNode) return null;
       const a = offsetOf(sel.anchorNode, sel.anchorOffset);
       const b = offsetOf(sel.focusNode, sel.focusOffset);
-      const s = Math.min(a, b), e = Math.max(a, b);
-      return e > s ? { s: s, e: e } : null;
+      return { s: Math.min(a, b), e: Math.max(a, b) };
+    };
+
+    /** Что сейчас выделено. Пустой курсор выделением не считается. */
+    const selection = () => {
+      const r = spot();
+      return r && r.e > r.s ? r : null;
     };
 
     /** Вернуть выделение на прежние символы после перерисовки. */
@@ -3024,6 +3376,81 @@ body {
       bar.appendChild(b.node);
     });
 
+    // ----------------------------------------------------------------
+    // Вторая строка панели: выравнивание и цвет текста.
+    //
+    // Выравнивание одно на всю карточку. Кнопки работают как переключатель
+    // из четырёх положений: нажал — выбралось, остальные погасли. Видно
+    // сразу и в самом поле, не дожидаясь сохранения.
+    // ----------------------------------------------------------------
+    let align = sanitizeAlign(f.align);
+    let ink = sanitizeInk(f.ink);
+
+    const alignRow = el('div', { class: 'rich-bar rich-bar-2' });
+    const alignBtns = [
+      { v: 'left', title: 'По левому краю' },
+      { v: 'center', title: 'По центру' },
+      { v: 'right', title: 'По правому краю' },
+      { v: 'justify', title: 'По ширине' },
+    ];
+
+    /** Показать в поле то, что выбрано: и выравнивание, и цвет. */
+    const dress = () => {
+      box.style.setProperty('text-align', align);
+      box.style.setProperty('color', ink);
+      alignBtns.forEach((x) => {
+        x.node.setAttribute('aria-pressed', String(x.v === align));
+        x.node.className = 'rich-btn align align-' + x.v + (x.v === align ? ' on' : '');
+      });
+      swatches.forEach((x) => {
+        x.node.setAttribute('aria-pressed', String(x.c === ink));
+        x.node.className = 'ink-dot' + (x.c === ink ? ' on' : '');
+      });
+    };
+
+    const swatches = [];
+
+    alignBtns.forEach((x) => {
+      x.node = el('button', {
+        class: 'rich-btn align align-' + x.v,
+        attrs: { type: 'button', 'aria-label': x.title, title: x.title,
+                 'aria-pressed': 'false' },
+      }, [
+        // Значок — три-четыре полоски, нарисованные рамками. Ни картинок,
+        // ни шрифтовых символов: те на разных устройствах разной ширины.
+        el('span', { class: 'align-mark' }),
+      ]);
+      // Не даём полю потерять выделение, пока палец идёт к кнопке
+      x.node.addEventListener('pointerdown', (ev) => {
+        if (ev.preventDefault) ev.preventDefault();
+      });
+      x.node.addEventListener('mousedown', (ev) => {
+        if (ev.preventDefault) ev.preventDefault();
+      });
+      x.node.addEventListener('click', () => { align = x.v; dress(); });
+      alignRow.appendChild(x.node);
+    });
+
+    // Цвет текста. Готовые цвета, а не круг с оттенками: на карточке
+    // должно остаться читаемо, а из круга легко достать блёклое.
+    const inkRow = el('div', { class: 'ink-row' });
+    INK_COLORS.forEach((c) => {
+      const node = el('button', {
+        class: 'ink-dot', style: { background: c },
+        attrs: { type: 'button', 'aria-pressed': String(c === ink),
+                 'aria-label': 'Цвет текста', title: 'Цвет текста' },
+      });
+      node.addEventListener('pointerdown', (ev) => {
+        if (ev.preventDefault) ev.preventDefault();
+      });
+      node.addEventListener('mousedown', (ev) => {
+        if (ev.preventDefault) ev.preventDefault();
+      });
+      node.addEventListener('click', () => { ink = c; dress(); });
+      swatches.push({ c: c, node: node });
+      inkRow.appendChild(node);
+    });
+
     // Правка текста: отметки едут следом, перерисовку не делаем — иначе
     // сбивалась бы точка ввода и подсказки клавиатуры на телефоне
     box.addEventListener('input', () => {
@@ -3038,16 +3465,27 @@ body {
     });
 
     // Перевод строки вставляем сами: браузеры иначе норовят создать
-    // вложенные блоки, а нам нужен ровно один плоский текст
+    // вложенные блоки, а нам нужен ровно один плоский текст.
+    //
+    // Здесь и была ошибка «Enter не работает». Спрашивали не точку ввода,
+    // а выделение, — а выделения при простом курсоре нет. Каждый Enter
+    // молча уходил в самый конец текста: встанешь в начало, нажмёшь — и
+    // перенос появляется где-то внизу, а не под курсором.
     box.addEventListener('keydown', (ev) => {
       if (ev.key !== 'Enter' || ev.shiftKey) return;
       if (ev.preventDefault) ev.preventDefault();
-      const r = selection() || { s: text.length, e: text.length };
-      const at = r.s;
-      text = text.slice(0, at) + '\n' + text.slice(r.e);
-      marks = shiftMarks(marks, box.textContent || '', text);
+      const now = box.textContent || '';
+      // Текст берём прямо из поля: последние набранные буквы могли ещё
+      // не дойти до нашей копии, и тогда перенос встал бы не туда
+      if (now !== text) { marks = shiftMarks(marks, text, now); text = now; }
+      const r = spot() || { s: text.length, e: text.length };
+      const at = Math.max(0, Math.min(r.s, text.length));
+      const to = Math.max(at, Math.min(r.e, text.length));
+      text = text.slice(0, at) + '\n' + text.slice(to);
+      marks = shiftMarks(marks, now, text);
       paint();
       select(at + 1, at + 1);
+      refresh();
     });
 
     /**
@@ -3105,10 +3543,15 @@ body {
       el('span', { class: 'field-label', text: f.label }), box,
     ]));
     sheet.appendChild(bar);
+    sheet.appendChild(alignRow);
+    sheet.appendChild(inkRow);
+    dress();
 
     return {
       get value() { return box.textContent || ''; },
       __marks: () => sanitizeMarks(marks, (box.textContent || '').length),
+      __align: () => align,
+      __ink: () => ink,
     };
   }
 
@@ -3884,8 +4327,12 @@ body {
     // Полоска проигрывания внизу карточки — появляется, только если
     // к карточке действительно прикреплена запись
     const audioBar = el('div', { class: 'audio-bar' });
+    // Строка со ссылкой. Живёт под рядом кнопок и появляется только по
+    // нажатию на скрепку — в покое её нет вовсе.
+    const linkRow = el('div', { class: 'link-row' });
     const bigText = el('div', { class: 'bigcard-text' });
     paintText(bigText, card.text, card.marks);
+    dressText(bigText, card);
     const big = el('div', { class: 'bigcard' }, [bigText, audioBar]);
     paint(big, card.color);
 
@@ -3901,7 +4348,7 @@ body {
         class: 'bigcard side' + (c.audio ? ' with-audio' : ''),
         attrs: { 'aria-hidden': 'true' },
       }, [
-        paintText(el('div', { class: 'bigcard-text' }), c.text, c.marks),
+        dressText(paintText(el('div', { class: 'bigcard-text' }), c.text, c.marks), c),
         bar,
       ]);
       paint(g, c.color);
@@ -4225,6 +4672,7 @@ body {
           on: { click: () => go({ name: 'deck', sectionId: view.sectionId, deckId: view.deckId }) },
         }),
         el('span', { class: 'reader-pos', text: (i + 1) + ' / ' + total }),
+        makeLinkButton(card, linkRow),
         makeRecordControls(card, audioBar),
         makeAudioPicker(card, audioBar),
         el('button', {
@@ -4242,6 +4690,7 @@ body {
           text: '✎', on: { click: () => editCard(deck, card) },
         }),
       ]),
+      linkRow,
       stage,
       el('div', { class: 'reader-actions' }, [
         el('button', {
@@ -6085,6 +6534,8 @@ body {
             for (const k of Object.keys(inputs)) {
               values[k] = inputs[k].value;
               if (inputs[k].__marks) values[k + 'Marks'] = inputs[k].__marks();
+              if (inputs[k].__align) values[k + 'Align'] = inputs[k].__align();
+              if (inputs[k].__ink) values[k + 'Ink'] = inputs[k].__ink();
             }
             if (onSave(values) !== false) { close(); save(); render(); }
           },
@@ -6159,6 +6610,8 @@ body {
     modal(card ? 'Карточка' : 'Новая карточка', [
       { key: 'text', label: 'Текст аффирмации', type: 'textarea', rich: true,
         value: card ? card.text : '', marks: card ? card.marks : [],
+        align: card ? card.align : ALIGN_DEFAULT,
+        ink: card ? card.ink : INK_DEFAULT,
         max: LIMITS.cardText },
       { key: 'color', label: 'Цвет карточки', type: 'colors',
         palette: CARD_COLORS, value: card ? card.color : CARD_COLORS[0] },
@@ -6169,13 +6622,17 @@ body {
         const text = v.text.trim();
         if (!text) return false;
         const marks = shiftMarks(v.textMarks || [], v.text, text);
-        if (card) { card.text = text; card.color = v.color; card.marks = marks; }
-        else {
+        const align = sanitizeAlign(v.textAlign);
+        const ink = sanitizeInk(v.textInk);
+        if (card) {
+          card.text = text; card.color = v.color; card.marks = marks;
+          card.align = align; card.ink = ink;
+        } else {
           if (deck.cards.length >= LIMITS.cardsPerDeck) {
             alert('Достигнут предел карточек в колоде.'); return false;
           }
           deck.cards.push({ id: uid(), text: text, color: v.color, fav: false,
-                            marks: marks });
+                            marks: marks, align: align, ink: ink });
         }
       },
       card ? () => dropCard(deck, card, true) : null);
@@ -7108,6 +7565,9 @@ body {
             // текст тот же, а оформление осталось прежним. «Как в
             // файле» значит и оформление как в файле.
             keep.marks = sanitizeMarks(inCard.marks, keep.text.length);
+            keep.align = sanitizeAlign(inCard.align);
+            keep.ink = sanitizeInk(inCard.ink);
+            keep.link = sanitizeLink(inCard.link);
             keep.peaks = sanitizePeaks(inCard.peaks);
             deck.cards.push(keep);
           } else {
@@ -7115,6 +7575,9 @@ body {
                               fav: inCard.fav, audio: false, audioLen: 0,
                               parts: [],
                               marks: sanitizeMarks(inCard.marks, inCard.text.length),
+                              align: sanitizeAlign(inCard.align),
+                              ink: sanitizeInk(inCard.ink),
+                              link: sanitizeLink(inCard.link),
                               peaks: sanitizePeaks(inCard.peaks) });
           }
         }
@@ -7200,6 +7663,9 @@ body {
                           fav: inCard.fav, audio: false, audioLen: 0,
                           parts: [],
                           marks: sanitizeMarks(inCard.marks, inCard.text.length),
+                          align: sanitizeAlign(inCard.align),
+                          ink: sanitizeInk(inCard.ink),
+                          link: sanitizeLink(inCard.link),
                           peaks: sanitizePeaks(inCard.peaks) };
           deck.cards.push(fresh);
           byText.set(key, fresh);
