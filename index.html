@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-uVZEszSi0uOzurXLDbjmKNWVTWxzdXPNv0IRqNIi3jM=';
-               style-src 'sha256-MQKDVuNKWJSkCbSdNrdpFUu7Z53Mpo7YdDhh9feUvoI=';
+               script-src 'sha256-AIpgT5czobgrjMwNEpSP2lwRKaN9J+mE+LZYs4IlzaM=';
+               style-src 'sha256-84POrcmhTmeeCCwvHJZ/Y1nAsFyqCpE5aO8rTjUpLeM=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -284,15 +284,20 @@ body {
 
 /* Строка ссылки под рядом кнопок. В покое её нет вовсе. */
 .link-row { display: none; }
-.link-row.on {
+.link-row.on { display: block; margin: 8px 2px 0; }
+
+/* Одна строка и на телефоне, и на компьютере: слева «Удалить», в
+   середине поле, справа «Открыть» и «ОК». Ничего не переносится вниз —
+   раньше на узком экране кнопки сваливались под поле. Ширину отдаём
+   полю: кнопки узкие и не сжимаются. */
+.link-line {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 8px;
-  margin: 8px 2px 0;
+  gap: 6px;
 }
 .link-input {
-  flex: 1 1 180px;
+  flex: 1 1 auto;
   min-width: 0;
   border: 1px solid var(--hair);
   border-radius: 12px;
@@ -303,21 +308,23 @@ body {
   /* 16 px обязательны: при меньшем Safari на iPhone увеличивает страницу */
   font-size: 16px;
 }
-.link-acts { display: flex; gap: 8px; flex: none; }
-.link-acts button {
+.link-line button {
+  flex: none;
   min-height: 40px;
-  padding: 0 14px;
+  padding: 0 12px;
   border: 1px solid var(--hair);
   border-radius: 12px;
   background: var(--sheet);
   color: var(--ink);
   font: 500 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
   cursor: pointer;
+  white-space: nowrap;
 }
-.link-acts .link-open { color: var(--ink); }
-.link-acts .link-go { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
-.link-acts .link-drop { color: var(--danger); }
-.link-warn { flex: 1 1 100%; font-size: 13px; color: var(--danger); }
+/* «Открыть» — только значок: место в строке дорого */
+.link-line .link-open { color: var(--ink); font-size: 17px; padding: 0 11px; }
+.link-line .link-go { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.link-line .link-drop { color: var(--danger); }
+.link-warn { display: block; margin-top: 6px; font-size: 13px; color: var(--danger); }
 .link-warn:empty { display: none; }
 
 /* Сердечко: пустое — обычное, залитое — красное */
@@ -763,11 +770,6 @@ body {
 }
 .align-right .align-mark {
   background-position: right 0, right 3.8px, right 7.6px, right 11.4px;
-}
-/* По ширине — все полоски во всю длину */
-.align-justify .align-mark {
-  background-size: 100% 1.7px, 100% 1.7px, 100% 1.7px, 100% 1.7px;
-  background-position: left 0, left 3.8px, left 7.6px, left 11.4px;
 }
 
 /* Цвет текста. Кружки, а не круг с оттенками: на карточке всё должно
@@ -1351,7 +1353,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '02.08.2026, 23:09';
+  const BUILD = '02.08.2026, 23:49';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1589,7 +1591,15 @@ body {
   // две-три строки одной мысли, разнобой внутри неё только мешал бы; да
   // и хранить пришлось бы отметку на каждый абзац, а её ещё переносить
   // между устройствами. Здесь одно значение, и оно всегда сходится.
-  const ALIGNS = ['left', 'center', 'right', 'justify'];
+  // Выравниваний три, и четвёртого — «по ширине» — здесь нет намеренно.
+  //
+  // Оно раздвигает пробелы между словами так, чтобы строка дотянулась до
+  // обоих краёв. В книге это выглядит ровно, а в аффирмации из двух строк
+  // — как будто между словами наставили лишних пробелов. Сами пробелы при
+  // этом не менялись, текст оставался прежним; растягивал их браузер, и
+  // только на вид. Убрано вместе с кнопкой: у карточек, где оно уже было
+  // выбрано, текст вернётся к обычному виду.
+  const ALIGNS = ['left', 'center', 'right'];
   const ALIGN_DEFAULT = 'center';        // как было до этой правки
 
   // Цвета текста. Первый — обычный, тот же, что и раньше; остальные
@@ -3175,7 +3185,7 @@ body {
 
       const warn = el('span', { class: 'link-warn' });
 
-      /** Сохранить то, что в поле. */
+      /** Сохранить то, что в поле. Строку не закрываем: её закрывает значок. */
       const okay = () => {
         const safe = sanitizeLink(field.value);
         if (!safe && String(field.value || '').trim()) {
@@ -3184,33 +3194,59 @@ body {
           warn.textContent = 'Похоже, это не адрес сайта';
           return;
         }
+        warn.textContent = '';
         card.link = safe;
+        if (safe) field.value = safe;   // дописанное «https://» показываем
         save();
         dress();
-        shut();
+        fill();
       };
 
-      const buttons = [el('button', {
-        class: 'link-go', attrs: { type: 'button' }, text: 'ОК',
-        on: { click: okay },
-      })];
+      // Слева — «Удалить», справа — «ОК». Одна строка и на телефоне, и на
+      // компьютере: раньше на узком экране кнопки сваливались вниз.
+      const drop = el('button', {
+        class: 'link-drop', attrs: { type: 'button', 'aria-label': 'Удалить ссылку' },
+        text: 'Удалить',
+        on: { click: () => {
+          // Убираем и ссылку, и то, что набрано: строка остаётся
+          // открытой — можно сразу вставить другую
+          card.link = '';
+          field.value = '';
+          warn.textContent = '';
+          save();
+          dress();
+          fill();
+          if (field.focus) field.focus();
+        } },
+      });
 
-      // «Открыть» и «Удалить» показываем, только когда есть что
-      // открывать и что удалять
-      if (card.link) {
-        buttons.unshift(el('button', {
-          class: 'link-open', attrs: { type: 'button' }, text: 'Открыть',
-          on: { click: () => { openLink(card.link); } },
-        }));
-        buttons.push(el('button', {
-          class: 'link-drop', attrs: { type: 'button' }, text: 'Удалить',
-          on: { click: () => { card.link = ''; save(); dress(); shut(); } },
-        }));
+      // «Открыть» — маленькая, значком: место в строке дорого, особенно
+      // на телефоне
+      const goOut = el('button', {
+        class: 'link-open', attrs: { type: 'button', 'aria-label': 'Перейти по ссылке',
+                                     title: 'Перейти по ссылке' },
+        text: '↗',
+        on: { click: () => { openLink(card.link); } },
+      });
+
+      const okBtn = el('button', {
+        class: 'link-go', attrs: { type: 'button', 'aria-label': 'Сохранить ссылку' },
+        text: 'ОК', on: { click: okay },
+      });
+
+      const line = el('div', { class: 'link-line' });
+      /** Пересобрать строку: «Открыть» есть только когда есть что открывать. */
+      function fill() {
+        clear(line);
+        line.appendChild(drop);
+        line.appendChild(field);
+        if (card.link) line.appendChild(goOut);
+        line.appendChild(okBtn);
       }
+      fill();
 
-      row.appendChild(field);
-      row.appendChild(el('div', { class: 'link-acts' }, buttons));
-      if (warn) row.appendChild(warn);
+      row.appendChild(line);
+      row.appendChild(warn);
       // Enter в поле — то же, что «ОК»
       field.addEventListener('keydown', (ev) => {
         if (ev.key !== 'Enter') return;
@@ -3391,7 +3427,6 @@ body {
       { v: 'left', title: 'По левому краю' },
       { v: 'center', title: 'По центру' },
       { v: 'right', title: 'По правому краю' },
-      { v: 'justify', title: 'По ширине' },
     ];
 
     /** Показать в поле то, что выбрано: и выравнивание, и цвет. */
