@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-AIpgT5czobgrjMwNEpSP2lwRKaN9J+mE+LZYs4IlzaM=';
-               style-src 'sha256-84POrcmhTmeeCCwvHJZ/Y1nAsFyqCpE5aO8rTjUpLeM=';
+               script-src 'sha256-dy2nlsLl+uet0nubea+I9+XtlJXKGcvoSPxmVi9DPpg=';
+               style-src 'sha256-f84DZs9s/93AhSIUPDJhVHPKxer0p6edHa3PCJ69S58=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -308,22 +308,26 @@ body {
   /* 16 px обязательны: при меньшем Safari на iPhone увеличивает страницу */
   font-size: 16px;
 }
+/* Обе кнопки — маленькие квадраты одного размера: слева убрать, справа
+   перейти. Кнопки «ОК» здесь нет: адрес запоминается сам, как только
+   становится похож на адрес, — нажимать было нечего. */
 .link-line button {
   flex: none;
-  min-height: 40px;
-  padding: 0 12px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
   border: 1px solid var(--hair);
   border-radius: 12px;
   background: var(--sheet);
   color: var(--ink);
-  font: 500 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 500 17px/1 -apple-system, BlinkMacSystemFont, sans-serif;
   cursor: pointer;
-  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-/* «Открыть» — только значок: место в строке дорого */
-.link-line .link-open { color: var(--ink); font-size: 17px; padding: 0 11px; }
-.link-line .link-go { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .link-line .link-drop { color: var(--danger); }
+.link-line .link-open { color: var(--ink); }
 .link-warn { display: block; margin-top: 6px; font-size: 13px; color: var(--danger); }
 .link-warn:empty { display: none; }
 
@@ -1353,7 +1357,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '02.08.2026, 23:49';
+  const BUILD = '02.08.2026, 23:55';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -3162,9 +3166,13 @@ body {
       btn.setAttribute('title', name);
     };
 
+    // Что сделать с набранным, когда строку закрывают значком
+    let rowCommit = null;
+
     const shut = () => {
       clear(row);
       row.className = 'link-row';
+      rowCommit = null;
       btn.setAttribute('aria-pressed', 'false');
     };
 
@@ -3185,28 +3193,39 @@ body {
 
       const warn = el('span', { class: 'link-warn' });
 
-      /** Сохранить то, что в поле. Строку не закрываем: её закрывает значок. */
-      const okay = () => {
-        const safe = sanitizeLink(field.value);
-        if (!safe && String(field.value || '').trim()) {
-          // Не молчим и не подчищаем втихую: человек должен понять,
-          // почему адрес не взяли
-          warn.textContent = 'Похоже, это не адрес сайта';
+      /**
+       * Взять то, что в поле, и сохранить. Кнопки «ОК» нет: адрес
+       * запоминается сам, как только становится похож на адрес.
+       *
+       * loud — сказать вслух, если это не адрес. Пока человек набирает,
+       * молчим: на полпути «https:/» адресом ещё не является, и ругаться
+       * на каждую букву незачем. Говорим, когда он закончил — ушёл из
+       * поля или нажал Enter.
+       */
+      const commit = (loud) => {
+        const typed = String(field.value || '').trim();
+        const safe = sanitizeLink(typed);
+        if (!safe && typed) {
+          if (loud) warn.textContent = 'Похоже, это не адрес сайта';
           return;
         }
         warn.textContent = '';
+        // Дописанное «https://» показываем в поле, когда человек закончил
+        if (safe && loud && field.value !== safe) field.value = safe;
+        if (card.link === safe) return;   // ничего не поменялось
         card.link = safe;
-        if (safe) field.value = safe;   // дописанное «https://» показываем
         save();
         dress();
         fill();
       };
 
-      // Слева — «Удалить», справа — «ОК». Одна строка и на телефоне, и на
-      // компьютере: раньше на узком экране кнопки сваливались вниз.
+      // Слева — «убрать», справа — «перейти». Обе маленькие и
+      // квадратные, поле между ними: одна строка и на телефоне, и на
+      // компьютере.
       const drop = el('button', {
-        class: 'link-drop', attrs: { type: 'button', 'aria-label': 'Удалить ссылку' },
-        text: 'Удалить',
+        class: 'link-drop', attrs: { type: 'button', 'aria-label': 'Удалить ссылку',
+                                     title: 'Удалить ссылку' },
+        text: '✕',
         on: { click: () => {
           // Убираем и ссылку, и то, что набрано: строка остаётся
           // открытой — можно сразу вставить другую
@@ -3229,35 +3248,39 @@ body {
         on: { click: () => { openLink(card.link); } },
       });
 
-      const okBtn = el('button', {
-        class: 'link-go', attrs: { type: 'button', 'aria-label': 'Сохранить ссылку' },
-        text: 'ОК', on: { click: okay },
-      });
-
       const line = el('div', { class: 'link-line' });
-      /** Пересобрать строку: «Открыть» есть только когда есть что открывать. */
+      /** Пересобрать строку: «перейти» есть, только когда есть куда. */
       function fill() {
         clear(line);
         line.appendChild(drop);
         line.appendChild(field);
         if (card.link) line.appendChild(goOut);
-        line.appendChild(okBtn);
       }
       fill();
 
       row.appendChild(line);
       row.appendChild(warn);
-      // Enter в поле — то же, что «ОК»
+
+      // Адрес запоминается сам: пока набирают — молча, при уходе из поля
+      // и по Enter — уже с замечанием, если это не адрес
+      field.addEventListener('input', () => { commit(false); });
+      field.addEventListener('blur', () => { commit(true); });
       field.addEventListener('keydown', (ev) => {
         if (ev.key !== 'Enter') return;
         if (ev.preventDefault) ev.preventDefault();
-        okay();
+        commit(true);
       });
+      // Строку закрывает значок наверху — но набранное перед этим берём
+      rowCommit = () => { commit(false); };
       if (field.focus) field.focus();
     };
 
     btn.addEventListener('click', () => {
-      if (row.className.indexOf('on') >= 0) { shut(); return; }
+      if (row.className.indexOf('on') >= 0) {
+        if (rowCommit) rowCommit();
+        shut();
+        return;
+      }
       openRow();
     });
     return btn;
