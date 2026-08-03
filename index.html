@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-eqI7O1twyjfh2KUN4WEXhVDP2K7XY7ZWBe/h9ilQCDs=';
-               style-src 'sha256-C+2nG3gCAmMdUJTm4Rq69yDiKCtFU0xjcCfcKclIvbM=';
+               script-src 'sha256-owtPiHqXvrrxS9fUzd+XuvdQmpg9/gmjSRXdYcQJ5Zc=';
+               style-src 'sha256-q0Gpbat7vF0ZBg8Bl7liigrPDLujcC9BJcnOK4nLD6o=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -783,6 +783,31 @@ body {
   background-position: left 0, left 3.8px, left 7.6px, left 11.4px;
 }
 
+/* Выравнивание по ширине: откуда берутся дыры между словами и что с
+   ними делать.
+ *
+ * Растянуть строку до обоих краёв браузер может только пробелами — сам
+ * текст он не трогает. Насколько сильно придётся тянуть, зависит от
+ * того, что не поместилось: если следующее слово длинное и разорвать
+ * его нельзя, дыра будет во всю оставшуюся ширину. Именно так и вышло
+ * на присланной фотографии: за первой строкой стояло слово из тридцати
+ * букв без единого пробела, целиком оно в строку не влезало, а
+ * разрывать его было запрещено — вот строку и раздуло.
+ *
+ * Две строки ниже это и снимают. Первая разрешает переносить слова по
+ * слогам (язык страницы задан, переносы русские). Вторая разрешает
+ * разорвать слово в любом месте, когда иначе никак, — длинные адреса и
+ * наборы букв перестают распирать строку.
+ *
+ * Только для «по ширине»: остальным выравниваниям это не нужно, там
+ * строку никто не растягивает и слова рвать незачем. */
+.bigcard-text.just,
+.rich-input.just {
+  -webkit-hyphens: auto;
+  hyphens: auto;
+  overflow-wrap: anywhere;
+}
+
 /* Цвет текста. Кружки, а не круг с оттенками: на карточке всё должно
    остаться читаемым, а из круга легко достать блёклое или слепящее. */
 .ink-row {
@@ -1377,7 +1402,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '03.08.2026, 12:19';
+  const BUILD = '03.08.2026, 12:26';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -3329,8 +3354,13 @@ body {
    */
   function dressText(node, card) {
     if (!node || !node.style) return node;
-    node.style.setProperty('text-align', alignCss(card && card.align));
+    const align = alignCss(card && card.align);
+    node.style.setProperty('text-align', align);
     node.style.setProperty('color', sanitizeInk(card && card.ink));
+    // Пометка «по ширине» — по ней в стилях включаются переносы. Другим
+    // выравниваниям они не нужны: там строку никто не растягивает.
+    const base = String(node.className || '').replace(/\s*\bjust\b/g, '');
+    node.className = base + (align === 'justify' ? ' just' : '');
     return node;
   }
 
@@ -3488,8 +3518,11 @@ body {
 
     /** Показать в поле то, что выбрано: и выравнивание, и цвет. */
     const dress = () => {
-      box.style.setProperty('text-align', alignCss(align));
+      const css = alignCss(align);
+      box.style.setProperty('text-align', css);
       box.style.setProperty('color', ink);
+      // В поле правки ровно то же, что получится на карточке
+      box.className = 'rich-input' + (css === 'justify' ? ' just' : '');
       alignBtns.forEach((x) => {
         x.node.setAttribute('aria-pressed', String(x.v === align));
         x.node.className = 'rich-btn align align-' + x.v + (x.v === align ? ' on' : '');
