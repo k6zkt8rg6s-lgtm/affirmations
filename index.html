@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-z/VACrRg6kHeiJGhDlY9d4nXGGQmOKKfIWGF4a3vvbY=';
-               style-src 'sha256-V63psf33XnG2eO2XCghHWExTMQaOHCq8Mp6xxRceguI=';
+               script-src 'sha256-5bVeBFvpBRcwRuRE+JsAWPYILsxF6ihA7ZjSLapgt1Q=';
+               style-src 'sha256-d16zQOqtIay72jyLEURiURT5FgVLSK2KmAr1G3hm4zc=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -432,16 +432,37 @@ body {
 .track-row { display: flex; align-items: center; gap: 8px; }
 .track-row + .track-row { margin-top: 8px; }
 /* Номер слева. Появляется только когда записей больше одной: при
-   единственной он ничего не сообщает. Ширина задана, чтобы дорожки
-   стояли ровно друг под другом. */
+   единственной он ничего не сообщает.
+   Он же и ручка: за номер дорожку тянут вверх или вниз, чтобы поменять
+   порядок. Поэтому у него есть подложка — иначе непонятно, что за него
+   можно взяться, — но тихая: командует здесь дорожка, а не номер.
+   touch-action: none обязателен: этот жест ведём сами, и отдавать его
+   браузеру под прокрутку страницы нельзя. */
 .track-no {
   flex: none;
-  width: 14px;
+  width: 20px;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, .07);
   text-align: center;
+  font: inherit;
   font-size: 12px;
   color: #2B2408;
-  opacity: .55;
+  opacity: .6;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
+.track-no:active { cursor: grabbing; background: rgba(0, 0, 0, .14); opacity: .9; }
+/* Строку несут: она идёт поверх соседних и чуть отделяется тенью, чтобы
+   было видно, что она оторвана от столбика. */
+.track-row.moving { position: relative; z-index: 2; }
+.track-row.moving .wave,
+.track-row.moving .audio-btn { box-shadow: 0 5px 12px rgba(0, 0, 0, .18); }
+.track-row.moving .track-no { background: rgba(0, 0, 0, .14); opacity: .9; }
 .track-box { flex: 1; min-width: 0; }
 /* Кнопки записи и удаления прижаты друг к другу и стоят парой у правого
    края: так дорожке достаётся вся оставшаяся ширина, а рука тянется к
@@ -1470,7 +1491,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '06.08.2026, 01:14';
+  const BUILD = '06.08.2026, 01:53';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1893,6 +1914,19 @@ body {
   }
 
   /**
+   * Место дорожки в показе — целое число от 0 до 2.
+   *
+   * Всё, что не похоже на такое число, возвращается как -1: «не указано».
+   * Тогда дорожка встаёт туда, где стояла, — по своему месту в списке.
+   * Так открываются карточки, записанные до появления перестановки.
+   */
+  function sanitizePos(value) {
+    if (typeof value !== 'number' || !isFinite(value)) return -1;
+    const n = Math.round(value);
+    return (n >= 0 && n < TRACKS_MAX) ? n : -1;
+  }
+
+  /**
    * Вторая и третья записи карточки из сохранённого.
    *
    * Каждая проверяется теми же мерками, что и запись самой карточки:
@@ -1915,6 +1949,7 @@ body {
                    && e.audioLen > 0) ? Math.min(e.audioLen, 3600) : 0,
         parts: sanitizeParts(e.parts),
         peaks: sanitizePeaks(e.peaks),
+        trackPos: sanitizePos(e.trackPos),
       });
       if (out.length >= TRACKS_MAX - 1) break;
     }
@@ -1945,13 +1980,34 @@ body {
   // ------------------------------------------------------------------
   const TRACKS_MAX = 3;
 
-  /** Записи карточки по порядку. Пустых мест в списке нет. */
+  /**
+   * Записи карточки по порядку показа. Пустых мест в списке нет.
+   *
+   * Порядок хранится числом на самой дорожке (trackPos), а не тем, как
+   * дорожки лежат в списке. Это сделано ради перестановки: поменять
+   * дорожки местами надо, не сдвинув ни одного байта звука. Запись лежит
+   * в хранилище под номером своего места, и переложить её означало бы
+   * скопировать несколько мегабайт под новым номером — на телефоне это и
+   * долго, и опасно: оборвётся на середине, и звука не станет. Число
+   * переписать ничего не стоит.
+   *
+   * У дорожек, записанных до появления перестановки, числа нет. Такая
+   * встаёт туда, где стояла, — по своему месту в списке.
+   */
   function audioSlots(card) {
     const out = [];
     if (card && card.audio) out.push(card);
     const extra = (card && Array.isArray(card.extra)) ? card.extra : [];
     extra.forEach((e) => { if (e && e.audio) out.push(e); });
-    return out;
+    const seats = out.map((s, k) => {
+      const p = sanitizePos(s.trackPos);
+      return { slot: s, was: k, at: p < 0 ? k : p };
+    });
+    // При равных числах порядок остаётся прежним: сравнение по «was»
+    // добавлено намеренно, а не на всякий случай, — иначе две дорожки с
+    // одним и тем же числом могли бы меняться местами сами по себе.
+    seats.sort((A, B) => (A.at - B.at) || (A.was - B.was));
+    return seats.map((s) => s.slot);
   }
 
   /**
@@ -1963,15 +2019,41 @@ body {
    * даже если первую потом удалить.
    */
   function freeSlot(card) {
-    if (audioSlots(card).length >= TRACKS_MAX) return null;
+    const busy = audioSlots(card);
+    if (busy.length >= TRACKS_MAX) return null;
+    /** Новая запись встаёт последней, за всеми уже занятыми местами. */
+    const last = (slot) => {
+      let top = -1;
+      busy.forEach((s) => { const p = sanitizePos(s.trackPos); if (p > top) top = p; });
+      slot.trackPos = Math.min(TRACKS_MAX - 1, Math.max(busy.length, top + 1));
+      return slot;
+    };
     const extra = Array.isArray(card.extra) ? card.extra : [];
-    if (!card.audio && !extra.some((e) => e && e.audio)) return card;
+    if (!card.audio && !extra.some((e) => e && e.audio)) return last(card);
     if (!Array.isArray(card.extra)) card.extra = [];
     const idle = card.extra.find((e) => e && !e.audio);
-    if (idle) return idle;
+    if (idle) return last(idle);
     const fresh = { id: uid(), audio: false, audioLen: 0, parts: [], peaks: [] };
     card.extra.push(fresh);
-    return fresh;
+    return last(fresh);
+  }
+
+  /**
+   * Переставить дорожку: та, что стояла на месте from, встаёт на to.
+   *
+   * Двигаются только числа мест — звук остаётся лежать там, где лежал.
+   * Числа выдаются заново всем дорожкам подряд, от нуля: так они всегда
+   * плотные и не расходятся, сколько бы раз ни переставляли.
+   */
+  function moveTrack(card, from, to) {
+    const slots = audioSlots(card);
+    if (from === to) return false;
+    if (from < 0 || to < 0 || from >= slots.length || to >= slots.length) return false;
+    const order = slots.slice();
+    const moved = order.splice(from, 1)[0];
+    order.splice(to, 0, moved);
+    order.forEach((s, k) => { s.trackPos = k; });
+    return true;
   }
 
   /** Убрать одну дорожку: и звук из хранилища, и место из списка. */
@@ -2151,6 +2233,9 @@ body {
             // Вторая и третья записи. Каждая — со своим номером в
             // хранилище и со своими кусками, как у первой.
             extra: sanitizeExtra(c.extra),
+            // Место записи самой карточки в показе. Дорожки можно
+            // переставлять, и первой не обязательно стоит её собственная.
+            trackPos: sanitizePos(c.trackPos),
           });
         }
         section.decks.push(deck);
@@ -3888,6 +3973,16 @@ body {
   const DROP_MS = 220;     // соседи расступаются и элемент опускается
   const EDGE = 64;         // у края экрана страница подкручивается сама
   const EDGE_SPEED = 12;   // на столько пикселей за кадр
+  // Насколько должен отойти указатель, чтобы порядок поменялся снова.
+  //
+  // Без этого запаса перестановка мышью дрожала. Дело в том, что место
+  // ячейки считается по тем позициям, которые ЕСТЬ сейчас, а перестановка
+  // их и меняет: поставили ячейку — соседи разъехались — под тем же
+  // курсором получилось уже другое место — поставили обратно. Мышь
+  // присылает движения непрерывно, и так могло продолжаться без конца.
+  // Запас разрывает этот круг: пока курсор стоит примерно на месте,
+  // решение остаётся прежним.
+  const PUT_SLOP = 10;
 
   let drag = null;         // сведения о текущем переносе
   let dragKill = 0;        // до какого времени гасим случайное нажатие
@@ -3913,15 +4008,31 @@ body {
    * уже оттуда отпускаются с переходом.
    */
   function flipMove(nodes, mutate) {
+    // «До» — там, где элемент виден СЕЙЧАС, вместе с недоигранным сдвигом
+    // от прошлой перестановки: getBoundingClientRect его учитывает.
     const before = nodes.map(rectOf);
     mutate();
+    // Прежний сдвиг снимаем до замера «после».
+    //
+    // Здесь и была та ошибка, из-за которой соседние плитки прыгали при
+    // переносе мышью. Пальцем переставляют редко, и прошлое движение
+    // успевает закончиться. Мышь идёт непрерывно, перестановка случается
+    // на каждом втором движении — и «после» замерялось у элемента,
+    // который ещё едет. Разница получалась посчитанной от полпути, а
+    // сдвиг ставился от начала: элемент мгновенно перескакивал на
+    // остаток прошлого хода. Теперь сдвиг сначала снимается, поэтому
+    // «после» — это чистая новая раскладка, и элемент продолжает
+    // движение оттуда, где его застали.
+    nodes.forEach((n) => {
+      n.style.setProperty('transition', 'none');
+      n.style.setProperty('transform', 'translate3d(0,0,0)');
+    });
     let moved = false;
     nodes.forEach((n, k) => {
       const now = rectOf(n);
       const dx = before[k].left - now.left, dy = before[k].top - now.top;
       if (!dx && !dy) return;
       moved = true;
-      n.style.setProperty('transition', 'none');
       n.style.setProperty('transform',
         'translate3d(' + dx + 'px,' + dy + 'px,0)');
     });
@@ -4080,7 +4191,22 @@ body {
     if (page && page.appendChild) page.appendChild(node);
 
     return { page: page, base: base, box: box, slot: slot,
-             id: id, x0: x0, y0: y0, scroll0: pageY(), first: true };
+             id: id, x0: x0, y0: y0, scroll0: pageY(), first: true,
+             putAt: null };
+  }
+
+  /**
+   * Отошёл ли указатель от того места, где порядок менялся в прошлый раз.
+   *
+   * Возвращает да — и запоминает новое место. Возвращает нет — значит,
+   * оставляем как есть: см. PUT_SLOP.
+   */
+  function farEnough(st, cx, cy) {
+    const was = st.putAt;
+    if (was && Math.abs(cx - was.x) < PUT_SLOP
+        && Math.abs(cy - was.y) < PUT_SLOP) return false;
+    st.putAt = { x: cx, y: cy };
+    return true;
   }
 
   /** Вести поднятый элемент за пальцем. */
@@ -4170,9 +4296,10 @@ body {
         return { index: k, others: others };
       };
 
-      const put = (cy) => {
+      const put = (cx, cy) => {
         const t = aim(cy);
         if (t.index === at) return;
+        if (!farEnough(st, cx, cy)) return;
         at = t.index;
         flipMove(shiftable(), () => {
           // Ниже последнего раздела ячейка встаёт перед меткой конца
@@ -4188,13 +4315,15 @@ body {
           }
         });
       };
+      /** Первая расстановка — сразу, запас на неё не распространяется. */
+      const putFirst = (cx, cy) => { st.putAt = null; put(cx, cy); };
 
       drag = {
         id: id, lastX: x0, lastY: y0,
         move: (cx, cy) => {
           drag.lastX = cx; drag.lastY = cy;
           follow(node, st, cx, cy);
-          put(cy);
+          put(cx, cy);
           edgeScroll(cy);
         },
         cancel: () => back(node, st),
@@ -4208,7 +4337,7 @@ body {
           });
         },
       };
-      put(y0);
+      putFirst(x0, y0);
     });
   }
 
@@ -4476,9 +4605,10 @@ body {
         return { index: k, rows: rows };
       };
 
-      const put = (cy) => {
+      const put = (cx, cy) => {
         const t = aim(cy);
         if (t.index === at) return;
+        if (!farEnough(st, cx, cy)) return;
         at = t.index;
         flipMove(shiftable(), () => {
           const parent = st.slot.parentNode;
@@ -4488,6 +4618,7 @@ body {
           else if (host) host.appendChild(st.slot);
         });
       };
+      const putFirst = (cx, cy) => { st.putAt = null; put(cx, cy); };
 
       drag = {
         id: id, lastX: x0, lastY: y0,
@@ -4495,7 +4626,7 @@ body {
         move: (cx, cy) => {
           drag.lastX = cx; drag.lastY = cy;
           follow(holder, st, cx, cy);
-          put(cy);
+          put(cx, cy);
           edgeScroll(cy);
         },
         drop: () => {
@@ -4508,7 +4639,7 @@ body {
           });
         },
       };
-      put(y0);
+      putFirst(x0, y0);
     });
   }
 
@@ -4552,6 +4683,8 @@ body {
         const grid = host.querySelector ? host.querySelector('.deck-grid') : null;
         const spot = grid ? indexIn(grid, cx, cy) : { index: 0, tiles: [] };
         if (host === atSection && spot.index === atIndex) return;
+        // Курсор почти не двигался — оставляем как есть: см. PUT_SLOP
+        if (!farEnough(st, cx, cy)) return;
         atSection = host; atIndex = spot.index;
         list('drop-into').forEach((n) => {
           n.className = n.className.replace(/ drop-into\b/, '');
@@ -4566,6 +4699,8 @@ body {
           else host.appendChild(st.slot);      // раздел свёрнут — ячейка под шапкой
         });
       };
+      /** Первая расстановка — сразу, запас на неё не распространяется. */
+      const putFirst = (cx, cy) => { st.putAt = null; put(cx, cy); };
 
       drag = {
         id: id, lastX: x0, lastY: y0,
@@ -4600,7 +4735,7 @@ body {
           });
         },
       };
-      put(x0, y0);
+      putFirst(x0, y0);
     });
   }
 
@@ -6054,7 +6189,7 @@ body {
     slots.forEach((slot, k) => {
       const box = el('div', { class: 'track-box' });
       const row = el('div', { class: 'track-row' + (many ? ' many' : '') }, many
-        ? [el('span', { class: 'track-no', text: String(k + 1) }), box]
+        ? [trackGrip(bar, card, k, again), box]
         : [box]);
       bar.appendChild(row);
       buildPlayer(box, slot, {
@@ -6062,6 +6197,145 @@ body {
         gone: () => { dropTrack(card, slot); save(); again(); },
       });
     });
+  }
+
+  // Перестановка дорожек.
+  //
+  // Три коротких строки в один столбик — поэтому ничего не вынимаем из
+  // потока и не считаем координаты страницы, как при переносе колод.
+  // Строку ведёт сдвиг, соседние расступаются таким же сдвигом, а порядок
+  // переписывается только по отпусканию: перерисовать полосу под пальцем
+  // значило бы оборвать движение рывком.
+  //
+  // Тянут за номер. Отдельная ручка нужна потому, что всё остальное в
+  // строке уже занято: по дорожке перематывают, по кнопкам нажимают, а по
+  // самой карточке листают. Номер же ничего не делал, и рука тянется
+  // именно к нему — он и говорит, какая это дорожка по счёту.
+  const TRACK_SLOP = 3;      // с какого сдвига считаем, что дорожку тянут
+  const TRACK_MS = 200;      // соседние расступаются и дорожка встаёт
+
+  function trackGrip(bar, card, index, redraw) {
+    const grip = el('button', {
+      class: 'track-no',
+      attrs: { type: 'button',
+               'aria-label': 'Запись ' + (index + 1)
+                 + ': потяните вверх или вниз, чтобы переставить' },
+      text: String(index + 1),
+    });
+
+    let id = null, y0 = 0, live = false, off = null;
+    let rows = [], mine = null, step = 0, mids = [], to = index;
+
+    /** Снять все сдвиги и пометку «несут». */
+    const bare = () => {
+      rows.forEach((r) => {
+        r.style.setProperty('transition', 'none');
+        r.style.setProperty('transform', 'translate3d(0,0,0)');
+      });
+      if (mine) mine.className = (mine.className || '').replace(/ moving\b/g, '');
+    };
+
+    const quit = () => { if (off) { off(); off = null; } id = null; live = false; };
+
+    const begin = () => {
+      live = true;
+      to = index;
+      rows = Array.prototype.slice.call(bar.children || []);
+      const boxes = rows.map(rectOf);
+      mine = rows[index] || null;
+      step = boxes[index] ? boxes[index].height : 0;
+      // Середины строк меряем один раз, до первого сдвига. Дальше строки
+      // едут, и мерить их заново значило бы сравнивать с тем, что само
+      // движется: дорожка перескакивала бы туда-обратно у самой границы.
+      mids = boxes.map((b) => b.top + b.height / 2);
+      if (mine) mine.className += ' moving';
+    };
+
+    /** Куда встанет дорожка, если отпустить сейчас. */
+    const aim = (dy) => {
+      const centre = (mids[index] || 0) + dy;
+      let k = index;
+      while (k > 0 && centre < mids[k - 1]) k--;
+      while (k < rows.length - 1 && centre > mids[k + 1]) k++;
+      return k;
+    };
+
+    const draw = (dy) => {
+      if (mine) {
+        mine.style.setProperty('transition', 'none');
+        mine.style.setProperty('transform', 'translate3d(0,' + dy + 'px,0)');
+      }
+      const want = aim(dy);
+      if (want === to) return;
+      to = want;
+      // Расступаются только те, через кого дорожка прошла. Остальные
+      // стоят: сдвиг ставим всем, но нулевой — иначе прежний остался бы
+      // висеть, и строка не вернулась бы на место.
+      rows.forEach((r, k) => {
+        if (k === index) return;
+        let by = 0;
+        if (k > index && k <= to) by = -step;
+        else if (k < index && k >= to) by = step;
+        r.style.setProperty('transition', 'transform ' + TRACK_MS + 'ms ' + SLIDE_EASE);
+        r.style.setProperty('transform', 'translate3d(0,' + by + 'px,0)');
+      });
+    };
+
+    /** Отпустили: довести строку до места и переписать порядок. */
+    const land = () => {
+      const done = to;
+      if (mine) {
+        mine.style.setProperty('transition', 'transform ' + TRACK_MS + 'ms ' + SLIDE_EASE);
+        mine.style.setProperty('transform',
+          'translate3d(0,' + ((done - index) * step) + 'px,0)');
+      }
+      setTimeout(() => {
+        bare();
+        if (moveTrack(card, index, done)) save();
+        if (typeof redraw === 'function') redraw();
+      }, TRACK_MS);
+    };
+
+    grip.addEventListener('pointerdown', (ev) => {
+      if (!ev.isPrimary) return;
+      // Жест наш: карточка не должна принять его за перелистывание, а
+      // страница — за прокрутку
+      if (ev.stopPropagation) ev.stopPropagation();
+      quit();
+      id = ev.pointerId;
+      y0 = ev.clientY;
+
+      const onMove = (e) => {
+        if (e.pointerId !== id) return;
+        const dy = e.clientY - y0;
+        if (!live) {
+          if (Math.abs(dy) < TRACK_SLOP) return;
+          begin();
+        }
+        if (e.cancelable && e.preventDefault) e.preventDefault();
+        draw(dy);
+      };
+      const onUp = (e) => {
+        if (e.pointerId !== id) return;
+        const was = live;
+        quit();
+        if (was) land();
+      };
+      // Жест прервали — порядок остаётся прежним, строки возвращаются
+      const onCancel = (e) => {
+        if (e.pointerId !== id) return;
+        const was = live;
+        quit();
+        if (was) { bare(); if (typeof redraw === 'function') redraw(); }
+      };
+      off = whileGesture({ pointermove: onMove, pointerup: onUp,
+                           pointercancel: onCancel });
+      if (grip.setPointerCapture) {
+        try { grip.setPointerCapture(id); } catch (e) { /* не поддержано */ }
+      }
+    });
+
+    return grip;
   }
 
   /** То же самое, но для соседней карточки: без живого звука. */
@@ -8041,6 +8315,11 @@ body {
    * У нас место может быть другим — поэтому и нужна связка: откуда взять
    * и куда положить. Первая дорожка ложится в саму карточку, остальные —
    * в новые места её списка, по порядку из файла.
+   *
+   * Порядок берём из показа, а не из того, как дорожки лежат в файле:
+   * переставленные на одном устройстве приезжают на другое в том же
+   * виде. Числа мест выдаём заново, подряд, — присланные не годятся, у
+   * нас первой становится дорожка самой карточки.
    */
   function linkTracks(inCard, mine, out, existing) {
     const inSlots = audioSlots(inCard);
@@ -8049,6 +8328,7 @@ body {
     inSlots.forEach((src, k) => {
       const dst = k === 0 ? mine
         : { id: uid(), audio: false, audioLen: 0, parts: [], peaks: [] };
+      dst.trackPos = k;
       if (k > 0) mine.extra.push(dst);
       out.push({ from: src.id, card: dst, len: src.audioLen,
                  peaks: sanitizePeaks(src.peaks),
