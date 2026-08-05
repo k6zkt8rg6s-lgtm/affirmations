@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-7gy196XdXrjhImXM/AJQ6702FseoMb+U6vQSpeaYKBc=';
-               style-src 'sha256-/fvOj92VypPLPMKXLGfIQ978j5GPNS2kWOGfbsjfMQs=';
+               script-src 'sha256-z/VACrRg6kHeiJGhDlY9d4nXGGQmOKKfIWGF4a3vvbY=';
+               style-src 'sha256-V63psf33XnG2eO2XCghHWExTMQaOHCq8Mp6xxRceguI=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -408,14 +408,23 @@ body {
 }
 .mini-open:active { opacity: .6; }
 
-/* Полоска проигрывания внизу карточки */
+/* Полоса записей внизу карточки.
+ *
+ * Раньше она лежала накладкой поверх карточки, а место под неё
+ * освобождалось запасом снизу — одним числом на все случаи. С одной
+ * записью это сходилось, с тремя перестало: полоса выросла втрое, а
+ * запас остался прежним, и дорожки поехали по тексту.
+ *
+ * Теперь полоса занимает настоящее место в карточке: текст живёт над
+ * ней и получает ровно то, что осталось. Сколько бы дорожек ни было,
+ * закрыть текст они уже не могут — под ними просто нет места.
+ * Наружу вылезает на 10 пикселей за поля текста: так дорожка идёт
+ * от края до края карточки, как и была. */
 .audio-bar {
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 12px;
+  flex: none;
+  margin: 12px -10px 0;
 }
-.audio-bar:empty { display: none; }
+.audio-bar:empty { display: none; margin: 0; }
 
 /* Дорожки записей, одна под другой. Их может быть до трёх, и каждая
    живёт сама по себе: свой проигрыватель, своя дозапись, своё
@@ -586,6 +595,30 @@ body {
 }
 /* Пока пишем, слушать и удалять нечего */
 .audio-btn:disabled, .audio-del:disabled { opacity: .35; cursor: default; }
+
+/* Записей больше одной — строка становится ниже.
+ *
+ * Три полных дорожки заняли бы у текста половину карточки. Поэтому,
+ * когда записей несколько, кружок, сосуд и подпись времени убавляются в
+ * росте — примерно на четверть каждый. Длина дорожки не меняется:
+ * сужать её незачем, дорога здесь именно высота.
+ *
+ * При единственной записи всё остаётся ровно как было: у того, что уже
+ * записано на карточках, вид не должен меняться из-за появления новой
+ * возможности, которой человек не пользуется.
+ *
+ * Правила стоят после основных, а не до: так видно, что это именно
+ * поправка к готовому виду, а не отдельная его разновидность. */
+.track-row.many .audio-btn { min-width: 34px; min-height: 34px; font-size: 13px; }
+.track-row.many .wave { height: 26px; }
+.track-row.many .audio-label {
+  margin-top: 1px;
+  font-size: 11px;
+  line-height: 14px;
+}
+.track-row.many .audio-del,
+.track-row.many .audio-more { min-height: 26px; }
+.track-row.many + .track-row.many { margin-top: 4px; }
 
 /* ---------- Разделы и колоды ---------- */
 .section { margin: 22px 0 6px; }
@@ -1051,15 +1084,31 @@ body {
   user-select: none;
   -webkit-user-select: none;
   box-shadow: 0 10px 24px rgba(0, 0, 0, .16), 0 2px 4px rgba(0, 0, 0, .12);
+  /* Столбиком: текст сверху, полоса записей под ним. Столбиком, а не в
+     строку, именно из-за записей — теперь они занимают своё место, а не
+     висят поверх текста. */
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
   padding: 28px 24px;
   z-index: 1;              /* текущая карточка поверх соседних */
   /* Едва заметная волокнистость бумаги */
   background-image:
     repeating-linear-gradient(90deg, rgba(0,0,0,.018) 0 1px, transparent 1px 3px),
     repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px 4px);
+}
+/* Середина карточки — всё место, кроме полосы записей. Текст стоит в
+   ней по центру; когда записей нет, это вся карточка, и выглядит она
+   в точности как прежде.
+   min-height: 0 обязателен: без него длинный текст растянул бы середину
+   и выдавил полосу за нижний край карточки вместо того, чтобы
+   прокручиваться внутри. */
+.bigcard-mid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .bigcard-text {
   font: 500 clamp(20px, 5.4vw, 30px)/1.35 -apple-system, BlinkMacSystemFont,
@@ -1072,11 +1121,10 @@ body {
   word-break: break-word;
   white-space: pre-wrap;      /* переносы строк пользователя сохраняются */
 }
-/* Когда снизу есть плеер, освобождаем под него место, чтобы текст
-   не заезжал под кнопку */
-/* Дорожка со временем занимает больше места, чем прежняя строчка:
-   40 px сама дорожка плюс подпись под ней */
-.bigcard:has(.audio-bar:not(:empty)) { padding-bottom: 96px; }
+/* С записями нижнее поле меньше: дорожки должны стоять низко, у самого
+   края карточки, а не висеть посреди неё. Запаса под них больше нет —
+   место они занимают сами. */
+.bigcard:has(.audio-bar:not(:empty)) { padding-bottom: 14px; }
 .bigcard:active { cursor: grabbing; }
 .bigcard-text { user-select: text; -webkit-user-select: text; }
 
@@ -1092,9 +1140,11 @@ body {
   cursor: default;
 }
 .bigcard.side .bigcard-text { overflow: hidden; user-select: none; }
-/* Место под плеер оставляем и у соседней: иначе в момент подмены текст
-   карточки с записью прыгнул бы вверх */
-.bigcard.side.with-audio { padding-bottom: 96px; }
+/* Запаса под плеер у соседней больше нет — и не нужно. Прежде полоса
+   висела накладкой, и место под неё приходилось держать заранее, иначе
+   в момент подмены текст прыгал вверх. Теперь полоса занимает место
+   сама: как только соседке дорисуют дорожки, текст в ней встанет
+   там же, где встанет и после подмены. */
 
 
 .reader-actions {
@@ -1420,7 +1470,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '06.08.2026, 00:29';
+  const BUILD = '06.08.2026, 01:14';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -4579,8 +4629,13 @@ body {
     // текущей и выглядела застрявшей тенью. Здесь соседние не под
     // карточкой, а сбоку от неё, и в покое их не видно вовсе.
     const stage = el('div', { class: 'stage' });
-    // Полоска проигрывания внизу карточки — появляется, только если
-    // к карточке действительно прикреплена запись
+    // Полоса записей внизу карточки — появляется, только если к карточке
+    // действительно прикреплена запись.
+    //
+    // Стоит она не поверх карточки, а под текстом, отдельной частью:
+    // текст занимает всё, что осталось выше. Раньше полоса висела
+    // накладкой, а место под неё держалось запасом снизу — с одной
+    // записью это сходилось, с тремя дорожки поехали по тексту.
     const audioBar = el('div', { class: 'audio-bar' });
     // Строка со ссылкой. Живёт под рядом кнопок и появляется только по
     // нажатию на скрепку — в покое её нет вовсе.
@@ -4588,7 +4643,8 @@ body {
     const bigText = el('div', { class: 'bigcard-text' });
     paintText(bigText, card.text, card.marks);
     dressText(bigText, card);
-    const big = el('div', { class: 'bigcard' }, [bigText, audioBar]);
+    const bigMid = el('div', { class: 'bigcard-mid' }, [bigText]);
+    const big = el('div', { class: 'bigcard' }, [bigMid, audioBar]);
     paint(big, card.color);
 
     /**
@@ -4600,10 +4656,12 @@ body {
     const neighbour = (c) => {
       const bar = el('div', { class: 'audio-bar' });
       const g = el('div', {
-        class: 'bigcard side' + (audioSlots(c).length ? ' with-audio' : ''),
+        class: 'bigcard side',
         attrs: { 'aria-hidden': 'true' },
       }, [
-        dressText(paintText(el('div', { class: 'bigcard-text' }), c.text, c.marks), c),
+        el('div', { class: 'bigcard-mid' }, [
+          dressText(paintText(el('div', { class: 'bigcard-text' }), c.text, c.marks), c),
+        ]),
         bar,
       ]);
       paint(g, c.color);
@@ -5394,10 +5452,12 @@ body {
     // Сколько ещё можно записать. У дозаписи потолок общий с тем, что
     // уже лежит на карточке, иначе пятиминутный предел обходился бы
     // простым нажатием «дописать».
+    // Потолок у каждой дорожки свой: они и живут отдельно друг от друга.
     const already = append ? (card.audioLen || 0) : 0;
     const room = Math.max(0, AUDIO_CAP - already);
     if (append && room < 1) {
-      alert('На карточке уже пять минут звука — больше не поместится.');
+      alert('На этой дорожке уже пять минут звука — больше не поместится. '
+        + 'Запишите отдельную дорожку.');
       ui.idle();
       return;
     }
