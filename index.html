@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-owtPiHqXvrrxS9fUzd+XuvdQmpg9/gmjSRXdYcQJ5Zc=';
-               style-src 'sha256-q0Gpbat7vF0ZBg8Bl7liigrPDLujcC9BJcnOK4nLD6o=';
+               script-src 'sha256-7gy196XdXrjhImXM/AJQ6702FseoMb+U6vQSpeaYKBc=';
+               style-src 'sha256-/fvOj92VypPLPMKXLGfIQ978j5GPNS2kWOGfbsjfMQs=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -416,6 +416,24 @@ body {
   bottom: 12px;
 }
 .audio-bar:empty { display: none; }
+
+/* Дорожки записей, одна под другой. Их может быть до трёх, и каждая
+   живёт сама по себе: свой проигрыватель, своя дозапись, своё
+   удаление. */
+.track-row { display: flex; align-items: center; gap: 8px; }
+.track-row + .track-row { margin-top: 8px; }
+/* Номер слева. Появляется только когда записей больше одной: при
+   единственной он ничего не сообщает. Ширина задана, чтобы дорожки
+   стояли ровно друг под другом. */
+.track-no {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  font-size: 12px;
+  color: #2B2408;
+  opacity: .55;
+}
+.track-box { flex: 1; min-width: 0; }
 /* Кнопки записи и удаления прижаты друг к другу и стоят парой у правого
    края: так дорожке достаётся вся оставшаяся ширина, а рука тянется к
    одному месту, а не к двум разным. */
@@ -1402,7 +1420,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '03.08.2026, 12:26';
+  const BUILD = '06.08.2026, 00:29';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1824,10 +1842,109 @@ body {
     return out;
   }
 
+  /**
+   * Вторая и третья записи карточки из сохранённого.
+   *
+   * Каждая проверяется теми же мерками, что и запись самой карточки:
+   * номер — строкой, длительность — числом в пределах часа, куски и
+   * форма волны — своими проверками. Записи без звука не берём: пустое
+   * место в списке ничего не значит.
+   */
+  function sanitizeExtra(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const e of value) {
+      if (!e || typeof e !== 'object') continue;
+      if (e.audio !== true) continue;
+      const id = String(e.id || '').slice(0, 64);
+      if (!id) continue;
+      out.push({
+        id: id,
+        audio: true,
+        audioLen: (typeof e.audioLen === 'number' && isFinite(e.audioLen)
+                   && e.audioLen > 0) ? Math.min(e.audioLen, 3600) : 0,
+        parts: sanitizeParts(e.parts),
+        peaks: sanitizePeaks(e.peaks),
+      });
+      if (out.length >= TRACKS_MAX - 1) break;
+    }
+    return out;
+  }
+
   /** Убрать звук карточки целиком: и из хранилища, и с самой карточки. */
   function forgetAudio(card) {
     audioKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
     card.audio = false; card.audioLen = 0; card.peaks = []; card.parts = [];
+  }
+
+  // ------------------------------------------------------------------
+  // Несколько записей на одной карточке.
+  //
+  // Устройство одной записи — куски, склейка без стыка, дозапись, перенос
+  // между устройствами — уже сделано и работает. Поэтому здесь ничего из
+  // этого не переписывается: вместо одной записи у карточки появляется
+  // список «мест», и каждое место выглядит для остального кода точно так
+  // же, как карточка со звуком, — те же поля id, audio, audioLen, parts,
+  // peaks. Проигрыватель, дозапись и перенос принимают их без единой
+  // правки.
+  //
+  // Первое место — сама карточка. Запись там и остаётся лежать, под тем
+  // же номером в хранилище, что и раньше: у того, что уже записано, ничто
+  // не сдвигается. Остальные места живут в списке extra, и у каждого свой
+  // собственный номер, выданный при создании.
+  // ------------------------------------------------------------------
+  const TRACKS_MAX = 3;
+
+  /** Записи карточки по порядку. Пустых мест в списке нет. */
+  function audioSlots(card) {
+    const out = [];
+    if (card && card.audio) out.push(card);
+    const extra = (card && Array.isArray(card.extra)) ? card.extra : [];
+    extra.forEach((e) => { if (e && e.audio) out.push(e); });
+    return out;
+  }
+
+  /**
+   * Куда положить следующую запись. null — все три места заняты.
+   *
+   * Пока у карточки нет ни одной записи, берём саму карточку: так запись
+   * ложится туда, где она лежала всегда. Дальше новые всегда добавляются
+   * в конец списка — чтобы порядок дорожек совпадал с порядком появления,
+   * даже если первую потом удалить.
+   */
+  function freeSlot(card) {
+    if (audioSlots(card).length >= TRACKS_MAX) return null;
+    const extra = Array.isArray(card.extra) ? card.extra : [];
+    if (!card.audio && !extra.some((e) => e && e.audio)) return card;
+    if (!Array.isArray(card.extra)) card.extra = [];
+    const idle = card.extra.find((e) => e && !e.audio);
+    if (idle) return idle;
+    const fresh = { id: uid(), audio: false, audioLen: 0, parts: [], peaks: [] };
+    card.extra.push(fresh);
+    return fresh;
+  }
+
+  /** Убрать одну дорожку: и звук из хранилища, и место из списка. */
+  function dropTrack(card, slot) {
+    forgetAudio(slot);
+    if (slot !== card && Array.isArray(card.extra)) {
+      card.extra = card.extra.filter((e) => e !== slot);
+    }
+  }
+
+  /** Все ключи звука карточки — со всеми её дорожками. */
+  function allAudioKeys(card) {
+    let out = [];
+    if (card && card.audio) out = out.concat(audioKeys(card));
+    const extra = (card && Array.isArray(card.extra)) ? card.extra : [];
+    extra.forEach((e) => { if (e && e.audio) out = out.concat(audioKeys(e)); });
+    return out;
+  }
+
+  /** Убрать звук карточки целиком, со всеми дорожками. */
+  function forgetAllAudio(card) {
+    audioSlots(card).slice().forEach((slot) => { dropTrack(card, slot); });
+    card.extra = [];
   }
 
   /**
@@ -1981,6 +2098,9 @@ body {
             ink: sanitizeInk(c.ink),
             // Ссылка: только http и https, всё прочее отбрасывается
             link: sanitizeLink(c.link),
+            // Вторая и третья записи. Каждая — со своим номером в
+            // хранилище и со своими кусками, как у первой.
+            extra: sanitizeExtra(c.extra),
           });
         }
         section.decks.push(deck);
@@ -2234,7 +2354,17 @@ body {
 
       const have = new Set(keys);
       let fixed = 0, back = 0;
+      // Вторая и третья дорожки проверяются так же, как первая: у них
+      // тоже свой номер в хранилище. Записи и здесь НЕ удаляются —
+      // снимается только отметка.
       cards.forEach((card) => {
+        const extra = Array.isArray(card.extra) ? card.extra : [];
+        extra.forEach((e) => {
+          if (e && e.audio && !have.has(e.id)) { e.audio = false; fixed++; }
+        });
+        if (extra.some((e) => e && !e.audio)) {
+          card.extra = extra.filter((e) => e && e.audio);
+        }
         const real = have.has(card.id);
         if (card.audio && !real) {
           // Отметку снимаем, но САМИ ЗАПИСИ НЕ ТРОГАЕМ. Здесь была
@@ -4470,14 +4600,14 @@ body {
     const neighbour = (c) => {
       const bar = el('div', { class: 'audio-bar' });
       const g = el('div', {
-        class: 'bigcard side' + (c.audio ? ' with-audio' : ''),
+        class: 'bigcard side' + (audioSlots(c).length ? ' with-audio' : ''),
         attrs: { 'aria-hidden': 'true' },
       }, [
         dressText(paintText(el('div', { class: 'bigcard-text' }), c.text, c.marks), c),
         bar,
       ]);
       paint(g, c.color);
-      if (c.audio) dress.push({ bar: bar, card: c });
+      if (audioSlots(c).length) dress.push({ bar: bar, card: c });
       return g;
     };
 
@@ -4488,7 +4618,7 @@ body {
     const dressSides = () => {
       while (dress.length) {
         const it = dress.pop();
-        stillPlayer(it.bar, it.card);
+        paintStill(it.bar, it.card);
       }
     };
 
@@ -4510,7 +4640,7 @@ body {
     if (after) track.appendChild(after);
     track.appendChild(big);
     stage.appendChild(track);
-    if (card.audio) buildPlayer(audioBar, card);
+    paintTracks(audioBar, card);
 
     /**
      * Насколько соседняя карточка отстоит от текущей.
@@ -4984,10 +5114,18 @@ body {
       if (activeRecorder) return;                 // уже пишем
       const sup = recordingSupport();
       if (!sup.ok) { alert(RECORD_HELP[sup.why]); return; }
-      startRecording(card, audioBar, {
+      // Прежние записи остаются на месте — новая ложится следующей
+      // дорожкой. Мест три; когда заняты все, говорим об этом прямо.
+      const slot = freeSlot(card);
+      if (!slot) {
+        alert('На карточке уже ' + TRACKS_MAX + ' записи — больше не поместится. '
+          + 'Удалите одну крестиком на её дорожке.');
+        return;
+      }
+      startRecording(slot, audioBar, {
         tick: (text) => { timer.textContent = text; },
         live: live, idle: idle, pauseBtn: pauseBtn,
-      });
+      }, false, () => { paintTracks(audioBar, card); });
     });
 
     // Значок паузы не меняется никогда — меняется только его плотность.
@@ -5162,8 +5300,13 @@ body {
 
     btn.addEventListener('click', () => {
       if (activeRecorder) { alert('Сейчас идёт запись — сначала остановите её.'); return; }
-      if (card.audio && !confirm(
-        'На карточке уже есть запись. Заменить её выбранным файлом?')) return;
+      // Прежняя запись больше не заменяется: файл ложится следующей
+      // дорожкой. Заменить — это удалить крестиком и загрузить снова.
+      if (audioSlots(card).length >= TRACKS_MAX) {
+        alert('На карточке уже ' + TRACKS_MAX + ' записи — больше не поместится. '
+          + 'Удалите одну крестиком на её дорожке.');
+        return;
+      }
       input.click();
     });
 
@@ -5189,11 +5332,19 @@ body {
             + '(m4a), а также mp3, wav и aac.');
           return null;
         }
-        // Прежние куски продолжения к новому файлу отношения не имеют
-        const stale = audioKeys(card).slice(1);
-        stale.forEach((k) => { AudioStore.del(k).catch(() => {}); });
-        return AudioStore.put(card.id, file)
-          .then(() => AudioStore.get(card.id))
+        // Ничего прежнего не убираем: файл ложится своей дорожкой, а
+        // соседние записи и их продолжения остаются как были. Раньше
+        // здесь подчищались куски прежней записи — тогда новый файл
+        // занимал её место, теперь занимать нечего.
+        const slot = freeSlot(card);
+        if (!slot) { busy(false); return null; }
+        // Место могло быть уже занято раньше и освобождено крестиком —
+        // чужих кусков в нём остаться не должно
+        audioKeys(slot).slice(1).forEach((k) => {
+          AudioStore.del(k).catch(() => {});
+        });
+        return AudioStore.put(slot.id, file)
+          .then(() => AudioStore.get(slot.id))
           .then((back) => {
             busy(false);
             if (!back || !back.size) {
@@ -5201,18 +5352,18 @@ body {
               return null;
             }
             const len = Math.max(1, Math.round((secs || 0) * 100) / 100);
-            card.audio = true;
-            card.audioLen = len;
-            card.parts = [{ len: len, top: 100, head: 0 }];
-            card.peaks = [];
+            slot.audio = true;
+            slot.audioLen = len;
+            slot.parts = [{ len: len, top: 100, head: 0 }];
+            slot.peaks = [];
             save();
-            clear(audioBar); buildPlayer(audioBar, card);
+            paintTracks(audioBar, card);
             // Рисунок волны считаем из самого файла. На iPhone это
             // работает: формат Apple Safari разбирает без труда.
             return computePeaks(file).then((peaks) => {
               if (!peaks || !peaks.length) return null;
-              card.peaks = peaks; save();
-              clear(audioBar); buildPlayer(audioBar, card);
+              slot.peaks = peaks; save();
+              paintTracks(audioBar, card);
               return null;
             }).catch(() => null);
           });
@@ -5232,7 +5383,14 @@ body {
    * ложится в хранилище отдельным ключом и приписывается к списку
    * кусков карточки; длина и рисунок звука складываются с прежними.
    */
-  function startRecording(card, audioBar, ui, append) {
+  function startRecording(card, audioBar, ui, append, repaint) {
+    // Чем перерисовать дорожку, когда запись легла в хранилище. У второй
+    // и третьей записи это своя строка, а не вся полоса, — поэтому кто
+    // именно рисует, решает вызывающий.
+    const redraw = () => {
+      if (typeof repaint === 'function') { repaint(); return; }
+      clear(audioBar); buildPlayer(audioBar, card);
+    };
     // Сколько ещё можно записать. У дозаписи потолок общий с тем, что
     // уже лежит на карточке, иначе пятиминутный предел обходился бы
     // простым нажатием «дописать».
@@ -5294,7 +5452,7 @@ body {
         if (!blob.size) {
           // Пусто — но плеер уже написал «Сохраняю…». Возвращаем его в
           // нормальный вид, иначе подпись зависла бы навсегда
-          if (append) { clear(audioBar); buildPlayer(audioBar, card); }
+          if (append) { redraw(); }
           return;
         }
 
@@ -5314,7 +5472,7 @@ body {
             .then((back) => {
               if (!back || !back.size) {
                 alert('Продолжение не сохранилось. Попробуйте ещё раз.');
-                clear(audioBar); buildPlayer(audioBar, card);
+                redraw();
                 return;
               }
               const hadLen = card.audioLen || 0;
@@ -5325,11 +5483,11 @@ body {
               card.audioLen = Math.round((hadLen + grew) * 100) / 100;
               card.audio = true;
               save();
-              clear(audioBar); buildPlayer(audioBar, card);
+              redraw();
             })
             .catch(() => {
               alert('Не удалось сохранить продолжение.');
-              clear(audioBar); buildPlayer(audioBar, card);
+              redraw();
             });
           return;
         }
@@ -5351,14 +5509,14 @@ body {
           // совпадать с общей длиной — по ней считается перемотка
           card.parts = [{ len: card.audioLen, top: loud }];
           save();
-          clear(audioBar); buildPlayer(audioBar, card);
+          redraw();
           // Если с микрофона снять не удалось (старый браузер), пробуем
           // разобрать сам файл — на компьютере это работает
           if (snapped.length) return;
           computePeaks(blob).then((peaks) => {
             if (!peaks || !peaks.length) return;
             card.peaks = peaks; save();
-            clear(audioBar); buildPlayer(audioBar, card);
+            redraw();
           }).catch(() => {});
         }).catch(() => alert('Не удалось сохранить запись.'));
       };
@@ -5817,7 +5975,62 @@ body {
   }
 
   /** Плеер внизу карточки: кнопка, дорожка волны, время до сотых. */
-  function buildPlayer(bar, card) {
+  /**
+   * Все дорожки карточки, одна под другой.
+   *
+   * Каждая — сама по себе: свой проигрыватель, своя дозапись, своё
+   * удаление. Номер слева ставим только когда записей больше одной: при
+   * единственной он ничего не сообщает и лишь занимает место.
+   *
+   * Перерисовываем всю полосу целиком, а не одну строку: после удаления
+   * или добавления меняются номера у соседних, и держать их в согласии
+   * поштучно — верный способ однажды разойтись.
+   */
+  function paintTracks(bar, card) {
+    clear(bar);
+    const slots = audioSlots(card);
+    const many = slots.length > 1;
+    const again = () => { paintTracks(bar, card); };
+    slots.forEach((slot, k) => {
+      const box = el('div', { class: 'track-box' });
+      const row = el('div', { class: 'track-row' + (many ? ' many' : '') }, many
+        ? [el('span', { class: 'track-no', text: String(k + 1) }), box]
+        : [box]);
+      bar.appendChild(row);
+      buildPlayer(box, slot, {
+        repaint: again,
+        gone: () => { dropTrack(card, slot); save(); again(); },
+      });
+    });
+  }
+
+  /** То же самое, но для соседней карточки: без живого звука. */
+  function paintStill(bar, card) {
+    clear(bar);
+    const slots = audioSlots(card);
+    const many = slots.length > 1;
+    slots.forEach((slot, k) => {
+      const box = el('div', { class: 'track-box' });
+      bar.appendChild(el('div', { class: 'track-row' + (many ? ' many' : '') }, many
+        ? [el('span', { class: 'track-no', text: String(k + 1) }), box]
+        : [box]));
+      stillPlayer(box, slot);
+    });
+  }
+
+  /**
+   * Проигрыватель одной записи.
+   *
+   * card здесь — не обязательно карточка: это «место записи», и у второй
+   * с третьей дорожек оно своё. Полей у него ровно столько же, сколько у
+   * карточки со звуком, поэтому всё, что ниже, одинаково работает и для
+   * первой записи, и для остальных.
+   *
+   * opts.gone — что делать по крестику. Для второй и третьей дорожек там
+   * убирается только своя запись, а соседние остаются.
+   */
+  function buildPlayer(bar, card, opts) {
+    const killTrack = opts && opts.gone;
     const face = playerFace(card);
     const play = face.play, wave = face.wave, fill = face.fill;
     const barBox = face.barBox, head = face.head, label = face.label;
@@ -5933,6 +6146,9 @@ body {
           if (taping) return;             // идёт дозапись — не до удаления
           if (!confirm('Удалить голосовую запись с этой карточки?')) return;
           hush();
+          // Убираем ровно эту дорожку. Остальные — соседние записи той
+          // же карточки — остаются на месте: за это отвечает killTrack.
+          if (killTrack) { killTrack(); return; }
           forgetAudio(card);              // вместе со всеми продолжениями
           save(); clear(bar);
         },
@@ -6511,7 +6727,7 @@ body {
         // заново, когда лёг; до тех пор говорим, что происходит.
         idle: () => { showTaping(false); label.textContent = 'Сохраняю…'; },
         pauseBtn: null,
-      }, true);
+      }, true, opts && opts.repaint);
     });
 
     // Перемотка нажатием и протягиванием по дорожке
@@ -6781,9 +6997,8 @@ body {
     // Вместе с карточкой убираем и её запись, иначе звук останется
     // висеть в хранилище: карточки нет, а место занято. Кусков
     // продолжения может быть несколько — убираем все.
-    if (card.audio) {
-      audioKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
-    }
+    // Все дорожки карточки, а не только первая: их может быть до трёх
+    allAudioKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
     deck.cards = deck.cards.filter((c) => c.id !== card.id);
     if (view.name === 'read') {
       if (deck.cards.length === 0) {
@@ -7084,7 +7299,9 @@ body {
       const withAudio = [];
       for (const s of state.sections) {
         for (const d of s.decks) {
-          for (const c of d.cards) if (c.audio) withAudio.push(c);
+          // В файл идут все дорожки: у карточки их может быть до трёх,
+          // и каждая — со своими кусками
+          for (const c of d.cards) audioSlots(c).forEach((sl) => withAudio.push(sl));
         }
       }
       if (withAudio.length === 0) {
@@ -7695,6 +7912,14 @@ body {
             // выделил слово жирным на телефоне, перенёс на компьютер —
             // текст тот же, а оформление осталось прежним. «Как в
             // файле» значит и оформление как в файле.
+            // «Как в файле» — значит и дорожки как в файле. Свои
+            // дополнительные записи этой карточки убираем из хранилища:
+            // список соберётся заново из файла, а иначе их звук остался
+            // бы лежать мёртвым грузом, на который никто не ссылается.
+            (Array.isArray(keep.extra) ? keep.extra : []).forEach((e) => {
+              if (e && e.audio) dropped.push(e);
+            });
+            keep.extra = [];
             keep.marks = sanitizeMarks(inCard.marks, keep.text.length);
             keep.align = sanitizeAlign(inCard.align);
             keep.ink = sanitizeInk(inCard.ink);
@@ -7709,11 +7934,16 @@ body {
                               align: sanitizeAlign(inCard.align),
                               ink: sanitizeInk(inCard.ink),
                               link: sanitizeLink(inCard.link),
+                              // Место под дополнительные дорожки есть у
+                              // каждой карточки: без него один и тот же
+                              // файл, применённый дважды, менял бы вид
+                              // карточки во второй раз
+                              extra: [],
                               peaks: sanitizePeaks(inCard.peaks) });
           }
         }
         // Всё, что осталось в byText, в файле не значится
-        byText.forEach((c) => { if (c.audio) dropped.push(c); });
+        byText.forEach((c) => { audioSlots(c).forEach((sl) => dropped.push(sl)); });
         sec.decks.push(deck);
       }
       // Колоды нашего раздела, которых в файле нет
@@ -7721,7 +7951,7 @@ body {
         const kept = new Set(inSec.decks.map((d) => d.name));
         mine.decks.forEach((d) => {
           if (kept.has(d.name)) return;
-          d.cards.forEach((c) => { if (c.audio) dropped.push(c); });
+          d.cards.forEach((c) => { audioSlots(c).forEach((sl) => dropped.push(sl)); });
         });
       }
       sections.push(sec);
@@ -7731,7 +7961,7 @@ body {
     state.sections.forEach((sec) => {
       if (kept.has(sec.name)) return;
       sec.decks.forEach((d) => d.cards.forEach((c) => {
-        if (c.audio) dropped.push(c);
+        audioSlots(c).forEach((sl) => dropped.push(sl));
       }));
     });
 
@@ -7742,6 +7972,29 @@ body {
       audioKeys(c).forEach((k) => { AudioStore.del(k).catch(() => {}); });
     });
     return dropped.length;
+  }
+
+  /**
+   * Связать дорожки из файла с местами у нас.
+   *
+   * У каждой дорожки в файле свой номер, и звук в файле лежит под ним.
+   * У нас место может быть другим — поэтому и нужна связка: откуда взять
+   * и куда положить. Первая дорожка ложится в саму карточку, остальные —
+   * в новые места её списка, по порядку из файла.
+   */
+  function linkTracks(inCard, mine, out, existing) {
+    const inSlots = audioSlots(inCard);
+    if (!inSlots.length) return;
+    mine.extra = [];
+    inSlots.forEach((src, k) => {
+      const dst = k === 0 ? mine
+        : { id: uid(), audio: false, audioLen: 0, parts: [], peaks: [] };
+      if (k > 0) mine.extra.push(dst);
+      out.push({ from: src.id, card: dst, len: src.audioLen,
+                 peaks: sanitizePeaks(src.peaks),
+                 parts: sanitizeParts(src.parts),
+                 existing: !!existing });
+    });
   }
 
   function mergeState(incoming) {
@@ -7776,12 +8029,7 @@ body {
             // файла молча пропускалась, и переносилось ноль записей при
             // том, что в файле их видно. Теперь наличие своей записи
             // проверяется по самому хранилищу, а не по отметке.
-            if (inCard.audio) {
-              audioLinks.push({ from: inCard.id, card: mine, len: inCard.audioLen,
-                                peaks: sanitizePeaks(inCard.peaks),
-                                parts: sanitizeParts(inCard.parts),
-                                existing: true });
-            }
+            linkTracks(inCard, mine, audioLinks, true);
             continue;
           }
           if (deck.cards.length >= LIMITS.cardsPerDeck) break;
@@ -7797,15 +8045,12 @@ body {
                           align: sanitizeAlign(inCard.align),
                           ink: sanitizeInk(inCard.ink),
                           link: sanitizeLink(inCard.link),
+                          extra: [],
                           peaks: sanitizePeaks(inCard.peaks) };
           deck.cards.push(fresh);
           byText.set(key, fresh);
           added++;
-          if (inCard.audio) {
-            audioLinks.push({ from: inCard.id, card: fresh, len: inCard.audioLen,
-                              peaks: sanitizePeaks(inCard.peaks),
-                              parts: sanitizeParts(inCard.parts) });
-          }
+          linkTracks(inCard, fresh, audioLinks, false);
         }
       }
     }
