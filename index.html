@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-3g4jVInx6wc13iepIiVMPS028D64LcxeTzqSjB0lM78=';
-               style-src 'sha256-Bq8hdlI8ERC6BYHbjnaXlWlhN28NZ2oLz07T/HHYm0c=';
+               script-src 'sha256-A2Lhchjh/3W6A+rC1qJO09+QFcYZWtAislOpQ8p5hO4=';
+               style-src 'sha256-IpES01weUB8dN91PG1B/pqNhMn2Sf369ZZTnLMe/BEE=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -423,14 +423,36 @@ body {
 .audio-bar {
   flex: none;
   margin: 12px -10px 0;
+  /* Цвет карточки передаётся дорожкам дальше: строка едет поверх
+     спрятанной кнопки «В карточку» и просвечивать не должна, а карточки
+     бывают разного цвета. */
+  background-color: inherit;
 }
 .audio-bar:empty { display: none; margin: 0; }
 
 /* Дорожки записей, одна под другой. Их может быть до трёх, и каждая
    живёт сама по себе: свой проигрыватель, своя дозапись, своё
    удаление. */
-.track-row { display: flex; align-items: center; gap: 8px; }
-.track-row + .track-row { margin-top: 8px; }
+/* Обёртка дорожки. Под строкой у правого края лежит кнопка «В карточку»
+   и открывается, когда строку уводят влево. overflow прячет её в покое.
+   Цвет наследуется от карточки: строка едет поверх кнопки и просвечивать
+   не должна, а карточки бывают разного цвета. */
+.track-slot {
+  position: relative;
+  overflow: hidden;
+  overflow: clip;
+  border-radius: var(--radius-m);
+  background-color: inherit;
+}
+.track-slot + .track-slot { margin-top: 8px; }
+.track-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: inherit;
+}
 /* Номер слева. Появляется только когда записей больше одной: при
    единственной он ничего не сообщает.
    Он же и ручка: за номер дорожку тянут вверх или вниз, чтобы поменять
@@ -458,11 +480,12 @@ body {
 }
 .track-no:active { cursor: grabbing; background: rgba(0, 0, 0, .14); opacity: .9; }
 /* Строку несут: она идёт поверх соседних и чуть отделяется тенью, чтобы
-   было видно, что она оторвана от столбика. */
-.track-row.moving { position: relative; z-index: 2; }
-.track-row.moving .wave,
-.track-row.moving .audio-btn { box-shadow: 0 5px 12px rgba(0, 0, 0, .18); }
-.track-row.moving .track-no { background: rgba(0, 0, 0, .14); opacity: .9; }
+   было видно, что она оторвана от столбика. Пометка стоит на обёртке —
+   при перестановке едет именно обёртка, вместе со скрытой кнопкой. */
+.track-slot.moving { z-index: 2; }
+.track-slot.moving .wave,
+.track-slot.moving .audio-btn { box-shadow: 0 5px 12px rgba(0, 0, 0, .18); }
+.track-slot.moving .track-no { background: rgba(0, 0, 0, .14); opacity: .9; }
 .track-box { flex: 1; min-width: 0; }
 /* Кнопки записи и удаления прижаты друг к другу и стоят парой у правого
    края: так дорожке достаётся вся оставшаяся ширина, а рука тянется к
@@ -639,7 +662,7 @@ body {
 }
 .track-row.many .audio-del,
 .track-row.many .audio-more { min-height: 26px; }
-.track-row.many + .track-row.many { margin-top: 4px; }
+.track-slot.many + .track-slot.many { margin-top: 4px; }
 
 /* ---------- Разделы и колоды ---------- */
 .section { margin: 22px 0 6px; }
@@ -1510,7 +1533,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '06.08.2026, 11:01';
+  const BUILD = '06.08.2026, 12:30';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -2081,6 +2104,97 @@ body {
     if (slot !== card && Array.isArray(card.extra)) {
       card.extra = card.extra.filter((e) => e !== slot);
     }
+  }
+
+  /**
+   * Перенести одну запись на другую карточку.
+   *
+   * Куда она встанет: в конец, следующей по счёту. Если на той карточке
+   * записей не было — станет первой, если была одна — второй, если две —
+   * третьей. Больше трёх не берём и говорим об этом прямо.
+   *
+   * Двух путей здесь не избежать, и вот почему. Запись лежит в хранилище
+   * под номером своего места. У второй и третьей дорожек это собственный
+   * номер, ни с чем не связанный, — такую дорожку переносим целым
+   * объектом, и звук не двигается с места вовсе.
+   *
+   * А у первой дорожки номер места — это номер самой карточки. Отдать
+   * его другой карточке нельзя: карточка остаётся у себя, и запишись на
+   * неё что-нибудь снова — новая запись легла бы поверх перенесённой.
+   * Поэтому её куски переписываются под новым номером. Старые убираются
+   * только после того, как новые прочитаны обратно и оказались на месте:
+   * потерять запись на полпути нельзя.
+   *
+   * done(ok, why) — что получилось. Ошибку показывает вызывающий: он
+   * знает, где человек сейчас смотрит.
+   */
+  function moveTrackToCard(fromCard, slot, toCard, done) {
+    const finish = (ok, why) => { if (typeof done === 'function') done(ok, why); };
+    if (!slot || !toCard || fromCard === toCard) { finish(false, 'same'); return; }
+    if (audioSlots(toCard).length >= TRACKS_MAX) { finish(false, 'full'); return; }
+
+    /** Поставить дорожку в конец списка карточки-получателя. */
+    const seat = (dst) => {
+      if (!Array.isArray(toCard.extra)) toCard.extra = [];
+      const busy = audioSlots(toCard);
+      let top = -1;
+      busy.forEach((s) => { const p = sanitizePos(s.trackPos); if (p > top) top = p; });
+      dst.trackPos = Math.min(TRACKS_MAX - 1, Math.max(busy.length, top + 1));
+      toCard.extra.push(dst);
+    };
+
+    // Вторая или третья дорожка: переносим объект как есть
+    if (slot !== fromCard) {
+      if (Array.isArray(fromCard.extra)) {
+        fromCard.extra = fromCard.extra.filter((e) => e !== slot);
+      }
+      seat(slot);
+      save();
+      finish(true);
+      return;
+    }
+
+    // Первая дорожка: переписываем куски под новым номером
+    const fresh = { id: uid(), audio: false, audioLen: slot.audioLen || 0,
+                    parts: sanitizeParts(slot.parts),
+                    peaks: sanitizePeaks(slot.peaks) };
+    const from = audioKeys(slot);
+    const copied = [];
+    const step = (i) => {
+      if (i >= from.length) return Promise.resolve(true);
+      const to = partKey(fresh.id, i);
+      return AudioStore.get(from[i])
+        .then((blob) => {
+          if (!blob || !blob.size) return null;      // кусок потерялся — дальше не идём
+          return AudioStore.put(to, blob).then(() => AudioStore.get(to));
+        })
+        .then((back) => {
+          if (!back || !back.size) return false;
+          copied.push(to);
+          return step(i + 1);
+        });
+    };
+    step(0).then((ok) => {
+      if (!ok && !copied.length) {
+        finish(false, 'copy');
+        return;
+      }
+      // Дошло хотя бы начало записи — переносим ровно то, что дошло
+      fresh.parts = fresh.parts.slice(0, copied.length);
+      if (fresh.parts.length) {
+        fresh.audioLen = Math.round(
+          fresh.parts.reduce((s, p) => s + p.len, 0) * 100) / 100;
+      }
+      fresh.audio = true;
+      seat(fresh);
+      // И только теперь убираем прежнее: сначала убедились, что новое на месте
+      forgetAudio(slot);
+      save();
+      finish(true);
+    }).catch(() => {
+      copied.forEach((k) => { AudioStore.del(k).catch(() => {}); });
+      finish(false, 'copy');
+    });
   }
 
   /** Все ключи звука карточки — со всеми её дорожками. */
@@ -6218,12 +6332,152 @@ body {
       const row = el('div', { class: 'track-row' + (many ? ' many' : '') }, many
         ? [trackGrip(bar, card, k, again), box]
         : [box]);
-      bar.appendChild(row);
+      // Обёртка нужна двум разным движениям сразу. Вбок едет сама строка,
+      // и из-под неё открывается кнопка «В карточку». Вверх-вниз, при
+      // перестановке дорожек, едет обёртка целиком — вместе со своей
+      // кнопкой, иначе кнопка осталась бы стоять на месте.
+      const move = el('button', {
+        class: 'row-move', attrs: { type: 'button',
+          'aria-label': 'Перенести запись на другую карточку' },
+        on: { click: () => { closeRow(true); moveTrackTo(card, slot, k); } },
+      }, [
+        el('span', { class: 'row-move-icon', text: '→' }),
+        el('span', { class: 'row-move-text', text: 'В карточку' }),
+      ]);
+      const slotBox = el('div', { class: 'track-slot' + (many ? ' many' : '') }, [
+        el('div', { class: 'row-actions' }, [move]),
+        row,
+      ]);
+      bar.appendChild(slotBox);
+      // Движение вбок по дорожке — наше, а не перелистывание карточки.
+      // Без этого одно и то же движение значило бы сразу две вещи.
+      row.addEventListener('pointerdown', (ev) => {
+        if (ev.stopPropagation) ev.stopPropagation();
+      });
+      attachRowSwipe(row);
       buildPlayer(box, slot, {
         repaint: again,
         gone: () => { dropTrack(card, slot); save(); again(); },
       });
     });
+  }
+
+  /**
+   * Куда перенести запись. Сначала колода, потом карточка в ней.
+   *
+   * Двумя шагами, а не одним списком всех карточек подряд: карточек
+   * бывают сотни, и искать нужную в общей куче — то же самое, что не
+   * искать вовсе. Колод же немного, и по названию колоды сразу видно,
+   * куда идти.
+   */
+  function moveTrackTo(fromCard, slot, index) {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const sheet = el('div', { class: 'sheet' });
+    const head = 'Перенести запись ' + (index + 1);
+
+    /** Первый шаг: выбрать колоду. */
+    const askDeck = () => {
+      clear(sheet);
+      sheet.appendChild(el('h3', { text: head }));
+      sheet.appendChild(el('p', { class: 'hint',
+        text: 'Выберите колоду, потом карточку. На карточке помещается '
+          + TRACKS_MAX + ' записи.' }));
+      const list = el('div', { class: 'card-list scroll' });
+      let any = false;
+      for (const sec of state.sections) {
+        for (const deck of sec.decks) {
+          if (!deck.cards.length) continue;
+          any = true;
+          const swatch = el('span', { class: 'mini-swatch' });
+          swatch.style.setProperty('background-color', deck.color);
+          swatch.style.setProperty('border-color', deck.color);
+          list.appendChild(el('button', {
+            class: 'mini pick', attrs: { type: 'button' },
+            on: { click: () => askCard(sec, deck) },
+          }, [
+            swatch,
+            el('span', { class: 'mini-text', text: sec.name + ' · ' + deck.name }),
+            el('span', { class: 'mini-num', text: cardsLabel(deck.cards.length) }),
+          ]));
+        }
+      }
+      if (any) sheet.appendChild(list);
+      else {
+        sheet.appendChild(el('p', { class: 'empty',
+          text: 'Других карточек пока нет.' }));
+      }
+      sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Отмена', on: { click: close } }),
+      ]));
+    };
+
+    /** Второй шаг: выбрать карточку в этой колоде. */
+    const askCard = (sec, deck) => {
+      clear(sheet);
+      sheet.appendChild(el('h3', { text: head }));
+      sheet.appendChild(el('p', { class: 'hint', text: sec.name + ' · ' + deck.name }));
+      const list = el('div', { class: 'card-list scroll' });
+      let any = false;
+      deck.cards.forEach((c) => {
+        if (c === fromCard) return;          // сама себе она не нужна
+        any = true;
+        const busy = audioSlots(c).length;
+        const full = busy >= TRACKS_MAX;
+        list.appendChild(el('button', {
+          class: 'mini pick' + (full ? ' full' : ''),
+          attrs: { type: 'button' },
+          on: { click: () => {
+            if (full) return;
+            take(c);
+          } },
+        }, [
+          el('span', { class: 'mini-text', text: shortText(c.text) || 'Без текста' }),
+          el('span', { class: 'mini-num',
+                       text: full ? 'занято' : (busy ? 'записей: ' + busy : 'пусто') }),
+        ]));
+      });
+      if (any) sheet.appendChild(list);
+      else {
+        sheet.appendChild(el('p', { class: 'empty',
+          text: 'В этой колоде других карточек нет.' }));
+      }
+      sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Назад', on: { click: askDeck } }),
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Отмена', on: { click: close } }),
+      ]));
+    };
+
+    /** Собственно перенос. Первая дорожка переписывается — это не мгновенно. */
+    const take = (toCard) => {
+      clear(sheet);
+      sheet.appendChild(el('h3', { text: head }));
+      sheet.appendChild(el('p', { class: 'hint', text: 'Переношу…' }));
+      moveTrackToCard(fromCard, slot, toCard, (ok, why) => {
+        close();
+        if (ok) {
+          // Перерисовываем весь экран: дорожка ушла с этой карточки, и
+          // соседние сдвинулись — полосу проще собрать заново целиком.
+          openRow = null;
+          render();
+          return;
+        }
+        if (why === 'full') {
+          alert('На той карточке уже ' + TRACKS_MAX + ' записи. '
+            + 'Больше туда не поместится: удалите одну или выберите другую.');
+          return;
+        }
+        alert('Запись перенести не удалось — она осталась на месте.');
+      });
+    };
+
+    askDeck();
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
   }
 
   // Перестановка дорожек.
@@ -6372,9 +6626,13 @@ body {
     const many = slots.length > 1;
     slots.forEach((slot, k) => {
       const box = el('div', { class: 'track-box' });
-      bar.appendChild(el('div', { class: 'track-row' + (many ? ' many' : '') }, many
-        ? [el('span', { class: 'track-no', text: String(k + 1) }), box]
-        : [box]));
+      // Обёртка та же, что и у живой полосы: размеры обязаны совпадать
+      // до пикселя, иначе в момент подмены дорожка дёрнулась бы.
+      bar.appendChild(el('div', { class: 'track-slot' + (many ? ' many' : '') }, [
+        el('div', { class: 'track-row' + (many ? ' many' : '') }, many
+          ? [el('span', { class: 'track-no', text: String(k + 1) }), box]
+          : [box]),
+      ]));
       stillPlayer(box, slot);
     });
   }
