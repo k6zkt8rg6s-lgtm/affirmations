@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-A2Lhchjh/3W6A+rC1qJO09+QFcYZWtAislOpQ8p5hO4=';
+               script-src 'sha256-Cl5Ze1hiCJnt+UQAW3qVEgmNYtPLH2fMPELqXWlgT7k=';
                style-src 'sha256-IpES01weUB8dN91PG1B/pqNhMn2Sf369ZZTnLMe/BEE=';
                img-src 'self' data:;
                media-src blob:;
@@ -1533,7 +1533,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '06.08.2026, 12:30';
+  const BUILD = '06.08.2026, 12:53';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -7656,6 +7656,48 @@ body {
    * Карточки и голосовые записи это не трогает совсем: они лежат в
    * другом месте — в хранилище устройства, а не в памяти страницы.
    */
+  /**
+   * Какая версия лежит на сайте прямо сейчас.
+   *
+   * Отдельный крошечный файл version.txt рядом с приложением — в нём одна
+   * строка с отметкой сборки. Спрашиваем именно его, а не саму страницу,
+   * и вот почему.
+   *
+   * Страницу отдаёт обработчик кеша: у него в памяти лежит своя копия, и
+   * на любой запрос за страницей он вернёт её, даже если попросить
+   * «свежую». Значит, узнать через страницу, что на сайте новее, нельзя
+   * в принципе — пока обработчик сам не решит обновиться. Если он по
+   * какой-то причине этого не делает, приложение остаётся слепым: именно
+   * так и вышло, когда новая версия месяцами лежала на сайте, а на
+   * устройстве всё показывало старую отметку.
+   *
+   * Маленький файл со случайной добавкой в адресе не попадает ни в один
+   * кеш: ни в наш — такого адреса там нет, — ни в браузерный.
+   */
+  const VERSION_FILE = 'version.txt';
+  function askSiteVersion(done) {
+    const say = (v) => { if (typeof done === 'function') done(v); };
+    if (typeof fetch !== 'function' || location.protocol !== 'https:') {
+      say(null);
+      return Promise.resolve(null);
+    }
+    const href = VERSION_FILE + '?ask=' + Date.now();
+    return fetch(href, { cache: 'no-store', credentials: 'same-origin' })
+      .then((res) => (res && res.ok ? res.text() : null))
+      .then((text) => {
+        // Файла может не быть вовсе — например, на сайт положили только
+        // страницу. Тогда честно говорим «не знаю», а не выдумываем.
+        const line = String(text || '').trim().split('\n')[0].trim();
+        const ok = line && line.length <= 40 && line.indexOf('<') < 0 ? line : null;
+        say(ok);
+        return ok;
+      })
+      .catch(() => { say(null); return null; });
+  }
+
+  /** Наша собственная отметка — или null, если это сборка для разработки. */
+  const myVersion = () => (BUILD.indexOf('#') >= 0 ? null : BUILD);
+
   function fetchFreshApp(say) {
     const tell = (t) => { if (typeof say === 'function') say(t); };
     tell('Забираю свежую версию…');
@@ -7671,7 +7713,19 @@ body {
         .catch(() => {}));
     }
     return Promise.all(jobs).then(() => {
-      if (typeof location !== 'undefined' && location.reload) location.reload();
+      // Своей памяти у приложения больше нет — но есть ещё браузерная, и
+      // она про страницу тоже помнит. Обычная перезагрузка спокойно
+      // возьмёт страницу оттуда, и всё было бы зря. Поэтому сначала
+      // заставляем браузер скачать страницу заново, минуя свою память, и
+      // только потом перезагружаемся.
+      const here = (typeof location !== 'undefined' && location.href) || '';
+      if (typeof fetch !== 'function' || !here) return null;
+      return fetch(here, { cache: 'reload', credentials: 'same-origin' })
+        .catch(() => null);
+    }).then(() => {
+      if (typeof location === 'undefined') return;
+      if (location.reload) { location.reload(); return; }
+      if (location.replace) location.replace(location.href);
     });
   }
 
@@ -7755,6 +7809,27 @@ body {
     const wrap = el('div', { class: 'modal' });
     const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
     const status = el('div', { class: 'sync-status' });
+    // Две версии рядом: что стоит здесь и что лежит на сайте. Без этого
+    // «нажимаю обновить, а версия та же» не отличить от «на сайт ничего
+    // не положили»: снаружи оба случая выглядят одинаково.
+    const versions = el('p', { class: 'hint', text: 'Смотрю, что на сайте…' });
+    askSiteVersion((site) => {
+      const mine = myVersion();
+      if (!site) {
+        versions.textContent = mine
+          ? 'У вас версия от ' + mine + '. Что на сайте — узнать не вышло: '
+            + 'нет связи или рядом с приложением не лежит файл version.txt.'
+          : 'Версию сайта узнать не вышло.';
+        return;
+      }
+      if (mine && site === mine) {
+        versions.textContent = 'У вас версия от ' + mine
+          + ' — ровно та же, что на сайте. Обновлять нечего.';
+        return;
+      }
+      versions.textContent = 'У вас версия от ' + (mine || '—')
+        + ', на сайте — от ' + site + '. Есть что забрать.';
+    });
     const sheet = el('div', { class: 'sheet' }, [
       el('h3', { text: 'Обновить приложение' }),
       el('p', { class: 'hint', text:
@@ -7763,6 +7838,7 @@ body {
       el('p', { class: 'hint', text:
         'Карточки и голосовые записи останутся на месте: они хранятся '
         + 'отдельно от приложения и при обновлении не трогаются.' }),
+      versions,
       status,
       el('div', { class: 'sheet-actions' }, [
         el('button', { class: 'btn sec', attrs: { type: 'button' },
@@ -8814,9 +8890,11 @@ body {
         class: 'fresh-go', attrs: { type: 'button' },
         text: 'Обновить',
         on: {
-          click: () => {
-            if (typeof location !== 'undefined' && location.reload) location.reload();
-          },
+          // Не просто перезагрузка. Обычная перезагрузка берёт страницу
+          // из памяти — сначала нашей, потом браузерной, — и человек
+          // видит ту же версию, что и до нажатия. Здесь память чистится
+          // целиком, и страница скачивается заново.
+          click: () => { fetchFreshApp(); },
         },
       }),
     ]);
@@ -8924,6 +9002,23 @@ body {
         // просто не откроется без сети
       });
     });
+    // И вторая проверка, своя, ни от чего не зависящая.
+    //
+    // Обработчик кеша сообщает о новой версии сам — когда работает как
+    // задумано. Но если на сайт положили только страницу, а сам
+    // обработчик остался прежним, или он застрял на старой копии,
+    // сообщения не будет никогда, и приложение будет годами показывать
+    // «у вас последняя версия». Поэтому спрашиваем ещё и напрямую,
+    // маленьким файлом: он мимо всех кешей.
+    //
+    // Через несколько секунд после запуска: сразу — значит отнять сеть у
+    // того, что человеку нужно прямо сейчас.
+    setTimeout(() => {
+      askSiteVersion((site) => {
+        const mine = myVersion();
+        if (site && mine && site !== mine) noteFresh();
+      });
+    }, 4000);
   }
 
   // Два обработчика на всё время работы приложения — для переноса

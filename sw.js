@@ -25,7 +25,7 @@
 // Номер меняется при каждой правке обработчика. На «активации» все чужие
 // кеши удаляются, поэтому смена номера — это ещё и способ выбросить
 // накопленное старьё разом.
-const VERSION = 'affirmations-v4';
+const VERSION = 'affirmations-v5';
 const PAGE = './index.html';
 const SHELL = [
   './',
@@ -95,6 +95,14 @@ self.addEventListener('fetch', (event) => {
   let url;
   try { url = new URL(req.url); } catch (e) { return; }
   if (url.origin !== self.location.origin) return;
+
+  // Отметку версии не трогаем вовсе.
+  //
+  // Это единственный файл, который обязан приходить с сайта, а не из
+  // памяти: по нему приложение и узнаёт, что на сайте лежит версия
+  // новее. Отдай мы сохранённую копию — приложение вечно сравнивало бы
+  // себя с самим собой и уверяло, что всё свежее некуда.
+  if (/version\.txt$/.test(url.pathname)) return;
 
   const page = req.mode === 'navigate' || /\.html?$/.test(url.pathname);
 
