@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-Cl5Ze1hiCJnt+UQAW3qVEgmNYtPLH2fMPELqXWlgT7k=';
-               style-src 'sha256-IpES01weUB8dN91PG1B/pqNhMn2Sf369ZZTnLMe/BEE=';
+               script-src 'sha256-CbOh+nyeH9kp4e5qBfa/1+tzy7AZAfqVDc5sx1jkGdw=';
+               style-src 'sha256-TmcP1oN5oRr+Rph/kP24Rq9A57R5u1r+qKgF3APFtao=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -61,6 +61,7 @@
   --hair: rgba(0, 0, 0, .08);
   --danger: #C0392B;
   --heart: #E23B3B;
+  --star: #D9930B;      /* тёплый янтарь: отметка «в напоминания» */
   --radius-l: 22px;
   --radius-m: 16px;
   --tap: 44px;               /* минимальная зона нажатия по гайдлайнам Apple */
@@ -334,6 +335,12 @@ body {
 /* Сердечко: пустое — обычное, залитое — красное */
 .iconbtn.heart { background: transparent; font-size: 22px; color: var(--ink-soft); }
 .iconbtn.heart.on { color: var(--heart); }
+/* Звёздочка — «в напоминания». Ведёт себя как сердечко: в покое тёмная,
+   как все кнопки ряда, и загорается только когда отмечена. Цвет тёплый,
+   а не красный: рядом с сердечком два одинаково красных значка читались
+   бы как одно и то же, случайно нажатое дважды. */
+.iconbtn.star { background: transparent; font-size: 21px; color: var(--ink-soft); }
+.iconbtn.star.on { color: var(--star); }
 .mini-heart { color: var(--heart); font-size: 16px; flex: none; }
 .mini-audio { color: var(--ink-soft); font-size: 15px; flex: none; }
 
@@ -1004,6 +1011,16 @@ body {
      только пока она едет. */
 }
 
+/* Строка настройки напоминаний: подпись слева, «меньше» и «больше»
+   справа. Не поле ввода: цифру тут набирать нечего, её меняют шагами. */
+.dial {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.dial-name { flex: 1; font-size: 16px; }
+
 /* Колода, в которую переносим. Список выбора — те же строки, но нажатие
    у них другое, поэтому и вид чуть иной: без номера слева. */
 .mini.pick { cursor: pointer; }
@@ -1533,7 +1550,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '06.08.2026, 12:53';
+  const BUILD = '07.08.2026, 15:32';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1883,6 +1900,16 @@ body {
   // выбирается без препятствий. Содержимое от этого не меняется: внутри
   // тот же JSON, и он же проверяется при чтении.
   const SYNC_FILE = 'affirmations-sync.txt';
+
+  /**
+   * Телефон это или планшет — по наличию касаний.
+   *
+   * Разница важна для выдачи файлов наружу. На телефоне единственный
+   * путь положить файл в iCloud Drive — системное «Поделиться». На
+   * компьютере оно не к месту: человек нажал «сохранить в файл» и ждёт
+   * окна с папками, а не списка приложений.
+   */
+  const handheld = () => ((navigator.maxTouchPoints || 0) > 0);
 
   function clampStr(value, max) {
     return typeof value === 'string' ? value.slice(0, max) : '';
@@ -2310,6 +2337,14 @@ body {
     // прочитал и либо включил, либо решил обойтись. Напоминать при
     // каждом сохранении — навязчиво.
     out.hideSaveHint = raw.hideSaveHint === true;
+    // Расписание напоминаний. Числа и только числа, в разумных пределах:
+    // шаг от часа до полусуток, границы дня — часы обычных суток.
+    const hourOf = (v, def) => (typeof v === 'number' && isFinite(v)
+      ? Math.max(0, Math.min(23, Math.round(v))) : def);
+    out.remindEvery = (typeof raw.remindEvery === 'number' && isFinite(raw.remindEvery))
+      ? Math.max(1, Math.min(12, Math.round(raw.remindEvery))) : 3;
+    out.remindFrom = hourOf(raw.remindFrom, 9);
+    out.remindTo = Math.max(out.remindFrom, hourOf(raw.remindTo, 21));
     for (const s of raw.sections.slice(0, LIMITS.sections)) {
       if (!s || typeof s !== 'object') continue;
       const section = {
@@ -2339,6 +2374,9 @@ body {
             // подсунуть в стиль произвольное значение
             color: KNOWN_COLORS.includes(c.color) ? c.color : CARD_COLORS[0],
             fav: c.fav === true,          // строго булево, не «похожее на правду»
+            // Отметка «показывать в напоминаниях» — вторая, отдельная
+            // от избранного: у них разный смысл и разные списки.
+            remind: c.remind === true,
             audio: c.audio === true,      // сама запись лежит в IndexedDB
             // Длину записи держим рядом с карточкой. Спрашивать её у
             // самого файла ненадёжно: браузеры часто отдают Infinity для
@@ -5276,6 +5314,23 @@ body {
           text: card.fav ? '♥' : '♡',
           on: { click: () => { card.fav = !card.fav; save(); render(); } },
         }),
+        // Звёздочка — вторая отметка, рядом с сердечком и с той же
+        // повадкой: нажал — загорелась, нажал ещё — погасла. Смысл
+        // другой: сердечко собирает любимое в отдельный список наверху
+        // главного экрана, звёздочка отбирает карточки в напоминания.
+        // Цвет тоже другой, тёплый: два одинаково красных значка рядом
+        // читались бы как одно и то же, нажатое дважды.
+        el('button', {
+          class: 'iconbtn star' + (card.remind ? ' on' : ''),
+          attrs: {
+            type: 'button',
+            'aria-pressed': String(!!card.remind),
+            'aria-label': card.remind ? 'Убрать из напоминаний' : 'В напоминания',
+            title: card.remind ? 'Убрать из напоминаний' : 'В напоминания',
+          },
+          text: card.remind ? '★' : '☆',
+          on: { click: () => { card.remind = !card.remind; save(); render(); } },
+        }),
         el('button', {
           class: 'iconbtn ghost', attrs: { 'aria-label': 'Изменить', type: 'button' },
           text: '✎', on: { click: () => editCard(deck, card) },
@@ -7789,6 +7844,8 @@ body {
           'Отдать всё: карточки и голосовые записи', () => openSync('save')),
         item('↓', 'Взять из файла',
           'Забрать данные с другого устройства', () => openSync('load')),
+        item('★', 'Напоминания',
+          'Показывать отмеченные звёздочкой на экране устройства', openRemind),
         item('↻', 'Обновить приложение',
           'Скачать свежую версию самого приложения', openRefresh),
       ]),
@@ -7799,6 +7856,286 @@ body {
         }),
       ]),
     ]);
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+  }
+
+  // ------------------------------------------------------------------
+  // Напоминания: отмеченные звёздочкой карточки приходят на экран
+  // устройства, когда приложение закрыто.
+  //
+  // Почему через Календарь, а не само приложение. Показать что-то поверх
+  // других приложений сайт не может: на iPhone уведомления бывают только
+  // «пуш», их присылает сервер. Локальных, которые приложение ставит
+  // себе само на будущее, в вебе нет ни в стандарте, ни в Safari. А
+  // сервера у нас нет и заводить его незачем: всё приложение — один файл.
+  //
+  // Календарь эту задачу решает целиком и без сервера. Приложение делает
+  // файл событий, человек открывает его один раз — и дальше система сама
+  // показывает текст аффирмации баннером в назначенные часы, на iPhone и
+  // на MacBook сразу, через iCloud, и без интернета.
+  //
+  // Время в файле «плавающее», без часового пояса: событие в девять утра
+  // остаётся девятью утра и в другой стране.
+  // ------------------------------------------------------------------
+  const REMIND_FILE = 'affirmations-reminders.ics';
+  const REMIND_MAX = 200;       // столько событий не стыдно положить в календарь
+
+  /** Все карточки, отмеченные звёздочкой, — по порядку колод. */
+  function remindCards() {
+    const out = [];
+    state.sections.forEach((sec) => {
+      sec.decks.forEach((deck) => {
+        deck.cards.forEach((c) => { if (c.remind) out.push(c); });
+      });
+    });
+    return out;
+  }
+
+  /** Часы напоминаний за день: с какого по какой, через сколько. */
+  function remindHours(every, from, to) {
+    const step = Math.max(1, Math.min(12, Math.round(every || 3)));
+    const a = Math.max(0, Math.min(23, Math.round(from)));
+    const b = Math.max(a, Math.min(23, Math.round(to)));
+    const out = [];
+    for (let h = a; h <= b; h += step) out.push(h);
+    return out;
+  }
+
+  /** Двузначное число — часы и минуты в календаре пишутся только так. */
+  const two = (n) => (n < 10 ? '0' + n : String(n));
+
+  /**
+   * Собрать файл календаря.
+   *
+   * Карточки идут по очереди, по кругу. В календаре нет способа сказать
+   * «каждый раз следующая», поэтому очередь раскладывается заранее: на
+   * каждую пару «день круга + час» своё событие, и повторяется оно раз в
+   * K дней, где K — число отмеченных карточек. Через K дней всё
+   * возвращается к началу, и круг идёт заново.
+   */
+  function buildReminders(cards, hours, now) {
+    const K = cards.length, S = hours.length;
+    if (!K || !S) return '';
+    const start = now || new Date();
+    const lines = [];
+    const put = (s) => { lines.push(s); };
+    /** Перевод строки и точка с запятой в тексте события — служебные. */
+    const esc = (s) => String(s || '')
+      .replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,')
+      .replace(/\r?\n/g, '\\n');
+    const day = (add) => {
+      const d = new Date(start.getFullYear(), start.getMonth(),
+        start.getDate() + add, 0, 0, 0);
+      return String(d.getFullYear()) + two(d.getMonth() + 1) + two(d.getDate());
+    };
+    const now8 = String(start.getFullYear()) + two(start.getMonth() + 1)
+      + two(start.getDate()) + 'T' + two(start.getHours())
+      + two(start.getMinutes()) + two(start.getSeconds());
+
+    put('BEGIN:VCALENDAR');
+    put('VERSION:2.0');
+    put('PRODID:-//Аффирмации//RU');
+    put('CALSCALE:GREGORIAN');
+    put('METHOD:PUBLISH');
+    put('X-WR-CALNAME:Аффирмации');
+
+    const total = Math.min(K * S, REMIND_MAX);
+    for (let i = 0; i < total; i++) {
+      const d = Math.floor(i / S), h = hours[i % S];
+      const card = cards[i % K];
+      const text = shortText(card.text) || 'Аффирмация';
+      put('BEGIN:VEVENT');
+      put('UID:aff-' + i + '-' + now8 + '@affirmations');
+      put('DTSTAMP:' + now8);
+      put('DTSTART:' + day(d) + 'T' + two(h) + '0000');
+      put('DURATION:PT5M');
+      put('RRULE:FREQ=DAILY;INTERVAL=' + K);
+      put('SUMMARY:' + esc(text));
+      put('DESCRIPTION:' + esc(card.text));
+      put('TRANSP:TRANSPARENT');       // время не считается занятым
+      put('BEGIN:VALARM');
+      put('ACTION:DISPLAY');
+      put('DESCRIPTION:' + esc(text));
+      put('TRIGGER:PT0S');
+      put('END:VALARM');
+      put('END:VEVENT');
+    }
+    put('END:VCALENDAR');
+
+    // Длинные строки в календаре складываются: продолжение начинается с
+    // пробела. Считаем байты, а не буквы, и рвём только между буквами —
+    // иначе на разрыве получилась бы половина русской буквы.
+    const fold = (s) => {
+      if (utf8len(s) <= 74) return s;
+      const out = [];
+      let cur = '', size = 0;
+      for (const ch of s) {
+        const n = utf8len(ch);
+        if (size + n > 74) { out.push(cur); cur = ' '; size = 1; }
+        cur += ch; size += n;
+      }
+      out.push(cur);
+      return out.join('\r\n');
+    };
+    return lines.map(fold).join('\r\n') + '\r\n';
+  }
+
+  /** Сколько байтов занимает строка в UTF-8. */
+  function utf8len(s) {
+    let n = 0;
+    for (const ch of String(s)) {
+      const c = ch.codePointAt(0);
+      n += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+    }
+    return n;
+  }
+
+  /** Отдать файл наружу: на компьютере — «сохранить как», на телефоне — «поделиться». */
+  function deliverFile(text, name, type, done) {
+    const say = (t, kind) => { if (typeof done === 'function') done(t, kind); };
+    if (typeof self.__capture === 'function') self.__capture(text);
+    let blob;
+    try { blob = new Blob([text], { type: type }); }
+    catch (e) { say('Не удалось собрать файл.', 'bad'); return; }
+    const kb = Math.max(1, Math.round(blob.size / 1024));
+
+    if (self.showSaveFilePicker) {
+      self.showSaveFilePicker({ suggestedName: name }).then((handle) => {
+        if (!handle || !handle.createWritable) { say(''); return; }
+        return handle.createWritable()
+          .then((w) => w.write(blob).then(() => w.close()))
+          .then(() => say('Файл сохранён, ' + kb + ' КБ.'));
+      }).catch(() => say(''));
+      return;
+    }
+    let file = null;
+    try { file = new File([blob], name, { type: type }); } catch (e) { file = null; }
+    if (file && handheld() && navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file] })
+        .then(() => say('Файл отправлен.'))
+        .catch(() => say(''));
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { attrs: { href: url, download: name } });
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    say('Файл сохранён: ' + name + '.\nЕсли Safari не спросил, куда, — '
+      + 'ищите в «Загрузках» и откройте его оттуда.');
+  }
+
+  /** Окно «Напоминания»: что показывать, когда и как это получить. */
+  function openRemind() {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const sheet = el('div', { class: 'sheet' });
+    if (typeof state.remindEvery !== 'number') state.remindEvery = 3;
+    if (typeof state.remindFrom !== 'number') state.remindFrom = 9;
+    if (typeof state.remindTo !== 'number') state.remindTo = 21;
+    const status = el('div', { class: 'sync-status' });
+
+    const draw = () => {
+      clear(sheet);
+      const cards = remindCards();
+      const hours = remindHours(state.remindEvery, state.remindFrom, state.remindTo);
+      sheet.appendChild(el('h3', { text: 'Напоминания' }));
+
+      if (!cards.length) {
+        sheet.appendChild(el('p', { class: 'hint', text:
+          'Пока ни одна карточка не отмечена звёздочкой. Откройте карточку '
+          + 'и нажмите ☆ в верхнем ряду — она попадёт сюда.' }));
+        sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+          el('button', { class: 'btn sec', attrs: { type: 'button' },
+                         text: 'Закрыть', on: { click: close } }),
+        ]));
+        return;
+      }
+
+      sheet.appendChild(el('p', { class: 'hint', text:
+        'Отмеченные карточки будут приходить на экран iPhone и MacBook — '
+        + 'даже когда приложение закрыто. Идут по очереди, по кругу.' }));
+
+      // Что именно отмечено
+      const list = el('div', { class: 'card-list scroll' });
+      cards.forEach((c, k) => {
+        list.appendChild(el('div', { class: 'mini' }, [
+          el('span', { class: 'mini-num', text: String(k + 1) }),
+          el('span', { class: 'mini-text', text: shortText(c.text) || 'Без текста' }),
+        ]));
+      });
+      sheet.appendChild(list);
+
+      /** Строка настройки: подпись и две кнопки. */
+      const dial = (label, get, set, low, high) => {
+        const name = el('span', { class: 'dial-name' });
+        const paint = () => { name.textContent = label(get()); };
+        paint();
+        const bump = (by) => () => {
+          const v = Math.max(low, Math.min(high, get() + by));
+          set(v);
+          if (state.remindTo < state.remindFrom) state.remindTo = state.remindFrom;
+          save();
+          draw();
+        };
+        return el('div', { class: 'dial' }, [
+          name,
+          el('button', { class: 'iconbtn ghost', attrs: { type: 'button',
+            'aria-label': 'Меньше' }, text: '−', on: { click: bump(-1) } }),
+          el('button', { class: 'iconbtn ghost', attrs: { type: 'button',
+            'aria-label': 'Больше' }, text: '+', on: { click: bump(1) } }),
+        ]);
+      };
+
+      sheet.appendChild(dial((v) => 'Каждые ' + v + ' ч.',
+        () => state.remindEvery, (v) => { state.remindEvery = v; }, 1, 12));
+      sheet.appendChild(dial((v) => 'С ' + two(v) + ':00',
+        () => state.remindFrom, (v) => { state.remindFrom = v; }, 0, 23));
+      sheet.appendChild(dial((v) => 'До ' + two(v) + ':00',
+        () => state.remindTo, (v) => { state.remindTo = v; }, 0, 23));
+
+      const when = hours.map((h) => two(h) + ':00').join(', ');
+      sheet.appendChild(el('p', { class: 'hint', text:
+        'Выйдет ' + hours.length + ' в день: ' + when + '.' }));
+      const total = cards.length * hours.length;
+      if (total > REMIND_MAX) {
+        sheet.appendChild(el('p', { class: 'hint', text:
+          'Карточек и часов слишком много — в файл войдут первые '
+          + REMIND_MAX + ' напоминаний. Уберите часть звёздочек или '
+          + 'поставьте больший шаг.' }));
+      }
+      sheet.appendChild(status);
+
+      sheet.appendChild(el('p', { class: 'hint', text:
+        'Как это работает: приложение сделает файл для Календаря. '
+        + 'Откройте его один раз — и напоминания начнут приходить сами, '
+        + 'на обоих устройствах через iCloud. Поменяли текст карточки или '
+        + 'звёздочки — сделайте файл заново.' }));
+
+      sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Закрыть', on: { click: close } }),
+        el('button', {
+          class: 'btn big', attrs: { type: 'button' },
+          text: '★  Создать файл',
+          on: { click: () => {
+            const text = buildReminders(cards, hours, new Date());
+            clear(status);
+            status.className = 'sync-status wait';
+            status.appendChild(el('div', { text: 'Собираю…' }));
+            deliverFile(text, REMIND_FILE, 'text/calendar', (t) => {
+              clear(status);
+              if (!t) { status.className = 'sync-status'; return; }
+              status.className = 'sync-status wait';
+              status.appendChild(el('div', { text: t }));
+            });
+          } },
+        }),
+      ]));
+    };
+
+    draw();
     wrap.appendChild(sheet);
     wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
     document.body.appendChild(wrap);
@@ -8069,7 +8406,6 @@ body {
      * Проверено: на весну 2026 года так и осталось.
      */
     const canAskWhere = !!self.showSaveFilePicker;
-    const handheld = () => ((navigator.maxTouchPoints || 0) > 0);
 
     /**
      * Один раз объяснить, почему файл падает в «Загрузки» без вопроса,
@@ -8619,11 +8955,13 @@ body {
             keep.align = sanitizeAlign(inCard.align);
             keep.ink = sanitizeInk(inCard.ink);
             keep.link = sanitizeLink(inCard.link);
+            keep.remind = inCard.remind === true;
             keep.peaks = sanitizePeaks(inCard.peaks);
             deck.cards.push(keep);
           } else {
             deck.cards.push({ id: uid(), text: inCard.text, color: inCard.color,
-                              fav: inCard.fav, audio: false, audioLen: 0,
+                              fav: inCard.fav, remind: inCard.remind === true,
+                              audio: false, audioLen: 0,
                               parts: [],
                               marks: sanitizeMarks(inCard.marks, inCard.text.length),
                               align: sanitizeAlign(inCard.align),
@@ -8740,7 +9078,8 @@ body {
           // приезжает на другое устройство «раздетой», и человек видит
           // разное на двух экранах при одном и том же тексте
           const fresh = { id: uid(), text: inCard.text, color: inCard.color,
-                          fav: inCard.fav, audio: false, audioLen: 0,
+                          fav: inCard.fav, remind: inCard.remind === true,
+                          audio: false, audioLen: 0,
                           parts: [],
                           marks: sanitizeMarks(inCard.marks, inCard.text.length),
                           align: sanitizeAlign(inCard.align),
