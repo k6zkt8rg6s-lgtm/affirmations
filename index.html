@@ -6,23 +6,34 @@
   Политика безопасности. Скрипт и стили разрешены по контрольной сумме,
   а не по источнику: подменить их нельзя, сумма не сойдётся.
     default-src 'none'     — по умолчанию запрещено всё
+    img-src 'self' data: blob:
+                           — картинки только свои: из самого файла, из
+                             строки data: и из объектов, созданных на
+                             этом же устройстве. Без blob: фотографии с
+                             телефона не открывались вовсе: браузер молча
+                             отказывался их показывать, а приложение
+                             видело только «не удалось прочитать»
     media-src blob:        — звук только свой, созданный на этом устройстве;
                              подгрузить запись с чужого адреса нельзя
     worker-src 'self'      — офлайн-режим только из своего же файла
-    connect-src 'none'     — fetch, XHR, WebSocket заблокированы браузером
+    connect-src 'self'     — обращаться можно ровно к своему же адресу и
+                             никуда больше. Нужно для одной вещи: узнать,
+                             какая версия лежит на сайте (version.txt).
+                             При 'none' этот вопрос браузер запрещал, и
+                             приложение всегда думало, что обновлений нет
     form-action 'none'     — формы никуда не отправляются
     frame-ancestors 'none' — страницу нельзя встроить в чужой сайт
-  Данным физически некуда утечь.
+  Данным физически некуда утечь: чужие адреса закрыты полностью.
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-CQzWWl8qr+QZ5RgrMkvPQNuMVjmb8TEFRZ4ErEsBJfY=';
+               script-src 'sha256-UKpDRuSSYllCxZDKzcZs9thWqdt8p3+K58dBsp16dTY=';
                style-src 'sha256-1R2ZhlW6EfXulEwHxBS15pIPSYflAXR1519LCKqRbm8=';
-               img-src 'self' data:;
+               img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
                manifest-src 'self';
-               connect-src 'none';
+               connect-src 'self';
                form-action 'none';
                base-uri 'none';
                frame-ancestors 'none';
@@ -1637,7 +1648,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '09.08.2026, 19:26';
+  const BUILD = '09.08.2026, 19:40';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
