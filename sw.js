@@ -25,7 +25,7 @@
 // Номер меняется при каждой правке обработчика. На «активации» все чужие
 // кеши удаляются, поэтому смена номера — это ещё и способ выбросить
 // накопленное старьё разом.
-const VERSION = 'affirmations-v5';
+const VERSION = 'affirmations-v6';
 const PAGE = './index.html';
 const SHELL = [
   './',
@@ -119,6 +119,29 @@ self.addEventListener('fetch', (event) => {
   // ------------------------------------------------------------------
   if (page) {
     const href = url.href;
+    // Приложение попросило свежую страницу — отдаём только из сети.
+    //
+    // Так работает кнопка «Обновить»: она уходит на адрес с меткой
+    // времени. Сохранённую копию здесь возвращать нельзя ни в коем
+    // случае — ровно ради того, чтобы её обойти, всё и затевалось.
+    // Сети нет — тогда уж лучше сохранённая, чем пустой экран.
+    if (/[?&]fresh=/.test(url.search || '')) {
+      event.respondWith(
+        fetch(href, { cache: 'no-store', credentials: 'same-origin' })
+          .then((res) => {
+            if (res && res.ok) {
+              try {
+                const copy = res.clone();
+                event.waitUntil(caches.open(VERSION)
+                  .then((c) => c.put(PAGE, copy)).catch(() => {}));
+              } catch (e) { /* не поместилась — не страшно */ }
+            }
+            return res;
+          })
+          .catch(() => caches.match(PAGE))
+      );
+      return;
+    }
     event.respondWith(
       caches.match(PAGE).then((hit) => {
         if (hit) {

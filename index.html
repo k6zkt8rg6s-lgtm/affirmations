@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-UKpDRuSSYllCxZDKzcZs9thWqdt8p3+K58dBsp16dTY=';
-               style-src 'sha256-1R2ZhlW6EfXulEwHxBS15pIPSYflAXR1519LCKqRbm8=';
+               script-src 'sha256-3R9yTl8TO7ABKCWaf0bJJE80V4+/BOHdnwnOB2X0+bE=';
+               style-src 'sha256-RC+D0DUOh5wdkWgI/PwXR7zCDMA0hc8T40ZPoY4ZCyw=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1070,12 +1070,21 @@ body {
   align-items: center;
   justify-content: center;
   padding: env(safe-area-inset-top) 12px env(safe-area-inset-bottom);
+  /* Горизонталь забираем себе: по ней листают снимки. Всё остальное
+     остаётся браузеру — увеличение двумя пальцами тут кстати. */
+  touch-action: pan-y pinch-zoom;
 }
 .shot-full {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   border-radius: 6px;
+  /* Снимок тянут вбок, чтобы перейти к следующему. Браузер норовит
+     вместо этого начать своё перетаскивание картинки — на компьютере
+     это выглядит как призрак снимка, уезжающий за курсором. */
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .shot-close {
   position: absolute;
@@ -1648,7 +1657,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '09.08.2026, 19:40';
+  const BUILD = '09.08.2026, 21:19';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -8084,19 +8093,24 @@ body {
         .catch(() => {}));
     }
     return Promise.all(jobs).then(() => {
-      // Своей памяти у приложения больше нет — но есть ещё браузерная, и
-      // она про страницу тоже помнит. Обычная перезагрузка спокойно
-      // возьмёт страницу оттуда, и всё было бы зря. Поэтому сначала
-      // заставляем браузер скачать страницу заново, минуя свою память, и
-      // только потом перезагружаемся.
-      const here = (typeof location !== 'undefined' && location.href) || '';
-      if (typeof fetch !== 'function' || !here) return null;
-      return fetch(here, { cache: 'reload', credentials: 'same-origin' })
-        .catch(() => null);
-    }).then(() => {
       if (typeof location === 'undefined') return;
-      if (location.reload) { location.reload(); return; }
-      if (location.replace) location.replace(location.href);
+      // Уходим на адрес, которого браузер ещё не видел.
+      //
+      // Обычная перезагрузка тут не работает, и это выяснилось на живых
+      // устройствах: страницу браузер помнит у себя, отдельно от нашей
+      // памяти, и на перезагрузку спокойно достаёт прежнюю копию. Снаружи
+      // это выглядело так: нажимаешь «Обновить», страница мигает, и через
+      // несколько секунд снова «готова новая версия» — по кругу.
+      //
+      // Адрес с новой меткой времени взяться из памяти не может нигде: ни
+      // у нас, ни у браузера, ни у хостинга, — такого адреса никто ещё не
+      // спрашивал. Метка остаётся только в текущем окне; приложение,
+      // запущенное с экрана «Домой», открывается по своему обычному
+      // адресу.
+      const base = String(location.href || '').split('?')[0].split('#')[0];
+      const fresh = base + '?fresh=' + Date.now();
+      if (location.replace) { location.replace(fresh); return; }
+      if (location.reload) location.reload();
     });
   }
 
@@ -8450,8 +8464,97 @@ body {
       class: 'shot-close', attrs: { type: 'button', 'aria-label': 'Закрыть' },
       text: '✕', on: { click: close },
     }));
-    // Нажатие мимо снимка закрывает — как в галерее
-    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+
+    // ----------------------------------------------------------------
+    // Листание открытого снимка: пальцем, трекпадом и мышью.
+    //
+    // Все три жеста делают одно и то же и потому считаются одинаково —
+    // порогом и скоростью, теми же, что и у карточек. Список замкнут в
+    // круг: с последнего снимка вперёд попадаешь на первый, с первого
+    // назад — на последний.
+    // ----------------------------------------------------------------
+    let id = null, x0 = 0, y0 = 0, side = null, dx = 0;
+    let tPrev = 0, xPrev = 0, speed = 0;
+    /** Снимок идёт за пальцем: видно, что жест поймался. */
+    const drag = (px, ms) => {
+      img.style.setProperty('transition',
+        ms ? 'transform ' + ms + 'ms ' + SLIDE_EASE : 'none');
+      img.style.setProperty('transform', 'translate3d(' + px.toFixed(1) + 'px,0,0)');
+    };
+    wrap.addEventListener('pointerdown', (ev) => {
+      if (!ev.isPrimary || shots.length < 2) return;
+      if (ev.target && ev.target !== wrap && ev.target !== img) return;  // крестик
+      id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
+      side = null; dx = 0; speed = 0;
+      tPrev = Date.now(); xPrev = ev.clientX;
+    });
+    wrap.addEventListener('pointermove', (ev) => {
+      if (ev.pointerId !== id) return;
+      const mx = ev.clientX - x0, my = ev.clientY - y0;
+      if (side === null) {
+        if (Math.abs(mx) < SWIPE_START && Math.abs(my) < SWIPE_START) return;
+        // Вертикальное движение — не наше: пусть остаётся про запас
+        side = Math.abs(mx) >= Math.abs(my) ? 'x' : 'y';
+        if (side === 'x' && wrap.setPointerCapture) {
+          try { wrap.setPointerCapture(id); } catch (e) { /* не поддержано */ }
+        }
+      }
+      if (side !== 'x') return;
+      if (ev.cancelable && ev.preventDefault) ev.preventDefault();
+      const now = Date.now();
+      if (now > tPrev) {
+        speed = Math.abs(ev.clientX - xPrev) / (now - tPrev);
+        tPrev = now; xPrev = ev.clientX;
+      }
+      dx = mx;
+      drag(dx, 0);
+    });
+    const letGo = (ev) => {
+      if (ev.pointerId !== id) return;
+      id = null;
+      if (side !== 'x') return;
+      if (swipePassed(Math.abs(dx), speed)) {
+        // Влево — следующий, вправо — предыдущий, как при листании карточек
+        step(dx < 0 ? 1 : -1);
+        drag(0, 0);
+        return;
+      }
+      drag(0, 160);                       // не дотянули — снимок вернулся
+    };
+    wrap.addEventListener('pointerup', letGo);
+    wrap.addEventListener('pointercancel', letGo);
+
+    // Два пальца по трекпаду. Событий приходит десятки подряд, а после
+    // отрыва пальцев macOS ещё долго досылает затухающую инерцию —
+    // поэтому сумма копится, а хвост держит общий замок, тот же, что и
+    // при листании карточек.
+    let acc = 0, accTimer = null;
+    wrap.addEventListener('wheel', (ev) => {
+      if (shots.length < 2) return;
+      const push = padSide(ev);
+      if (!push) return;
+      const force = Math.abs(push);
+      if (padBlocks(force)) return;
+      acc += push;
+      if (accTimer) clearTimeout(accTimer);
+      accTimer = setTimeout(() => { accTimer = null; acc = 0; }, 180);
+      if (Math.abs(acc) < 90) { drag(Math.max(-70, Math.min(70, -acc)), 0); return; }
+      const dir = acc > 0 ? 1 : -1;
+      acc = 0;
+      if (accTimer) { clearTimeout(accTimer); accTimer = null; }
+      padLock(force);
+      step(dir);
+      drag(0, 0);
+    }, { passive: true });
+
+    // Нажатие мимо снимка закрывает — как в галерее. Но только если это
+    // было именно нажатие, а не конец жеста: иначе каждое пролистывание
+    // закрывало бы просмотр.
+    wrap.addEventListener('click', (ev) => {
+      if (ev.target !== wrap) return;
+      if (Math.abs(dx) > 4) { dx = 0; return; }
+      close();
+    });
     paint();
     document.body.appendChild(wrap);
     return wrap;
@@ -9966,13 +10069,24 @@ body {
   // ------------------------------------------------------------------
   let freshReady = false;
 
+  /** Пришли ли мы сюда с обновления: в адресе остаётся метка. */
+  const cameFromUpdate = () => /[?&]fresh=/.test(
+    (typeof location !== 'undefined' && location.search) || '');
+
   function freshStrip() {
     if (!freshReady) return null;
+    // Если мы только что обновлялись, а версия всё равно другая — значит,
+    // сайт пока отдаёт прежнюю страницу. Молчать об этом нельзя: человек
+    // нажимает «Обновить» второй и третий раз и не понимает, почему
+    // ничего не меняется.
+    const stuck = cameFromUpdate();
     return el('div', { class: 'fresh-strip' }, [
-      el('span', { class: 'fresh-text', text: 'Готова новая версия' }),
+      el('span', { class: 'fresh-text', text: stuck
+        ? 'Сайт пока отдаёт прежнюю версию. Через минуту попробуйте ещё раз'
+        : 'Готова новая версия' }),
       el('button', {
         class: 'fresh-go', attrs: { type: 'button' },
-        text: 'Обновить',
+        text: stuck ? 'Ещё раз' : 'Обновить',
         on: {
           // Не просто перезагрузка. Обычная перезагрузка берёт страницу
           // из памяти — сначала нашей, потом браузерной, — и человек
