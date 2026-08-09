@@ -16,8 +16,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-p/B46ttAKXc4dXzRYsZC1BPUNMbGW5oHWlpc2wzep9A=';
-               style-src 'sha256-GE8n7qZFvVz4ByKjY3kRlVBTHWo6iQ0T6dm4M7pE9bA=';
+               script-src 'sha256-CQzWWl8qr+QZ5RgrMkvPQNuMVjmb8TEFRZ4ErEsBJfY=';
+               style-src 'sha256-1R2ZhlW6EfXulEwHxBS15pIPSYflAXR1519LCKqRbm8=';
                img-src 'self' data:;
                media-src blob:;
                worker-src 'self';
@@ -1011,6 +1011,85 @@ body {
      только пока она едет. */
 }
 
+/* ---------- Фотографии на карточке ----------
+   Ряд миниатюр стоит на бумаге, над самой карточкой: снимки — про
+   карточку, но не часть её текста, и лезть на него они не должны.
+   Ряд едет вбок, поэтому снимков может быть сколько угодно: не
+   поместились — прокрутил пальцем. */
+.shot-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 0;
+  margin: 6px 0 2px;
+  /* Ряд прокручивается сам, а карточку под ним листают вбок. Чтобы эти
+     два движения не спорили, горизонталь здесь отдана ряду. */
+  touch-action: pan-x;
+  scrollbar-width: none;
+}
+.shot-strip::-webkit-scrollbar { display: none; }
+.shot-strip:empty { display: none; }
+.shot-cell {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, .06);
+  cursor: pointer;
+  -webkit-touch-callout: none;   /* удержание — наше меню, а не системное */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.shot-cell:active { opacity: .75; }
+.shot-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Снимок на весь экран. Чёрный фон и ничего лишнего: смотреть так
+   смотреть. Закрывается крестиком, нажатием мимо снимка и клавишей. */
+.shot-view {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, .92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: env(safe-area-inset-top) 12px env(safe-area-inset-bottom);
+}
+.shot-full {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.shot-close {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: 12px;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .18);
+  color: #fff;
+  font-size: 19px;
+  cursor: pointer;
+}
+.shot-count {
+  position: absolute;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: rgba(255, 255, 255, .7);
+  font-size: 13px;
+  pointer-events: none;
+}
+
 /* Строка настройки напоминаний: подпись слева, «меньше» и «больше»
    справа. Не поле ввода: цифру тут набирать нечего, её меняют шагами. */
 .dial {
@@ -1558,7 +1637,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '07.08.2026, 15:50';
+  const BUILD = '09.08.2026, 19:26';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -2133,6 +2212,96 @@ body {
     return true;
   }
 
+  // ------------------------------------------------------------------
+  // Фотографии на карточке.
+  //
+  // Лежат там же, где голос, — в хранилище устройства, каждая под своим
+  // ключом. На карточке остаётся только список: номер, ширина и высота.
+  // Размеры нужны, чтобы миниатюра не дёргалась, пока снимок грузится, и
+  // чтобы на весь экран он открывался в своих пропорциях.
+  //
+  // Снимок с iPhone весит три-пять мегабайт. Такие складывать нельзя: и
+  // хранилище на телефоне кончится, и файл обмена станет неподъёмным.
+  // Поэтому при загрузке каждый снимок уменьшается до 1600 точек по
+  // длинной стороне и пересохраняется — выходит около трёхсот килобайт,
+  // а на глаз в карточке разницы никакой. Заодно это переводит формат
+  // Apple (HEIC) в обычный, который откроется и на другом устройстве.
+  // ------------------------------------------------------------------
+  const SHOT_SIDE = 1600;       // длинная сторона после уменьшения
+  const SHOT_QUALITY = 0.82;
+  const SHOTS_MAX = 40;         // столько снимков на одну карточку хватит всем
+
+  /** Ключ снимка в хранилище. Свой вид, чтобы не путать со звуком. */
+  const shotKey = () => 'p-' + uid();
+
+  /** Снимки карточки — только годные записи списка. */
+  function cardShots(card) {
+    const list = (card && Array.isArray(card.shots)) ? card.shots : [];
+    return list.filter((s) => s && typeof s.id === 'string' && s.id);
+  }
+
+  /** Список снимков из сохранённого: номер, ширина, высота — и всё. */
+  function sanitizeShots(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const s of value) {
+      if (!s || typeof s !== 'object') continue;
+      const id = String(s.id || '').slice(0, 64);
+      if (!id) continue;
+      const side = (v) => (typeof v === 'number' && isFinite(v) && v > 0
+        ? Math.min(20000, Math.round(v)) : 0);
+      out.push({ id: id, w: side(s.w), h: side(s.h) });
+      if (out.length >= SHOTS_MAX) break;
+    }
+    return out;
+  }
+
+  /** Ключи всех снимков карточки. */
+  function shotKeys(card) { return cardShots(card).map((s) => s.id); }
+
+  /**
+   * Уменьшить снимок и отдать готовый к хранению.
+   *
+   * Через холст: браузер сам раскодирует что угодно, что умеет показать,
+   * — включая формат Apple, — а обратно отдаёт обычный jpeg. Не вышло
+   * (совсем чужой формат, битый файл) — говорим об этом честно, а не
+   * кладём в хранилище то, что потом не откроется.
+   */
+  function shrinkShot(file) {
+    return new Promise((done) => {
+      if (typeof Image !== 'function' || !document.createElement) { done(null); return; }
+      let url = '';
+      try { url = URL.createObjectURL(file); } catch (e) { done(null); return; }
+      const img = new Image();
+      const give = (res) => {
+        try { URL.revokeObjectURL(url); } catch (e) { /* уже нет */ }
+        done(res);
+      };
+      img.onerror = () => give(null);
+      img.onload = () => {
+        const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
+        if (!w0 || !h0) { give(null); return; }
+        const k = Math.min(1, SHOT_SIDE / Math.max(w0, h0));
+        const w = Math.max(1, Math.round(w0 * k)), h = Math.max(1, Math.round(h0 * k));
+        let canvas;
+        try {
+          canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { give(null); return; }
+          ctx.drawImage(img, 0, 0, w, h);
+        } catch (e) { give(null); return; }
+        const ready = (blob) => {
+          if (!blob || !blob.size) { give(null); return; }
+          give({ blob: blob, w: w, h: h });
+        };
+        if (canvas.toBlob) canvas.toBlob(ready, 'image/jpeg', SHOT_QUALITY);
+        else give(null);
+      };
+      img.src = url;
+    });
+  }
+
   /** Убрать одну дорожку: и звук из хранилища, и место из списка. */
   function dropTrack(card, slot) {
     forgetAudio(slot);
@@ -2415,6 +2584,9 @@ body {
             // Место записи самой карточки в показе. Дорожки можно
             // переставлять, и первой не обязательно стоит её собственная.
             trackPos: sanitizePos(c.trackPos),
+            // Снимки: только номера и размеры. Сами картинки лежат
+            // в хранилище устройства, как и голос.
+            shots: sanitizeShots(c.shots),
           });
         }
         section.decks.push(deck);
@@ -2773,6 +2945,36 @@ body {
   let state = load();
   let view = { name: 'home', sectionId: null, deckId: null, index: 0 };
   const root = document.getElementById('app');
+
+  /**
+   * Открыть сразу нужную карточку, если её попросили в адресе.
+   *
+   * Так работает переход из напоминания: в событии календаря лежит
+   * ссылка на приложение с номером карточки, и по ней открывается не
+   * главный экран, а сама карточка — с её цветом, текстом и голосом.
+   * Уведомление системное, нарисовать в нём карточку нельзя; но от
+   * уведомления до настоящей карточки остаётся одно нажатие.
+   */
+  function openFromAddress() {
+    const q = (typeof location !== 'undefined' && location.search) || '';
+    const m = /[?&]card=([^&#]+)/.exec(q);
+    if (!m) return;
+    let want = '';
+    try { want = decodeURIComponent(m[1]); } catch (e) { want = m[1]; }
+    if (!want) return;
+    for (const sec of state.sections) {
+      for (const deck of sec.decks) {
+        const k = deck.cards.findIndex((c) => c.id === want);
+        if (k >= 0) {
+          view = { name: 'read', sectionId: sec.id, deckId: deck.id, index: k };
+          return;
+        }
+      }
+    }
+    // Карточки нет — значит, её удалили или переименовали устройство.
+    // Молча остаёмся на главном экране: ругаться тут не на что.
+  }
+  openFromAddress();
 
   function findSection(id) { return state.sections.find((s) => s.id === id) || null; }
   function findDeck(sectionId, deckId) {
@@ -4962,6 +5164,9 @@ body {
     // Строка со ссылкой. Живёт под рядом кнопок и появляется только по
     // нажатию на скрепку — в покое её нет вовсе.
     const linkRow = el('div', { class: 'link-row' });
+    // Ряд миниатюр над карточкой. Пустой — его не видно вовсе.
+    const shotStrip = el('div', { class: 'shot-strip' });
+    paintShots(shotStrip, card);
     const bigText = el('div', { class: 'bigcard-text' });
     paintText(bigText, card.text, card.marks);
     dressText(bigText, card);
@@ -5345,6 +5550,7 @@ body {
         }),
       ]),
       linkRow,
+      shotStrip,
       // Какая карточка из скольких. Отдельной строкой и по центру —
       // прямо над серединой карточки, а не в ряду кнопок: там он стоял
       // между крестиком и кнопками и читался как ещё одна кнопка.
@@ -5686,7 +5892,9 @@ body {
     // Что за файл выбрали на самом деле, всё равно проверяем сами —
     // попыткой его открыть.
     const input = el('input', {
-      attrs: { type: 'file' },
+      // multiple — чтобы из медиатеки можно было отметить сразу
+      // несколько снимков и не ходить за каждым отдельно
+      attrs: { type: 'file', multiple: 'multiple' },
       style: { display: 'none' },
     });
 
@@ -5697,77 +5905,164 @@ body {
 
     btn.addEventListener('click', () => {
       if (activeRecorder) { alert('Сейчас идёт запись — сначала остановите её.'); return; }
-      // Прежняя запись больше не заменяется: файл ложится следующей
-      // дорожкой. Заменить — это удалить крестиком и загрузить снова.
-      if (audioSlots(card).length >= TRACKS_MAX) {
-        alert('На карточке уже ' + TRACKS_MAX + ' записи — больше не поместится. '
-          + 'Удалите одну крестиком на её дорожке.');
-        return;
-      }
+      // Места проверяем здесь только для звука: снимков помещается
+      // много, и упереться в предел на этой кнопке почти невозможно.
+      // Отказывать заранее нельзя — человек мог идти за фотографией.
       input.click();
     });
 
+    const NOT_OURS = 'Этот файл здесь не открывается. Подойдёт фотография '
+      + '(jpeg, png, heic) или запись «Диктофона» (m4a), а также mp3, wav и aac.';
+
+    /**
+     * Разобрать один выбранный файл.
+     *
+     * Снимок это или запись — решаем сами, по самому файлу. Кнопка одна
+     * на оба случая: человек нажимает «загрузить» и берёт из медиатеки
+     * что нужно, а разбираться, что именно принесли, — наша забота.
+     *
+     * Тип, который сообщает система, бывает пустым — особенно у файлов
+     * из облака. Поэтому он только подсказка: когда он молчит, файл
+     * сначала пробуют открыть как картинку, а потом как звук. Не вышло
+     * ни так, ни так — значит, это и правда что-то чужое.
+     *
+     * Отвечает одним словом: что получилось. Ругаться будет вызывающий,
+     * и один раз за всё — файлов может быть выбрано много.
+     */
+    function takeOne(file) {
+      return new Promise((done) => {
+        if (file.size > PICK_MAX_MB * 1024 * 1024) { done('big'); return; }
+        if (!file.size) { done('empty'); return; }
+
+        const looksImage = String(file.type || '').indexOf('image/') === 0;
+        const looksAudio = String(file.type || '').indexOf('audio/') === 0;
+        const named = /\.(m4a|mp3|wav|aac|caf|aiff?)$/i.test(file.name || '');
+
+        /** Взять как фотографию. next — что делать, если не вышло. */
+        const asShot = (next) => {
+          if (cardShots(card).length >= SHOTS_MAX) { done('full'); return; }
+          shrinkShot(file).then((small) => {
+            if (!small) { next(); return; }
+            const key = shotKey();
+            AudioStore.put(key, small.blob)
+              .then(() => AudioStore.get(key))
+              .then((back) => {
+                // Отмечаем снимок на карточке только после того, как он
+                // прочитался обратно: иначе в ряду был бы пустой квадрат
+                if (!back || !back.size) { done('store'); return; }
+                if (!Array.isArray(card.shots)) card.shots = [];
+                card.shots.push({ id: key, w: small.w, h: small.h });
+                save();
+                done('shot');
+              })
+              .catch(() => done('store'));
+          }).catch(next);
+        };
+
+        /** Взять как запись. */
+        const asAudio = () => {
+          probeAudio(file).then((secs) => {
+            if (secs === null) { done('bad'); return null; }
+            // Ничего прежнего не убираем: файл ложится своей дорожкой, а
+            // соседние записи и их продолжения остаются как были.
+            const slot = freeSlot(card);
+            if (!slot) { done('tracks'); return null; }
+            // Место могло быть занято раньше и освобождено крестиком —
+            // чужих кусков в нём остаться не должно
+            audioKeys(slot).slice(1).forEach((k) => {
+              AudioStore.del(k).catch(() => {});
+            });
+            return AudioStore.put(slot.id, file)
+              .then(() => AudioStore.get(slot.id))
+              .then((back) => {
+                if (!back || !back.size) { done('store'); return null; }
+                const len = Math.max(1, Math.round((secs || 0) * 100) / 100);
+                slot.audio = true;
+                slot.audioLen = len;
+                slot.parts = [{ len: len, top: 100, head: 0 }];
+                slot.peaks = [];
+                save();
+                done('audio');
+                // Рисунок волны считаем из самого файла — уже после
+                // того, как ответили: он к делу не относится, и ждать
+                // его незачем.
+                return computePeaks(file).then((peaks) => {
+                  if (!peaks || !peaks.length) return null;
+                  slot.peaks = peaks; save(); render();
+                  return null;
+                }).catch(() => null);
+              });
+          }).catch(() => done('bad'));
+        };
+
+        if (looksImage) { asShot(() => done('bad-image')); return; }
+        if (!looksAudio && !named) { asShot(asAudio); return; }
+        asAudio();
+      });
+    }
+
     input.addEventListener('change', () => {
-      const file = input.files && input.files[0];
-      input.value = '';                       // чтобы тот же файл выбрался снова
-      if (!file) return;
+      // Из медиатеки можно взять сразу несколько снимков — берём все,
+      // по очереди. Список копируем: поле сбрасываем тут же, иначе один
+      // и тот же файл во второй раз уже не выберется.
+      const files = Array.prototype.slice.call(input.files || []);
+      input.value = '';
+      if (!files.length) return;
       if (!AudioStore.available()) {
         alert('Хранилище недоступно — записи негде хранить.'); return;
       }
-      if (file.size > PICK_MAX_MB * 1024 * 1024) {
-        alert('Файл больше ' + PICK_MAX_MB + ' МБ. Такой не поместится: записи '
-          + 'хранятся на самом устройстве и целиком уезжают в файл обмена.');
-        return;
-      }
-      if (!file.size) { alert('Файл пустой.'); return; }
 
       busy(true);
-      probeAudio(file).then((secs) => {
-        if (secs === null) {
-          busy(false);
-          alert('Этот файл здесь не открывается. Подойдёт запись «Диктофона» '
-            + '(m4a), а также mp3, wav и aac.');
-          return null;
-        }
-        // Ничего прежнего не убираем: файл ложится своей дорожкой, а
-        // соседние записи и их продолжения остаются как были. Раньше
-        // здесь подчищались куски прежней записи — тогда новый файл
-        // занимал её место, теперь занимать нечего.
-        const slot = freeSlot(card);
-        if (!slot) { busy(false); return null; }
-        // Место могло быть уже занято раньше и освобождено крестиком —
-        // чужих кусков в нём остаться не должно
-        audioKeys(slot).slice(1).forEach((k) => {
-          AudioStore.del(k).catch(() => {});
+      const got = { shot: 0, audio: 0 };
+      const lost = [];
+      const step = (i) => {
+        if (i >= files.length) { finish(); return; }
+        takeOne(files[i]).then((how) => {
+          if (how === 'shot' || how === 'audio') got[how]++;
+          else lost.push(how);
+          step(i + 1);
         });
-        return AudioStore.put(slot.id, file)
-          .then(() => AudioStore.get(slot.id))
-          .then((back) => {
-            busy(false);
-            if (!back || !back.size) {
-              alert('Не удалось сохранить запись. Попробуйте ещё раз.');
-              return null;
-            }
-            const len = Math.max(1, Math.round((secs || 0) * 100) / 100);
-            slot.audio = true;
-            slot.audioLen = len;
-            slot.parts = [{ len: len, top: 100, head: 0 }];
-            slot.peaks = [];
-            save();
-            paintTracks(audioBar, card);
-            // Рисунок волны считаем из самого файла. На iPhone это
-            // работает: формат Apple Safari разбирает без труда.
-            return computePeaks(file).then((peaks) => {
-              if (!peaks || !peaks.length) return null;
-              slot.peaks = peaks; save();
-              paintTracks(audioBar, card);
-              return null;
-            }).catch(() => null);
-          });
-      }).catch(() => {
+      };
+
+      /** Один итог на всё: файлов бывает выбрано много. */
+      const finish = () => {
         busy(false);
-        alert('Не удалось загрузить файл.');
-      });
+        if (got.shot || got.audio) render();
+        if (!lost.length) return;
+        const one = files.length === 1;
+        const why = lost[0];
+        if (one) {
+          alert(why === 'big'
+              ? 'Файл больше ' + PICK_MAX_MB + ' МБ. Такой не поместится: он '
+                + 'хранится на самом устройстве и целиком уезжает в файл обмена.'
+            : why === 'empty' ? 'Файл пустой.'
+            : why === 'full' ? 'На карточке уже ' + SHOTS_MAX
+                + ' фотографий — больше не поместится.'
+            : why === 'tracks' ? 'На карточке уже ' + TRACKS_MAX + ' записи — '
+                + 'больше не поместится. Удалите одну крестиком на её дорожке.'
+            : why === 'store' ? 'Не удалось сохранить. Попробуйте ещё раз.'
+            : why === 'bad-image' ? 'Эту фотографию не удалось прочитать. '
+                + 'Попробуйте другую.'
+            : NOT_OURS);
+          return;
+        }
+        const lines = [];
+        if (got.shot) lines.push('Добавлено фотографий: ' + got.shot + '.');
+        if (got.audio) lines.push('Добавлено записей: ' + got.audio + '.');
+        lines.push('Не удалось взять: ' + lost.length + '.');
+        if (lost.indexOf('big') >= 0) {
+          lines.push('Часть файлов больше ' + PICK_MAX_MB + ' МБ.');
+        }
+        if (lost.indexOf('full') >= 0) {
+          lines.push('На карточке уже ' + SHOTS_MAX + ' фотографий.');
+        }
+        if (lost.indexOf('bad') >= 0 || lost.indexOf('bad-image') >= 0) {
+          lines.push('Часть файлов здесь не открывается.');
+        }
+        alert(lines.join('\n'));
+      };
+
+      step(0);
     });
 
     return el('span', { class: 'pick-box' }, [btn, input]);
@@ -7681,6 +7976,8 @@ body {
     // продолжения может быть несколько — убираем все.
     // Все дорожки карточки, а не только первая: их может быть до трёх
     allAudioKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+    // И снимки: они лежат там же и точно так же остались бы висеть
+    shotKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
     deck.cards = deck.cards.filter((c) => c.id !== card.id);
     if (view.name === 'read') {
       if (deck.cards.length === 0) {
@@ -7890,6 +8187,21 @@ body {
   const REMIND_FILE = 'affirmations-reminders.ics';
   const REMIND_MAX = 200;       // столько событий не стыдно положить в календарь
 
+  /**
+   * Адрес самой карточки — чтобы вернуться к ней из напоминания.
+   *
+   * Только для приложения, живущего по https: у файла, открытого
+   * двойным щелчком, адреса нет, и ссылка вела бы в никуда — лучше
+   * тогда обойтись вовсе без неё.
+   */
+  function cardLink(card) {
+    if (!card || !card.id) return '';
+    if (typeof location === 'undefined' || location.protocol !== 'https:') return '';
+    const base = String(location.href || '').split('?')[0].split('#')[0];
+    if (!base) return '';
+    return base + '?card=' + encodeURIComponent(card.id);
+  }
+
   /** Все карточки, отмеченные звёздочкой, — по порядку колод. */
   function remindCards() {
     const out = [];
@@ -7961,7 +8273,13 @@ body {
       put('DURATION:PT5M');
       put('RRULE:FREQ=DAILY;INTERVAL=' + K);
       put('SUMMARY:' + esc(text));
-      put('DESCRIPTION:' + esc(card.text));
+      // Ссылка на саму карточку. Уведомление рисует система, и это
+      // всегда строка текста — своей карточки в него не вложить. Зато
+      // от уведомления до настоящей карточки остаётся одно нажатие:
+      // открыть событие и нажать ссылку. Там уже и цвет, и голос.
+      const back = cardLink(card);
+      put('DESCRIPTION:' + esc(card.text + (back ? '\n\n' + back : '')));
+      if (back) put('URL:' + back);
       put('TRANSP:TRANSPARENT');       // время не считается занятым
       put('BEGIN:VALARM');
       put('ACTION:DISPLAY');
@@ -8056,6 +8374,277 @@ body {
       + 'поменяете карточки, его можно очистить целиком и добавить заново.';
   }
 
+  // ------------------------------------------------------------------
+  // Ряд миниатюр над карточкой.
+  //
+  // Стоит на бумаге, над самой карточкой: снимки — это про карточку, но
+  // не часть её текста, и лезть на него они не должны. Ряд едет вбок,
+  // поэтому число снимков ничем особо не ограничено: не поместились —
+  // прокрутил.
+  //
+  // Короткое нажатие открывает снимок целиком. Долгое — меню: удалить
+  // или отдать другой карточке. Так же, как и везде в приложении: одно
+  // движение — одно действие, и перепутать их нельзя.
+  // ------------------------------------------------------------------
+  const SHOT_HOLD = 600;        // сколько держать, чтобы открылось меню
+  const SHOT_SLOP = 8;          // палец поехал — значит, это прокрутка ряда
+
+  /** Показать снимок в узле: достаём из хранилища и отпускаем ссылку. */
+  function showShot(node, id, done) {
+    AudioStore.get(id).then((blob) => {
+      if (!blob || !blob.size) { if (done) done(false); return; }
+      let url = '';
+      try { url = URL.createObjectURL(blob); } catch (e) { if (done) done(false); return; }
+      node.setAttribute('src', url);
+      // Ссылку держим до ухода с экрана: пока картинка видна, она нужна
+      audioCleanup.push(() => { try { URL.revokeObjectURL(url); } catch (e) { /* уже */ } });
+      if (done) done(true);
+    }).catch(() => { if (done) done(false); });
+  }
+
+  /** Снимок на весь экран — как в галерее. */
+  function openShot(card, index) {
+    const shots = cardShots(card);
+    let at = Math.max(0, Math.min(index, shots.length - 1));
+    const wrap = el('div', { class: 'shot-view' });
+    const img = el('img', { class: 'shot-full', attrs: { alt: '' } });
+    const close = () => {
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      if (keyHandler) document.removeEventListener('keydown', keyHandler);
+    };
+    const paint = () => {
+      const s = shots[at];
+      if (!s) { close(); return; }
+      showShot(img, s.id);
+      count.textContent = shots.length > 1 ? (at + 1) + ' / ' + shots.length : '';
+    };
+    const step = (by) => {
+      if (shots.length < 2) return;
+      at = (at + by + shots.length) % shots.length;
+      paint();
+    };
+    const count = el('div', { class: 'shot-count' });
+    let keyHandler = null;
+    if (document.addEventListener) {
+      keyHandler = (ev) => {
+        if (ev.key === 'Escape') { close(); return; }
+        if (ev.key === 'ArrowRight') step(1);
+        if (ev.key === 'ArrowLeft') step(-1);
+      };
+      document.addEventListener('keydown', keyHandler);
+    }
+    wrap.appendChild(img);
+    wrap.appendChild(count);
+    wrap.appendChild(el('button', {
+      class: 'shot-close', attrs: { type: 'button', 'aria-label': 'Закрыть' },
+      text: '✕', on: { click: close },
+    }));
+    // Нажатие мимо снимка закрывает — как в галерее
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    paint();
+    document.body.appendChild(wrap);
+    return wrap;
+  }
+
+  /** Меню по удержанию: убрать снимок или отдать другой карточке. */
+  function shotMenu(card, shot, redraw) {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const drop = () => {
+      close();
+      if (!confirm('Удалить эту фотографию с карточки?')) return;
+      AudioStore.del(shot.id).catch(() => {});
+      card.shots = cardShots(card).filter((s) => s !== shot);
+      save();
+      if (typeof redraw === 'function') redraw();
+    };
+    const away = () => {
+      close();
+      pickCard({
+        head: 'Перенести фотографию',
+        from: card,
+        // У снимков предела на карточку почти нет — «занято» не бывает
+        full: () => false,
+        label: (c) => {
+          const n = cardShots(c).length;
+          return n ? 'фото: ' + n : 'без фото';
+        },
+        onPick: (to) => {
+          if (!Array.isArray(to.shots)) to.shots = [];
+          card.shots = cardShots(card).filter((s) => s !== shot);
+          to.shots.push(shot);          // сам файл не двигается: ключ тот же
+          save();
+          render();
+        },
+      });
+    };
+    wrap.appendChild(el('div', { class: 'sheet' }, [
+      el('h3', { text: 'Фотография' }),
+      el('div', { class: 'menu-list' }, [
+        el('button', { class: 'menu-item', attrs: { type: 'button' },
+          on: { click: away } }, [
+          el('span', { class: 'menu-sign', text: '→' }),
+          el('span', { class: 'menu-body' }, [
+            el('span', { class: 'menu-name', text: 'Перенести на другую карточку' }),
+          ]),
+        ]),
+        el('button', { class: 'menu-item', attrs: { type: 'button' },
+          on: { click: drop } }, [
+          el('span', { class: 'menu-sign', text: '✕' }),
+          el('span', { class: 'menu-body' }, [
+            el('span', { class: 'menu-name', text: 'Удалить фотографию' }),
+          ]),
+        ]),
+      ]),
+      el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Отмена', on: { click: close } }),
+      ]),
+    ]));
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+    return wrap;
+  }
+
+  /** Собрать ряд миниатюр карточки. */
+  function paintShots(strip, card) {
+    clear(strip);
+    const shots = cardShots(card);
+    const again = () => { paintShots(strip, card); };
+    shots.forEach((shot, k) => {
+      const img = el('img', { class: 'shot-thumb', attrs: { alt: '' } });
+      const cell = el('button', {
+        class: 'shot-cell',
+        attrs: { type: 'button',
+          'aria-label': 'Фотография ' + (k + 1)
+            + ': нажмите, чтобы открыть; удержите, чтобы убрать или перенести' },
+      }, [img]);
+      showShot(img, shot.id);
+
+      // Короткое нажатие — открыть, долгое — меню. Считаем сами, а не
+      // ждём click: на телефоне после удержания браузер шлёт и его тоже,
+      // и снимок открывался бы поверх только что открытого меню.
+      let timer = null, x0 = 0, y0 = 0, held = false, live = false;
+      const stop = () => { if (timer) { clearTimeout(timer); timer = null; } };
+      cell.addEventListener('pointerdown', (ev) => {
+        if (!ev.isPrimary) return;
+        live = true; held = false;
+        x0 = ev.clientX; y0 = ev.clientY;
+        stop();
+        timer = setTimeout(() => {
+          timer = null; held = true;
+          shotMenu(card, shot, again);
+        }, SHOT_HOLD);
+      });
+      cell.addEventListener('pointermove', (ev) => {
+        if (!live) return;
+        if (Math.abs(ev.clientX - x0) > SHOT_SLOP
+            || Math.abs(ev.clientY - y0) > SHOT_SLOP) { stop(); live = false; }
+      });
+      cell.addEventListener('pointerup', () => {
+        stop();
+        if (!live) return;
+        live = false;
+        if (!held) openShot(card, k);
+      });
+      cell.addEventListener('pointercancel', () => { stop(); live = false; });
+      // Нажатие само по себе ничего не делает: всё решает пара
+      // «нажал — отпустил» выше. Иначе на компьютере снимок открывался
+      // бы дважды.
+      cell.addEventListener('click', (ev) => {
+        if (ev.preventDefault) ev.preventDefault();
+      });
+      strip.appendChild(cell);
+    });
+  }
+
+  /**
+   * Выбрать карточку: сначала колода, потом карточка в ней.
+   *
+   * Общее окно для всего, что переносят с карточки на карточку. Пока
+   * таких дел два — голосовая запись и снимок, — и меняются в них только
+   * заголовок да подпись справа.
+   */
+  function pickCard(opts) {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const sheet = el('div', { class: 'sheet' });
+    const head = opts.head || 'Перенести';
+    const isFull = opts.full || (() => false);
+    const label = opts.label || (() => '');
+
+    const askDeck = () => {
+      clear(sheet);
+      sheet.appendChild(el('h3', { text: head }));
+      if (opts.hint) sheet.appendChild(el('p', { class: 'hint', text: opts.hint }));
+      const list = el('div', { class: 'card-list scroll' });
+      let any = false;
+      for (const sec of state.sections) {
+        for (const deck of sec.decks) {
+          if (!deck.cards.length) continue;
+          any = true;
+          const swatch = el('span', { class: 'mini-swatch' });
+          swatch.style.setProperty('background-color', deck.color);
+          swatch.style.setProperty('border-color', deck.color);
+          list.appendChild(el('button', {
+            class: 'mini pick', attrs: { type: 'button' },
+            on: { click: () => askCard(sec, deck) },
+          }, [
+            swatch,
+            el('span', { class: 'mini-text', text: sec.name + ' · ' + deck.name }),
+            el('span', { class: 'mini-num', text: cardsLabel(deck.cards.length) }),
+          ]));
+        }
+      }
+      if (any) sheet.appendChild(list);
+      else {
+        sheet.appendChild(el('p', { class: 'empty', text: 'Других карточек пока нет.' }));
+      }
+      sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Отмена', on: { click: close } }),
+      ]));
+    };
+
+    const askCard = (sec, deck) => {
+      clear(sheet);
+      sheet.appendChild(el('h3', { text: head }));
+      sheet.appendChild(el('p', { class: 'hint', text: sec.name + ' · ' + deck.name }));
+      const list = el('div', { class: 'card-list scroll' });
+      let any = false;
+      deck.cards.forEach((c) => {
+        if (c === opts.from) return;
+        any = true;
+        const full = isFull(c);
+        list.appendChild(el('button', {
+          class: 'mini pick' + (full ? ' full' : ''),
+          attrs: { type: 'button' },
+          on: { click: () => { if (full) return; close(); opts.onPick(c); } },
+        }, [
+          el('span', { class: 'mini-text', text: shortText(c.text) || 'Без текста' }),
+          el('span', { class: 'mini-num', text: full ? 'занято' : label(c) }),
+        ]));
+      });
+      if (any) sheet.appendChild(list);
+      else {
+        sheet.appendChild(el('p', { class: 'empty',
+          text: 'В этой колоде других карточек нет.' }));
+      }
+      sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Назад', on: { click: askDeck } }),
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+                       text: 'Отмена', on: { click: close } }),
+      ]));
+    };
+
+    askDeck();
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+    return wrap;
+  }
+
   /** Окно «Напоминания»: что показывать, когда и как это получить. */
   function openRemind() {
     const wrap = el('div', { class: 'modal' });
@@ -8085,7 +8674,12 @@ body {
 
       sheet.appendChild(el('p', { class: 'hint', text:
         'Отмеченные карточки будут приходить на экран iPhone и MacBook — '
-        + 'даже когда приложение закрыто. Идут по очереди, по кругу.' }));
+        + 'даже когда приложение закрыто. Идут по очереди, по кругу: '
+        + 'каждый раз одна, следующая.\n'
+        + 'Выглядит это как обычное уведомление: строка с текстом '
+        + 'аффирмации. Своей карточки в уведомление не вложить — его '
+        + 'рисует система. Зато внутри события лежит ссылка на саму '
+        + 'карточку: нажали — открылась она, с цветом и голосом.' }));
 
       // Что именно отмечено
       const list = el('div', { class: 'card-list scroll' });
@@ -8374,15 +8968,13 @@ body {
           for (const c of d.cards) audioSlots(c).forEach((sl) => withAudio.push(sl));
         }
       }
-      if (withAudio.length === 0) {
-        return Promise.resolve(JSON.stringify(Object.assign({}, state, {
-          kind: 'sync', syncedAt: Date.now(),
-          clipCount: 0, clipsExpected: 0, clips: {},
-        }), null, 2));
-      }
-
-      report('Собираю записи: 0 из ' + withAudio.length + '…', 'wait');
+      // Раньше здесь был короткий путь: нет записей — сразу отдаём файл.
+      // С появлением снимков он стал ловушкой: на карточках без голоса,
+      // но с фотографиями, файл уходил бы пустым. Теперь короткого пути
+      // нет, а пустой список записей просто ничего не собирает.
+      if (withAudio.length) report('Собираю записи: 0 из ' + withAudio.length + '…', 'wait');
       const clips = {};
+      const shots = {};
       let done = 0;
 
       const next = (i) => {
@@ -8408,7 +9000,31 @@ body {
           });
       };
 
-      return next(0).then(() => {
+      // Снимки собираем следом за звуком. Они уменьшены при загрузке,
+      // поэтому каждый весит около трёхсот килобайт: сотня фотографий
+      // добавит к файлу примерно тридцать мегабайт — много, но это
+      // ровно то, о чём и просили.
+      const grabShots = () => {
+        const all = [];
+        state.sections.forEach((sec) => sec.decks.forEach((deck) =>
+          deck.cards.forEach((c) => shotKeys(c).forEach((k) => all.push(k)))));
+        if (!all.length) return Promise.resolve();
+        report('Собираю фотографии: 0 из ' + all.length + '…', 'wait');
+        const one = (i) => {
+          if (i >= all.length) return Promise.resolve();
+          return AudioStore.get(all[i])
+            .then((blob) => (blob ? AudioStore.toText(blob) : null))
+            .then((text) => { if (text) shots[all[i]] = text; })
+            .catch(() => { /* снимок потерялся — берём что есть */ })
+            .then(() => {
+              report('Собираю фотографии: ' + (i + 1) + ' из ' + all.length + '…', 'wait');
+              return one(i + 1);
+            });
+        };
+        return one(0);
+      };
+
+      return next(0).then(grabShots).then(() => {
         clear(status);
         // Помечаем файл: что это и сколько записей внутри. Иначе
         // резервную копию (только текст) не отличить от файла обмена —
@@ -8422,6 +9038,7 @@ body {
           clipCount: got,
           clipsExpected: withAudio.length,
           clips: clips,
+          shots: shots,
         }), null, 2);
       });
     }
@@ -8749,9 +9366,12 @@ body {
       // которые только что появились, а у них новые идентификаторы
       const clips = (parsed && typeof parsed.clips === 'object' && parsed.clips)
         ? parsed.clips : {};
+      const inShots = (parsed && typeof parsed.shots === 'object' && parsed.shots)
+        ? parsed.shots : {};
       importClips(res.audioLinks, clips, {
         set text(v) { report(v, 'wait'); },
       }, res.added, (cards, clipsDone, info) => {
+        importShots(res.shotLinks, inShots, (v) => report(v, 'wait'), (shotsDone) => {
         clear(sheet);
         sheet.appendChild(el('h3', { text: 'Готово' }));
         const lines = [];
@@ -8761,6 +9381,7 @@ body {
         }
         lines.push('Добавлено карточек: ' + cards);
         lines.push('Перенесено записей: ' + clipsDone);
+        if (shotsDone) lines.push('Перенесено фотографий: ' + shotsDone);
         const inFile = (info && info.inFile) || 0;
         const kept = (info && info.kept) || 0;
         // Раньше итог сводился к «нового не оказалось», и было
@@ -8791,6 +9412,7 @@ body {
           el('button', { class: 'btn', attrs: { type: 'button' }, text: 'Закрыть',
                          on: { click: () => { close(); render(); } } }),
         ]));
+        }, mode);
       }, mode);
     }
 
@@ -9041,6 +9663,7 @@ body {
     // мёртвым грузом: карточки нет, а место занято.
     dropped.forEach((c) => {
       audioKeys(c).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+      shotKeys(c).forEach((k) => { AudioStore.del(k).catch(() => {}); });
     });
     return dropped.length;
   }
@@ -9074,11 +9697,82 @@ body {
     });
   }
 
+  /**
+   * Связать снимки из файла с карточкой у нас.
+   *
+   * Как и у голоса: в файле снимок лежит под своим ключом, у нас будет
+   * под новым. Список снимков карточки собираем заново — если в файле
+   * их нет вовсе, значит, и на карточке их быть не должно.
+   */
+  function linkShots(inCard, mine, out, existing) {
+    cardShots(inCard).forEach((s) => {
+      out.push({ from: s.id, card: mine, w: s.w, h: s.h, existing: !!existing });
+    });
+    // Список снимков здесь НЕ очищается, и это важно. При обычном
+    // «добавить» на карточке остаётся то, что уже снято на этом
+    // устройстве: файл дополняет, а не стирает. Чистит только «как в
+    // файле» — и делает это ниже, когда действительно кладёт своё.
+  }
+
+  /** Разложить снимки из файла по карточкам. */
+  function importShots(links, shots, say, onDone, mode) {
+    const all = links || [];
+    // «Как в файле» значит как в файле: у карточек, которые были и
+    // раньше, свои снимки уходят вместе с их содержимым, а на их место
+    // ложатся присланные. При обычном «добавить» своё остаётся.
+    if (mode === 'mirror') {
+      const seen = [];
+      all.forEach((l) => {
+        if (!l.existing || seen.indexOf(l.card) >= 0) return;
+        seen.push(l.card);
+        shotKeys(l.card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+        l.card.shots = [];
+      });
+    }
+    const todo = all.filter((l) => {
+      if (typeof shots[l.from] !== 'string') return false;
+      // Карточка уже была, и на ней есть свои снимки — при «добавить»
+      // не трогаем её вовсе: иначе одни и те же фотографии копились бы
+      // при каждой загрузке файла.
+      if (l.existing && mode !== 'mirror' && cardShots(l.card).length) return false;
+      return true;
+    });
+    let ok = 0;
+    const finish = () => { save(); render(); if (onDone) onDone(ok); };
+    if (!todo.length) { finish(); return; }
+    if (say) say('Переношу фотографии: 0 из ' + todo.length + '…');
+    const step = (i) => {
+      if (i >= todo.length) { finish(); return; }
+      const link = todo[i];
+      const cont = () => {
+        if (say) say('Переношу фотографии: ' + (i + 1) + ' из ' + todo.length + '…');
+        step(i + 1);
+      };
+      const blob = AudioStore.fromText(shots[link.from]);
+      if (!blob || !blob.size) { cont(); return; }
+      const key = shotKey();
+      AudioStore.put(key, blob)
+        .then(() => AudioStore.get(key))
+        .then((back) => {
+          // Отмечаем снимок на карточке только после того, как он
+          // прочитался обратно: иначе в списке был бы пустой квадрат
+          if (!back || !back.size) { cont(); return; }
+          if (!Array.isArray(link.card.shots)) link.card.shots = [];
+          link.card.shots.push({ id: key, w: link.w, h: link.h });
+          ok++;
+          cont();
+        })
+        .catch(() => cont());
+    };
+    step(0);
+  }
+
   function mergeState(incoming) {
     let added = 0;
     // Пары «идентификатор в файле → карточка у нас»: по ним потом
     // разложим голосовые записи
     const audioLinks = [];
+    const shotLinks = [];
     for (const inSec of incoming.sections) {
       let sec = state.sections.find((s) => s.name === inSec.name);
       if (!sec) {
@@ -9107,6 +9801,7 @@ body {
             // том, что в файле их видно. Теперь наличие своей записи
             // проверяется по самому хранилищу, а не по отметке.
             linkTracks(inCard, mine, audioLinks, true);
+            linkShots(inCard, mine, shotLinks, true);
             continue;
           }
           if (deck.cards.length >= LIMITS.cardsPerDeck) break;
@@ -9129,10 +9824,11 @@ body {
           byText.set(key, fresh);
           added++;
           linkTracks(inCard, fresh, audioLinks, false);
+          linkShots(inCard, fresh, shotLinks, false);
         }
       }
     }
-    return { added: added, audioLinks: audioLinks };
+    return { added: added, audioLinks: audioLinks, shotLinks: shotLinks };
   }
 
   /** Разложить голосовые записи из файла по карточкам. */
