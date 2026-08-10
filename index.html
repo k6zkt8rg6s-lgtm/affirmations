@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-3R9yTl8TO7ABKCWaf0bJJE80V4+/BOHdnwnOB2X0+bE=';
-               style-src 'sha256-RC+D0DUOh5wdkWgI/PwXR7zCDMA0hc8T40ZPoY4ZCyw=';
+               script-src 'sha256-odfisD9/sCXWyEzapcUf+4CZcaqwUbSx3AfoXsim1Gg=';
+               style-src 'sha256-9uUlk2O6h2TtranAOKI2kMxKVn4QuI9LUP3p4IFUPkA=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1043,6 +1043,7 @@ body {
 .shot-strip::-webkit-scrollbar { display: none; }
 .shot-strip:empty { display: none; }
 .shot-cell {
+  position: relative;
   flex: none;
   width: 46px;
   height: 46px;
@@ -1057,6 +1058,20 @@ body {
   -webkit-user-select: none;
 }
 .shot-cell:active { opacity: .75; }
+/* Снимок взят в руку: приподнялся и оторвался от ряда. Видно сразу, что
+   дальше его можно нести вбок, а не просто держать. */
+.shot-cell.took {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .28);
+  z-index: 2;
+  opacity: 1;
+}
+/* Приподнимаем саму картинку, а не ячейку: сдвиг ячейки занят — им
+   снимок несут вбок, и второй transform его бы затёр. */
+.shot-cell.took .shot-thumb {
+  transform: scale(1.12);
+  transition: transform .12s ease-out;
+}
+.shot-cell.moving { z-index: 2; }
 .shot-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* Снимок на весь экран. Чёрный фон и ничего лишнего: смотреть так
@@ -1074,6 +1089,32 @@ body {
      остаётся браузеру — увеличение двумя пальцами тут кстати. */
   touch-action: pan-y pinch-zoom;
 }
+/* Каретка со снимками: в ней три места — предыдущий, текущий и
+   следующий. Двигается только она, а снимки внутри стоят неподвижно.
+   Так же устроено перелистывание карточек в колоде, и это не совпадение:
+   одно движение руки должно ощущаться одинаково везде. */
+.shot-track {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+/* Каждое место стоит по центру экрана. Центрируется полями auto внутри
+   растянутой рамки — так сдвиг из кода остаётся чисто горизонтальным и
+   не спорит с центровкой. Соседние отодвинуты за края; в покое их не
+   видно. */
+.shot-track .shot-full {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  transform: translate3d(0, 0, 0);
+}
+
 .shot-full {
   max-width: 100%;
   max-height: 100%;
@@ -1657,7 +1698,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '09.08.2026, 21:19';
+  const BUILD = '10.08.2026, 08:52';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -8411,7 +8452,8 @@ body {
   // или отдать другой карточке. Так же, как и везде в приложении: одно
   // движение — одно действие, и перепутать их нельзя.
   // ------------------------------------------------------------------
-  const SHOT_HOLD = 600;        // сколько держать, чтобы открылось меню
+  const SHOT_HOLD = 600;        // сколько держать, чтобы взять снимок в руку
+  const SHOT_MOVE = 200;        // соседние расступаются и снимок встаёт
   const SHOT_SLOP = 8;          // палец поехал — значит, это прокрутка ряда
 
   /** Показать снимок в узле: достаём из хранилища и отпускаем ссылку. */
@@ -8427,28 +8469,96 @@ body {
     }).catch(() => { if (done) done(false); });
   }
 
-  /** Снимок на весь экран — как в галерее. */
+  /**
+   * Снимок на весь экран — как в галерее.
+   *
+   * Устроено так же, как перелистывание карточек в колоде, и намеренно:
+   * рука уже знает это движение. Три снимка лежат в одной каретке —
+   * предыдущий, текущий и следующий, — и двигается только она. Соседние
+   * стоят за краями экрана, поэтому при свайпе следующий заходит из-за
+   * края вслед за уходящим, а не подменяется рывком.
+   */
   function openShot(card, index) {
     const shots = cardShots(card);
+    const many = shots.length > 1;
     let at = Math.max(0, Math.min(index, shots.length - 1));
     const wrap = el('div', { class: 'shot-view' });
-    const img = el('img', { class: 'shot-full', attrs: { alt: '' } });
+    const count = el('div', { class: 'shot-count' });
+
+    // Три места в каретке: слева, посередине, справа
+    const slide = () => el('img', { class: 'shot-full', attrs: { alt: '' } });
+    const left = slide(), mid = slide(), right = slide();
+    const track = el('div', { class: 'shot-track' }, many ? [left, mid, right] : [mid]);
+
     const close = () => {
       if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
       if (keyHandler) document.removeEventListener('keydown', keyHandler);
     };
+
+    /**
+     * Насколько соседний снимок отстоит от текущего.
+     *
+     * Ширина окна плюс просвет: соседний целиком за краем, и в покое его
+     * не видно. Меряем при обращении, а не при сборке: пока окно не
+     * вставлено в страницу, ширины у него нет.
+     */
+    const gap = () => ((wrap.clientWidth
+      || (typeof window !== 'undefined' && window.innerWidth) || 360) + 24);
+
+    const seat = () => {
+      if (!many) return;
+      const g = gap();
+      left.style.setProperty('transform', 'translate3d(' + (-g) + 'px,0,0)');
+      right.style.setProperty('transform', 'translate3d(' + g + 'px,0,0)');
+    };
+
+    /** Сдвинуть каретку. ms = 0 — сразу, без перехода: точно за пальцем. */
+    let easing = '';
+    const place = (px, ms) => {
+      const move = ms ? 'transform ' + ms + 'ms ' + SLIDE_EASE : 'none';
+      if (move !== easing) { easing = move; track.style.setProperty('transition', move); }
+      track.style.setProperty('transform', 'translate3d(' + px.toFixed(1) + 'px,0,0)');
+    };
+
     const paint = () => {
       const s = shots[at];
       if (!s) { close(); return; }
-      showShot(img, s.id);
-      count.textContent = shots.length > 1 ? (at + 1) + ' / ' + shots.length : '';
+      showShot(mid, s.id);
+      if (many) {
+        const n = shots.length;
+        showShot(left, shots[(at - 1 + n) % n].id);
+        showShot(right, shots[(at + 1) % n].id);
+      }
+      count.textContent = many ? (at + 1) + ' / ' + shots.length : '';
+      seat();
     };
-    const step = (by) => {
-      if (shots.length < 2) return;
-      at = (at + by + shots.length) % shots.length;
-      paint();
+
+    // Перелистывание — сдвиг всей каретки ровно на один шаг. Содержимое
+    // подменяется только ПОСЛЕ конца хода: раньше соседний ещё не на
+    // месте, и подмена была бы видна скачком.
+    let sliding = false;
+    const step = (by, fast) => {
+      if (!many || sliding) return;
+      sliding = true;
+      const ms = fast ? SLIDE_FAST : SLIDE_MS;
+      place(-by * gap(), ms);
+      let settled = false;
+      const land = () => {
+        if (settled) return;
+        settled = true;
+        sliding = false;
+        at = (at + by + shots.length) % shots.length;
+        place(0, 0);
+        paint();
+      };
+      if (track.addEventListener) {
+        track.addEventListener('transitionend', land, { once: true });
+      }
+      // Таймер — страховка на случай, когда перехода нет вовсе:
+      // свёрнутая вкладка или отключённая анимация в настройках телефона
+      setTimeout(land, ms + 60);
     };
-    const count = el('div', { class: 'shot-count' });
+
     let keyHandler = null;
     if (document.addEventListener) {
       keyHandler = (ev) => {
@@ -8458,7 +8568,8 @@ body {
       };
       document.addEventListener('keydown', keyHandler);
     }
-    wrap.appendChild(img);
+
+    wrap.appendChild(track);
     wrap.appendChild(count);
     wrap.appendChild(el('button', {
       class: 'shot-close', attrs: { type: 'button', 'aria-label': 'Закрыть' },
@@ -8466,24 +8577,19 @@ body {
     }));
 
     // ----------------------------------------------------------------
-    // Листание открытого снимка: пальцем, трекпадом и мышью.
+    // Листание: пальцем, трекпадом и мышью.
     //
-    // Все три жеста делают одно и то же и потому считаются одинаково —
-    // порогом и скоростью, теми же, что и у карточек. Список замкнут в
+    // Все три жеста делают одно и то же и считаются одинаково — тем же
+    // порогом и той же скоростью, что и у карточек. Список замкнут в
     // круг: с последнего снимка вперёд попадаешь на первый, с первого
     // назад — на последний.
     // ----------------------------------------------------------------
     let id = null, x0 = 0, y0 = 0, side = null, dx = 0;
     let tPrev = 0, xPrev = 0, speed = 0;
-    /** Снимок идёт за пальцем: видно, что жест поймался. */
-    const drag = (px, ms) => {
-      img.style.setProperty('transition',
-        ms ? 'transform ' + ms + 'ms ' + SLIDE_EASE : 'none');
-      img.style.setProperty('transform', 'translate3d(' + px.toFixed(1) + 'px,0,0)');
-    };
     wrap.addEventListener('pointerdown', (ev) => {
-      if (!ev.isPrimary || shots.length < 2) return;
-      if (ev.target && ev.target !== wrap && ev.target !== img) return;  // крестик
+      if (!ev.isPrimary || !many || sliding) return;
+      if (ev.target && ev.target !== wrap && ev.target !== mid
+          && ev.target !== track) return;              // крестик не трогаем
       id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
       side = null; dx = 0; speed = 0;
       tPrev = Date.now(); xPrev = ev.clientX;
@@ -8493,7 +8599,6 @@ body {
       const mx = ev.clientX - x0, my = ev.clientY - y0;
       if (side === null) {
         if (Math.abs(mx) < SWIPE_START && Math.abs(my) < SWIPE_START) return;
-        // Вертикальное движение — не наше: пусть остаётся про запас
         side = Math.abs(mx) >= Math.abs(my) ? 'x' : 'y';
         if (side === 'x' && wrap.setPointerCapture) {
           try { wrap.setPointerCapture(id); } catch (e) { /* не поддержано */ }
@@ -8507,19 +8612,19 @@ body {
         tPrev = now; xPrev = ev.clientX;
       }
       dx = mx;
-      drag(dx, 0);
+      if (!sliding) place(dx, 0);
     });
     const letGo = (ev) => {
       if (ev.pointerId !== id) return;
       id = null;
       if (side !== 'x') return;
       if (swipePassed(Math.abs(dx), speed)) {
-        // Влево — следующий, вправо — предыдущий, как при листании карточек
+        // Каретка не возвращается на место, а продолжает движение с той
+        // точки, где её отпустили
         step(dx < 0 ? 1 : -1);
-        drag(0, 0);
         return;
       }
-      drag(0, 160);                       // не дотянули — снимок вернулся
+      place(0, Math.round(SLIDE_MS * 0.7));   // не дотянули — мягко назад
     };
     wrap.addEventListener('pointerup', letGo);
     wrap.addEventListener('pointercancel', letGo);
@@ -8530,7 +8635,7 @@ body {
     // при листании карточек.
     let acc = 0, accTimer = null;
     wrap.addEventListener('wheel', (ev) => {
-      if (shots.length < 2) return;
+      if (!many) return;
       const push = padSide(ev);
       if (!push) return;
       const force = Math.abs(push);
@@ -8538,25 +8643,33 @@ body {
       acc += push;
       if (accTimer) clearTimeout(accTimer);
       accTimer = setTimeout(() => { accTimer = null; acc = 0; }, 180);
-      if (Math.abs(acc) < 90) { drag(Math.max(-70, Math.min(70, -acc)), 0); return; }
+      if (Math.abs(acc) < 90) {
+        if (!sliding) place(Math.max(-70, Math.min(70, -acc)), 0);
+        return;
+      }
       const dir = acc > 0 ? 1 : -1;
       acc = 0;
       if (accTimer) { clearTimeout(accTimer); accTimer = null; }
       padLock(force);
       step(dir);
-      drag(0, 0);
     }, { passive: true });
 
     // Нажатие мимо снимка закрывает — как в галерее. Но только если это
     // было именно нажатие, а не конец жеста: иначе каждое пролистывание
     // закрывало бы просмотр.
     wrap.addEventListener('click', (ev) => {
-      if (ev.target !== wrap) return;
+      if (ev.target !== wrap && ev.target !== track) return;
       if (Math.abs(dx) > 4) { dx = 0; return; }
       close();
     });
+
     paint();
+    place(0, 0);
     document.body.appendChild(wrap);
+    // Со следующего кадра ширина окна известна — сажаем соседей точно
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => { seat(); });
+    }
     return wrap;
   }
 
@@ -8620,48 +8733,156 @@ body {
     return wrap;
   }
 
-  /** Собрать ряд миниатюр карточки. */
+  /**
+   * Собрать ряд миниатюр карточки.
+   *
+   * Одно нажатие делает три разных дела, и различаются они движением:
+   *   короткое нажатие          — открыть снимок целиком;
+   *   удержание и отпускание    — меню: убрать или отдать другой карточке;
+   *   удержание и движение вбок — поменять порядок в ряду.
+   *
+   * Порядок именно такой, как на самом телефоне: сначала снимок «берётся
+   * в руку» — приподнимается, — и уже потом решается, что с ним делать.
+   * Пока снимок не взят, движение пальцем прокручивает ряд, как обычно.
+   */
   function paintShots(strip, card) {
     clear(strip);
     const shots = cardShots(card);
     const again = () => { paintShots(strip, card); };
+    const cells = [];
+
     shots.forEach((shot, k) => {
       const img = el('img', { class: 'shot-thumb', attrs: { alt: '' } });
       const cell = el('button', {
         class: 'shot-cell',
         attrs: { type: 'button',
           'aria-label': 'Фотография ' + (k + 1)
-            + ': нажмите, чтобы открыть; удержите, чтобы убрать или перенести' },
+            + ': нажмите, чтобы открыть; удержите, чтобы переставить, '
+            + 'убрать или перенести' },
       }, [img]);
       showShot(img, shot.id);
+      cells.push(cell);
 
-      // Короткое нажатие — открыть, долгое — меню. Считаем сами, а не
-      // ждём click: на телефоне после удержания браузер шлёт и его тоже,
-      // и снимок открывался бы поверх только что открытого меню.
-      let timer = null, x0 = 0, y0 = 0, held = false, live = false;
-      const stop = () => { if (timer) { clearTimeout(timer); timer = null; } };
+      // Считаем сами, а не ждём click: на телефоне после удержания
+      // браузер шлёт и его тоже, и снимок открывался бы поверх меню.
+      let timer = null, x0 = 0, y0 = 0;
+      let live = false;      // палец на миниатюре
+      let took = false;      // снимок «взят в руку»: удержание сработало
+      let moved = false;     // и его уже понесли
+      let dx = 0, to = k;
+      let step = 0, mids = [];
+
+      const stopTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+      /** Снять все сдвиги и пометки ряда. */
+      const bare = () => {
+        cells.forEach((c) => {
+          c.style.setProperty('transition', 'none');
+          c.style.setProperty('transform', 'translate3d(0,0,0)');
+          c.className = (c.className || '').replace(/ moving\b/g, '');
+          c.className = (c.className || '').replace(/ took\b/g, '');
+        });
+        strip.style.removeProperty('touch-action');
+      };
+
+      /** Взять снимок в руку: приподнять и приготовиться нести. */
+      const take = () => {
+        took = true; to = k;
+        const boxes = cells.map(rectOf);
+        step = boxes[k] ? boxes[k].width : 0;
+        // Середины меряем один раз, до первого сдвига: дальше миниатюры
+        // едут, и мерить их заново значило бы сравнивать с тем, что само
+        // движется — снимок скакал бы туда-обратно у самой границы.
+        mids = boxes.map((b) => b.left + b.width / 2);
+        cell.className += ' took';
+        // Пока несём, ряд прокручиваться не должен: иначе одно движение
+        // означало бы сразу два разных дела
+        strip.style.setProperty('touch-action', 'none');
+      };
+
+      /** Куда встанет снимок, если отпустить сейчас. */
+      const aim = (by) => {
+        const centre = (mids[k] || 0) + by;
+        let j = k;
+        while (j > 0 && centre < mids[j - 1]) j--;
+        while (j < cells.length - 1 && centre > mids[j + 1]) j++;
+        return j;
+      };
+
+      const draw = (by) => {
+        cell.style.setProperty('transition', 'none');
+        cell.style.setProperty('transform', 'translate3d(' + by + 'px,0,0)');
+        const want = aim(by);
+        if (want === to) return;
+        to = want;
+        // Расступаются только те, через кого снимок прошёл. Остальным
+        // ставим нулевой сдвиг: иначе прежний остался бы висеть.
+        cells.forEach((c, j) => {
+          if (j === k) return;
+          let shift = 0;
+          if (j > k && j <= to) shift = -step;
+          else if (j < k && j >= to) shift = step;
+          c.style.setProperty('transition', 'transform ' + SHOT_MOVE + 'ms ' + SLIDE_EASE);
+          c.style.setProperty('transform', 'translate3d(' + shift + 'px,0,0)');
+        });
+      };
+
+      /** Отпустили: довести до места и переписать порядок. */
+      const land = () => {
+        const done = to;
+        cell.className += ' moving';
+        cell.style.setProperty('transition', 'transform ' + SHOT_MOVE + 'ms ' + SLIDE_EASE);
+        cell.style.setProperty('transform',
+          'translate3d(' + ((done - k) * step) + 'px,0,0)');
+        setTimeout(() => {
+          bare();
+          if (done !== k) {
+            const list = cardShots(card);
+            const it = list.splice(k, 1)[0];
+            list.splice(done, 0, it);
+            card.shots = list;
+            save();
+          }
+          again();
+        }, SHOT_MOVE);
+      };
+
       cell.addEventListener('pointerdown', (ev) => {
         if (!ev.isPrimary) return;
-        live = true; held = false;
+        live = true; took = false; moved = false; dx = 0; to = k;
         x0 = ev.clientX; y0 = ev.clientY;
-        stop();
-        timer = setTimeout(() => {
-          timer = null; held = true;
-          shotMenu(card, shot, again);
-        }, SHOT_HOLD);
+        stopTimer();
+        timer = setTimeout(() => { timer = null; take(); }, SHOT_HOLD);
       });
       cell.addEventListener('pointermove', (ev) => {
         if (!live) return;
-        if (Math.abs(ev.clientX - x0) > SHOT_SLOP
-            || Math.abs(ev.clientY - y0) > SHOT_SLOP) { stop(); live = false; }
+        const mx = ev.clientX - x0, my = ev.clientY - y0;
+        if (!took) {
+          // Ещё не взяли — значит, это прокрутка ряда, а не наше дело
+          if (Math.abs(mx) > SHOT_SLOP || Math.abs(my) > SHOT_SLOP) {
+            stopTimer(); live = false;
+          }
+          return;
+        }
+        if (!moved && Math.abs(mx) < 3) return;
+        moved = true;
+        if (ev.cancelable && ev.preventDefault) ev.preventDefault();
+        dx = mx;
+        draw(dx);
       });
       cell.addEventListener('pointerup', () => {
-        stop();
+        stopTimer();
         if (!live) return;
         live = false;
-        if (!held) openShot(card, k);
+        if (took && moved) { land(); return; }
+        if (took) { bare(); shotMenu(card, shot, again); return; }
+        openShot(card, k);
       });
-      cell.addEventListener('pointercancel', () => { stop(); live = false; });
+      cell.addEventListener('pointercancel', () => {
+        stopTimer();
+        if (live && took) bare();
+        live = false;
+      });
       // Нажатие само по себе ничего не делает: всё решает пара
       // «нажал — отпустил» выше. Иначе на компьютере снимок открывался
       // бы дважды.
