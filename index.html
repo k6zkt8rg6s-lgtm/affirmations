@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-odfisD9/sCXWyEzapcUf+4CZcaqwUbSx3AfoXsim1Gg=';
-               style-src 'sha256-9uUlk2O6h2TtranAOKI2kMxKVn4QuI9LUP3p4IFUPkA=';
+               script-src 'sha256-JJ0bkZaXIaKd1m2Zs3YRO0cKpo0l8hgdLX66chj4WyA=';
+               style-src 'sha256-fYFRPU/fn9Xzr1vpzidAQI6EeSlNaDRzd1g+Wr/vKqY=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1027,6 +1027,36 @@ body {
    карточку, но не часть её текста, и лезть на него они не должны.
    Ряд едет вбок, поэтому снимков может быть сколько угодно: не
    поместились — прокрутил пальцем. */
+/* Обёртка ряда: в ней едет каретка из трёх полос — предыдущей, текущей
+   и следующей. Место под ряд держится, пока снимки есть хоть у одной из
+   трёх карточек: иначе на подъезде соседней экран подпрыгивал бы. */
+.shot-deck {
+  position: relative;
+  height: 0;
+  overflow: hidden;
+  overflow: clip;
+}
+.shot-deck.open { height: 58px; }
+.shot-line {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+/* Соседние полосы стоят за краями экрана — их сдвиг ставит код */
+.shot-line > .shot-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+}
+/* Соседние ряды неживые: пока карточка не встала на место, её
+   снимки не трогают. Имя у класса своё, не общее «side»: тем
+   помечены соседние карточки, и путать эти два не надо. */
+.shot-strip.still { pointer-events: none; }
+
 .shot-strip {
   display: flex;
   gap: 6px;
@@ -1698,7 +1728,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '10.08.2026, 08:52';
+  const BUILD = '10.08.2026, 09:19';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -5226,8 +5256,22 @@ body {
     // нажатию на скрепку — в покое её нет вовсе.
     const linkRow = el('div', { class: 'link-row' });
     // Ряд миниатюр над карточкой. Пустой — его не видно вовсе.
+    // Миниатюры едут вместе с карточкой.
+    //
+    // Раньше ряд стоял на месте: карточка уезжала, а её снимки
+    // оставались висеть над новой — и пропадали уже потом, отдельным
+    // рывком. Теперь у миниатюр своя каретка, устроенная так же, как
+    // карточная, и двигаются они одним и тем же сдвигом. Снимки уходят
+    // вместе со своей карточкой, а снимки следующей приезжают вместе с
+    // ней.
     const shotStrip = el('div', { class: 'shot-strip' });
     paintShots(shotStrip, card);
+    const shotLine = el('div', { class: 'shot-line' });
+    const shotSide = (c) => {
+      const strip = el('div', { class: 'shot-strip still' });
+      paintStillShots(strip, c);
+      return strip;
+    };
     const bigText = el('div', { class: 'bigcard-text' });
     paintText(bigText, card.text, card.marks);
     dressText(bigText, card);
@@ -5282,6 +5326,17 @@ body {
     const loop = total > 1;
     const before = loop ? neighbour(deck.cards[(i - 1 + total) % total]) : null;
     const after = loop ? neighbour(deck.cards[(i + 1) % total]) : null;
+    const shotBefore = loop ? shotSide(deck.cards[(i - 1 + total) % total]) : null;
+    const shotAfter = loop ? shotSide(deck.cards[(i + 1) % total]) : null;
+    if (shotBefore) shotLine.appendChild(shotBefore);
+    if (shotAfter) shotLine.appendChild(shotAfter);
+    shotLine.appendChild(shotStrip);
+    // Место под ряд держим, если снимки есть хоть у одной из трёх: иначе
+    // на подъезде соседней экран подпрыгивал бы на высоту ряда.
+    const anyShots = [card, deck.cards[(i - 1 + total) % total],
+      deck.cards[(i + 1) % total]].some((c) => c && cardShots(c).length);
+    const shotDeck = el('div', { class: 'shot-deck' + (anyShots ? ' open' : '') },
+      [shotLine]);
     if (before) track.appendChild(before);
     if (after) track.appendChild(after);
     track.appendChild(big);
@@ -5325,6 +5380,17 @@ body {
         after.style.setProperty('transform',
           'translate(-50%, -50%) translate3d(' + gap + 'px, 0, 0)');
       }
+      // Полосы миниатюр стоят на том же расстоянии, что и карточки:
+      // тогда снимки приезжают ровно вместе со своей карточкой, а не
+      // раньше и не позже
+      if (shotBefore) {
+        shotBefore.style.setProperty('transform',
+          'translate3d(' + (-gap) + 'px, 0, 0)');
+      }
+      if (shotAfter) {
+        shotAfter.style.setProperty('transform',
+          'translate3d(' + gap + 'px, 0, 0)');
+      }
     };
 
     /**
@@ -5341,12 +5407,15 @@ body {
       // стиль — это работа для браузера ровно в тот момент, когда он
       // должен рисовать кадр.
       const move = ms ? 'transform ' + ms + 'ms ' + SLIDE_EASE : 'none';
+      const shift = 'translate3d(' + px.toFixed(1) + 'px, 0, 0)';
       if (move !== easing) {
         easing = move;
         track.style.setProperty('transition', move);
+        shotLine.style.setProperty('transition', move);
       }
-      track.style.setProperty('transform',
-        'translate3d(' + px.toFixed(1) + 'px, 0, 0)');
+      track.style.setProperty('transform', shift);
+      // Ряд миниатюр едет тем же сдвигом: он привязан к карточке
+      shotLine.style.setProperty('transform', shift);
     };
     seat();
     place(0, 0);
@@ -5611,7 +5680,7 @@ body {
         }),
       ]),
       linkRow,
-      shotStrip,
+      shotDeck,
       // Какая карточка из скольких. Отдельной строкой и по центру —
       // прямо над серединой карточки, а не в ряду кнопок: там он стоял
       // между крестиком и кнопками и читался как ещё одна кнопка.
@@ -8485,10 +8554,18 @@ body {
     const wrap = el('div', { class: 'shot-view' });
     const count = el('div', { class: 'shot-count' });
 
-    // Три места в каретке: слева, посередине, справа
+    // Три места в каретке: слева, посередине, справа.
+    //
+    // Меняются местами сами узлы, а не картинки в них. Это важно: снимок
+    // достаётся из хранилища не мгновенно, и если после хода подменять
+    // содержимое, то доли секунды в середине висит прежняя картинка —
+    // ровно та, от которой только что ушли. Выглядит как вспышка. А так
+    // в середину встаёт тот узел, который уже виден с картинкой, и
+    // догружать приходится только дальний — он за краем экрана.
     const slide = () => el('img', { class: 'shot-full', attrs: { alt: '' } });
-    const left = slide(), mid = slide(), right = slide();
-    const track = el('div', { class: 'shot-track' }, many ? [left, mid, right] : [mid]);
+    const a1 = slide(), a2 = slide(), a3 = slide();
+    let left = a1, mid = a2, right = a3;
+    const track = el('div', { class: 'shot-track' }, many ? [a1, a2, a3] : [a2]);
 
     const close = () => {
       if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
@@ -8506,6 +8583,10 @@ body {
       || (typeof window !== 'undefined' && window.innerWidth) || 360) + 24);
 
     const seat = () => {
+      // Середину ставим на ноль явно, а не полагаемся на то, что её
+      // никто не двигал: после хода узлы меняются ролями, и серединой
+      // становится тот, что только что стоял за краем экрана.
+      mid.style.setProperty('transform', 'translate3d(0,0,0)');
       if (!many) return;
       const g = gap();
       left.style.setProperty('transform', 'translate3d(' + (-g) + 'px,0,0)');
@@ -8520,6 +8601,9 @@ body {
       track.style.setProperty('transform', 'translate3d(' + px.toFixed(1) + 'px,0,0)');
     };
 
+    const tell = () => {
+      count.textContent = many ? (at + 1) + ' / ' + shots.length : '';
+    };
     const paint = () => {
       const s = shots[at];
       if (!s) { close(); return; }
@@ -8529,7 +8613,7 @@ body {
         showShot(left, shots[(at - 1 + n) % n].id);
         showShot(right, shots[(at + 1) % n].id);
       }
-      count.textContent = many ? (at + 1) + ' / ' + shots.length : '';
+      tell();
       seat();
     };
 
@@ -8548,8 +8632,25 @@ body {
         settled = true;
         sliding = false;
         at = (at + by + shots.length) % shots.length;
+        // Переставляем сами узлы по кругу: тот, что подъехал, становится
+        // серединой — с уже готовой картинкой. Каретка возвращается в
+        // ноль, и вместе эти два действия дают ту же самую точку на
+        // экране, только теперь в середине нужный снимок.
+        const n = shots.length;
+        let far = null, farAt = 0;
+        if (by > 0) {
+          far = left; left = mid; mid = right; right = far;
+          farAt = (at + 1) % n;
+        } else {
+          far = right; right = mid; mid = left; left = far;
+          farAt = (at - 1 + n) % n;
+        }
         place(0, 0);
-        paint();
+        seat();
+        tell();
+        // Догружаем только дальний — он за краем экрана, и его подмены
+        // не видно
+        if (shots[farAt]) showShot(far, shots[farAt].id);
       };
       if (track.addEventListener) {
         track.addEventListener('transitionend', land, { once: true });
@@ -8731,6 +8832,25 @@ body {
     wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
     document.body.appendChild(wrap);
     return wrap;
+  }
+
+  /**
+   * Ряд миниатюр соседней карточки: тот же вид, но неживой.
+   *
+   * Нужен, чтобы подъезжающая при свайпе карточка приходила уже со
+   * своими снимками. Нажимать в нём нечего: пока карточка не встала на
+   * место, её снимки не трогают, а как встанет — экран собирается
+   * заново, и ряд будет уже настоящий.
+   */
+  function paintStillShots(strip, card) {
+    clear(strip);
+    cardShots(card).forEach((shot) => {
+      const img = el('img', { class: 'shot-thumb', attrs: { alt: '' } });
+      const cell = el('div', { class: 'shot-cell', attrs: { 'aria-hidden': 'true' } },
+        [img]);
+      showShot(img, shot.id);
+      strip.appendChild(cell);
+    });
   }
 
   /**
