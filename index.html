@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-JJ0bkZaXIaKd1m2Zs3YRO0cKpo0l8hgdLX66chj4WyA=';
-               style-src 'sha256-fYFRPU/fn9Xzr1vpzidAQI6EeSlNaDRzd1g+Wr/vKqY=';
+               script-src 'sha256-dTKNHxiOwlvnT76snEZHLSVTERBLc/3+4SMh4Suy/jg=';
+               style-src 'sha256-wrOyOR/p0LIsYzud5bsChL+diKAU0klKVGh9VVN0qCo=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -835,6 +835,13 @@ body {
   -webkit-user-select: text;
   user-select: text;
 }
+/* Поле названия — в одну строку. Растёт само, если текст длинный, но
+   в покое занимает ровно строку: это заголовок, а не второй текст. */
+.rich-input.one {
+  min-height: 46px;
+  font-size: 17px;
+  font-weight: 600;
+}
 .rich-input:focus { outline: 2px solid var(--ink-soft); outline-offset: 1px; }
 /* Пустое поле не должно схлопываться в полоску */
 .rich-input:empty::before { content: ''; display: inline-block; }
@@ -1193,6 +1200,10 @@ body {
 
 /* Колода, в которую переносим. Список выбора — те же строки, но нажатие
    у них другое, поэтому и вид чуть иной: без номера слева. */
+/* В списке строка показывает название, если оно есть. Чуть плотнее
+   обычного текста: так видно, что это заголовок карточки. */
+.mini-text.head { font-weight: 600; }
+
 .mini.pick { cursor: pointer; }
 .mini.pick .mini-num { color: var(--ink-soft); font-size: 13px; margin-left: auto; }
 .mini.pick.full { opacity: .45; cursor: default; }
@@ -1328,6 +1339,27 @@ body {
     repeating-linear-gradient(90deg, rgba(0,0,0,.018) 0 1px, transparent 1px 3px),
     repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px 4px);
 }
+/* Название карточки — на самом верху, отдельной строкой.
+ *
+ * Крупное и того же цвета, что текст, без черты снизу: разделяет их
+ * только воздух. Выравнивание и цвет у названия свои — их ставит код,
+ * по тому, что выбрано в поле названия. Занимает столько строк, сколько
+ * нужно; текст аффирмации от этого не двигается — он стоит в середине
+ * того, что осталось.
+ */
+.bigcard-head {
+  flex: none;
+  font: 700 clamp(15px, 3.6vw, 19px)/1.25 -apple-system, BlinkMacSystemFont,
+        "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+  color: #2B2408;
+  letter-spacing: -.2px;
+  word-break: break-word;
+  white-space: pre-wrap;
+  margin-bottom: 10px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* Середина карточки — всё место, кроме полосы записей. Текст стоит в
    ней по центру; когда записей нет, это вся карточка, и выглядит она
    в точности как прежде.
@@ -1728,7 +1760,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '10.08.2026, 09:19';
+  const BUILD = '11.08.2026, 20:57';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -1738,6 +1770,7 @@ body {
     sectionName: 60,
     deckName: 60,
     cardText: 2000,
+    cardHead: 200,       // название карточки: строка, а не второй текст
     sections: 50,
     decksPerSection: 100,
     cardsPerDeck: 500,
@@ -2645,6 +2678,13 @@ body {
             // Отметка «показывать в напоминаниях» — вторая, отдельная
             // от избранного: у них разный смысл и разные списки.
             remind: c.remind === true,
+            // Название карточки. Своё поле со своим оформлением: жирный,
+            // цвет и выравнивание у него отдельные от текста аффирмации.
+            head: clampStr(c.head, LIMITS.cardHead),
+            headMarks: sanitizeMarks(c.headMarks,
+              clampStr(c.head, LIMITS.cardHead).length),
+            headAlign: sanitizeAlign(c.headAlign),
+            headInk: sanitizeInk(c.headInk),
             audio: c.audio === true,      // сама запись лежит в IndexedDB
             // Длину записи держим рядом с карточкой. Спрашивать её у
             // самого файла ненадёжно: браузеры часто отдают Infinity для
@@ -3193,7 +3233,10 @@ body {
                                     deckId: f.deckId, index: f.index }) },
           }, [
             sw,
-            paintText(el('span', { class: 'mini-text' }), f.card.text, f.card.marks),
+            f.card.head
+              ? paintText(el('span', { class: 'mini-text head' }),
+                          f.card.head, f.card.headMarks)
+              : paintText(el('span', { class: 'mini-text' }), f.card.text, f.card.marks),
             f.card.audio ? el('span', { class: 'mini-audio', text: '♪' }) : null,
           ]);
 
@@ -3436,7 +3479,11 @@ body {
       }, [
         el('span', { class: 'mini-num', text: String(i + 1) }),
         swatch,
-        paintText(el('span', { class: 'mini-text' }), card.text, card.marks),
+        // Есть название — показываем его: искать нужную карточку глазами
+        // по названию проще, чем по началу текста. Нет — как и было.
+        card.head
+          ? paintText(el('span', { class: 'mini-text head' }), card.head, card.headMarks)
+          : paintText(el('span', { class: 'mini-text' }), card.text, card.marks),
         card.audio ? el('span', { class: 'mini-audio', text: '♪' }) : null,
       ]);
 
@@ -4089,11 +4136,30 @@ body {
    * созданной карточки, до сохранения, — а туда значение приходит прямо
    * из окна правки.
    */
-  function dressText(node, card) {
+  /**
+   * Строка названия на карточке — или ничего, если названия нет.
+   *
+   * Отдельной строкой на самом верху: своё выравнивание, свой цвет,
+   * своё оформление. Текст аффирмации от этого не сдвигается — он
+   * по-прежнему стоит в середине оставшегося места.
+   */
+  function headLine(card) {
+    const head = String((card && card.head) || '');
+    if (!head) return null;
+    const node = el('div', { class: 'bigcard-head' });
+    paintText(node, head, (card && card.headMarks) || []);
+    return dressText(node, card, 'head');
+  }
+
+  function dressText(node, card, kind) {
     if (!node || !node.style) return node;
-    const align = alignCss(card && card.align);
+    // kind === 'head' — одеваем название: у него свои выравнивание и
+    // цвет, отдельные от текста аффирмации
+    const head = kind === 'head';
+    const align = alignCss(card && (head ? card.headAlign : card.align));
     node.style.setProperty('text-align', align);
-    node.style.setProperty('color', sanitizeInk(card && card.ink));
+    node.style.setProperty('color',
+      sanitizeInk(card && (head ? card.headInk : card.ink)));
     // Пометка «по ширине» — по ней в стилях включаются переносы. Другим
     // выравниваниям они не нужны: там строку никто не растягивает.
     const base = String(node.className || '').replace(/\s*\bjust\b/g, '');
@@ -4118,8 +4184,14 @@ body {
     let text = String(f.value || '');
     let marks = sanitizeMarks(f.marks || [], text.length);
 
+    // f.one — поле в одну строку: название карточки. Высота меньше, а
+    // растёт оно само, по мере набора. Всё остальное — те же кнопки,
+    // те же отметки — работает и здесь.
+    // Своя метка на каждой части поля: f-head у названия, f-text у
+    // аффирмации. Полей в окне два, и по метке видно, чьи это кнопки.
+    const tag = ' f-' + String(f.key || 'text');
     const box = el('div', {
-      class: 'rich-input',
+      class: 'rich-input' + (f.one ? ' one' : '') + tag,
       attrs: { contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true',
                'aria-label': f.label, spellcheck: 'true' },
     });
@@ -4199,7 +4271,7 @@ body {
       { m: 'u', label: 'Ч', title: 'Подчёркнутый' },
       { m: 's', label: 'З', title: 'Зачёркнутый' },
     ];
-    const bar = el('div', { class: 'rich-bar' });
+    const bar = el('div', { class: 'rich-bar' + tag });
 
     /** Подсветить кнопки того оформления, что уже стоит на выделенном. */
     const refresh = () => {
@@ -4245,7 +4317,7 @@ body {
     let align = sanitizeAlign(f.align);
     let ink = sanitizeInk(f.ink);
 
-    const alignRow = el('div', { class: 'rich-bar rich-bar-2' });
+    const alignRow = el('div', { class: 'rich-bar rich-bar-2' + tag });
     const alignBtns = [
       { v: 'left', title: 'По левому краю' },
       { v: 'center', title: 'По центру' },
@@ -4259,7 +4331,8 @@ body {
       box.style.setProperty('text-align', css);
       box.style.setProperty('color', ink);
       // В поле правки ровно то же, что получится на карточке
-      box.className = 'rich-input' + (css === 'justify' ? ' just' : '');
+      box.className = 'rich-input' + (f.one ? ' one' : '')
+        + (css === 'justify' ? ' just' : '') + tag;
       alignBtns.forEach((x) => {
         x.node.setAttribute('aria-pressed', String(x.v === align));
         x.node.className = 'rich-btn align align-' + x.v + (x.v === align ? ' on' : '');
@@ -4295,7 +4368,7 @@ body {
 
     // Цвет текста. Готовые цвета, а не круг с оттенками: на карточке
     // должно остаться читаемо, а из круга легко достать блёклое.
-    const inkRow = el('div', { class: 'ink-row' });
+    const inkRow = el('div', { class: 'ink-row' + tag });
     INK_COLORS.forEach((c) => {
       const node = el('button', {
         class: 'ink-dot', style: { background: c },
@@ -4401,7 +4474,7 @@ body {
     // переадресует, выделение теряется — и системное меню «Шрифт» с его
     // «жирный / курсив / подчёркнутый» показывается погашенным, потому
     // что редактировать, по мнению браузера, нечего.
-    sheet.appendChild(el('div', { class: 'field' }, [
+    sheet.appendChild(el('div', { class: 'field' + tag }, [
       el('span', { class: 'field-label', text: f.label }), box,
     ]));
     sheet.appendChild(bar);
@@ -5276,7 +5349,12 @@ body {
     paintText(bigText, card.text, card.marks);
     dressText(bigText, card);
     const bigMid = el('div', { class: 'bigcard-mid' }, [bigText]);
-    const big = el('div', { class: 'bigcard' }, [bigMid, audioBar]);
+    // Название — на самом верху карточки, отдельной строкой. Текст
+    // аффирмации от этого не двигается: он остаётся в середине того, что
+    // осталось. Пустого названия нет вовсе — и места оно не занимает.
+    const bigHead = headLine(card);
+    const big = el('div', { class: 'bigcard' },
+      bigHead ? [bigHead, bigMid, audioBar] : [bigMid, audioBar]);
     paint(big, card.color);
 
     /**
@@ -5287,15 +5365,16 @@ body {
     const dress = [];        // чьи дорожки дорисовать следующим кадром
     const neighbour = (c) => {
       const bar = el('div', { class: 'audio-bar' });
+      const sideHead = headLine(c);
       const g = el('div', {
         class: 'bigcard side',
         attrs: { 'aria-hidden': 'true' },
-      }, [
+      }, (sideHead ? [sideHead] : []).concat([
         el('div', { class: 'bigcard-mid' }, [
           dressText(paintText(el('div', { class: 'bigcard-text' }), c.text, c.marks), c),
         ]),
         bar,
-      ]);
+      ]));
       paint(g, c.color);
       if (audioSlots(c).length) dress.push({ bar: bar, card: c });
       return g;
@@ -8062,6 +8141,15 @@ body {
 
   function editCard(deck, card) {
     modal(card ? 'Карточка' : 'Новая карточка', [
+      // Название стоит первым и занимает одну строку. Поля разделены
+      // полностью: что набрано здесь, в текст аффирмации не перетекает,
+      // и оформление у каждого своё.
+      { key: 'head', label: 'Название карточки', rich: true, one: true,
+        value: card ? (card.head || '') : '',
+        marks: card ? card.headMarks : [],
+        align: card ? card.headAlign : ALIGN_DEFAULT,
+        ink: card ? card.headInk : INK_DEFAULT,
+        max: LIMITS.cardHead },
       { key: 'text', label: 'Текст аффирмации', type: 'textarea', rich: true,
         value: card ? card.text : '', marks: card ? card.marks : [],
         align: card ? card.align : ALIGN_DEFAULT,
@@ -8078,15 +8166,24 @@ body {
         const marks = shiftMarks(v.textMarks || [], v.text, text);
         const align = sanitizeAlign(v.textAlign);
         const ink = sanitizeInk(v.textInk);
+        // Название — то же самое, но со своими отметками и своим видом
+        const head = String(v.head || '').trim();
+        const headMarks = shiftMarks(v.headMarks || [], v.head || '', head);
+        const headAlign = sanitizeAlign(v.headAlign);
+        const headInk = sanitizeInk(v.headInk);
         if (card) {
           card.text = text; card.color = v.color; card.marks = marks;
           card.align = align; card.ink = ink;
+          card.head = head; card.headMarks = headMarks;
+          card.headAlign = headAlign; card.headInk = headInk;
         } else {
           if (deck.cards.length >= LIMITS.cardsPerDeck) {
             alert('Достигнут предел карточек в колоде.'); return false;
           }
           deck.cards.push({ id: uid(), text: text, color: v.color, fav: false,
-                            marks: marks, align: align, ink: ink });
+                            marks: marks, align: align, ink: ink,
+                            head: head, headMarks: headMarks,
+                            headAlign: headAlign, headInk: headInk });
         }
       },
       card ? () => dropCard(deck, card, true) : null);
@@ -10071,11 +10168,20 @@ body {
             keep.ink = sanitizeInk(inCard.ink);
             keep.link = sanitizeLink(inCard.link);
             keep.remind = inCard.remind === true;
+            keep.head = clampStr(inCard.head, LIMITS.cardHead);
+            keep.headMarks = sanitizeMarks(inCard.headMarks, keep.head.length);
+            keep.headAlign = sanitizeAlign(inCard.headAlign);
+            keep.headInk = sanitizeInk(inCard.headInk);
             keep.peaks = sanitizePeaks(inCard.peaks);
             deck.cards.push(keep);
           } else {
             deck.cards.push({ id: uid(), text: inCard.text, color: inCard.color,
                               fav: inCard.fav, remind: inCard.remind === true,
+                              head: clampStr(inCard.head, LIMITS.cardHead),
+                              headMarks: sanitizeMarks(inCard.headMarks,
+                                clampStr(inCard.head, LIMITS.cardHead).length),
+                              headAlign: sanitizeAlign(inCard.headAlign),
+                              headInk: sanitizeInk(inCard.headInk),
                               audio: false, audioLen: 0,
                               parts: [],
                               marks: sanitizeMarks(inCard.marks, inCard.text.length),
@@ -10267,6 +10373,11 @@ body {
           // разное на двух экранах при одном и том же тексте
           const fresh = { id: uid(), text: inCard.text, color: inCard.color,
                           fav: inCard.fav, remind: inCard.remind === true,
+                          head: clampStr(inCard.head, LIMITS.cardHead),
+                          headMarks: sanitizeMarks(inCard.headMarks,
+                            clampStr(inCard.head, LIMITS.cardHead).length),
+                          headAlign: sanitizeAlign(inCard.headAlign),
+                          headInk: sanitizeInk(inCard.headInk),
                           audio: false, audioLen: 0,
                           parts: [],
                           marks: sanitizeMarks(inCard.marks, inCard.text.length),
