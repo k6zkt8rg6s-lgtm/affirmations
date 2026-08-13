@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-Qv3NMJEdk3WneGduRVL2Ix+8W4jokwDxd0Iv3BSwpFg=';
-               style-src 'sha256-hXVbdJJnQBLtmmpUFiXokF80OU4poOhIYB78ucUxGTM=';
+               script-src 'sha256-cqjuBiTwQM4MMP190E4N4ZhxxKS7lLdspZ5yBhY2U70=';
+               style-src 'sha256-0gD58dGf40wN6mmtQ81gIRiDkS6gpg5Hvj1dzKf+A2E=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -352,6 +352,63 @@ body {
    бы как одно и то же, случайно нажатое дважды. */
 .iconbtn.star { background: transparent; font-size: 21px; color: var(--ink-soft); }
 .iconbtn.star.on { color: var(--star); }
+
+/* Корзинка — «убрать карточку из колоды, но не удалять».
+   Ведёт себя как сердечко: в покое бледная, отмеченная — закрашенная.
+   Закрашенная значит «карточка сейчас лежит в корзинке», и нажатие по
+   ней возвращает карточку обратно.
+
+   Значок нарисован рамками, а не взят из шрифта. Ведро в наборе знаков
+   одно и цветное, пары «пустое — закрашенное» у него нет, а этой парой
+   тут всё и сказано. Нарисованное наливается цветом одной строкой стиля
+   и на всех устройствах выглядит одинаково. */
+.iconbtn.bin { background: transparent; color: var(--ink-soft); }
+.iconbtn.bin.on { color: var(--ink); }
+.bin-mark {
+  display: block;
+  position: relative;
+  width: 17px;
+  height: 18px;
+  pointer-events: none;
+}
+/* Крышка: перекладина во всю ширину, а над ней короткая ручка */
+.bin-lid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  border-top: 1.7px solid currentColor;
+  border-radius: 1px;
+}
+.bin-lid::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -4.2px;
+  width: 7px;
+  height: 3px;
+  margin-left: -3.5px;
+  border: 1.7px solid currentColor;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+}
+/* Ведро под крышкой */
+.bin-can {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 6px;
+  bottom: 0;
+  border: 1.7px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 3px 3px;
+}
+/* Закрашенная: ведро налито тем же цветом, что и его рамка. Разницу
+   видно с одного взгляда и через весь экран. */
+.iconbtn.bin.on .bin-can { background: currentColor; }
+/* Пустое место вместо кнопки правки в шапке корзинки: заголовок остаётся
+   ровно по центру, как во всех остальных колодах. */
+.iconbtn.hidden { visibility: hidden; pointer-events: none; }
 .mini-heart { color: var(--heart); font-size: 16px; flex: none; }
 .mini-audio { color: var(--ink-soft); font-size: 15px; flex: none; }
 /* Метка «есть оборот» в строке карточки. Крупнее значка звука и
@@ -1280,9 +1337,34 @@ body {
      всё равно position:fixed, за пределы страницы соседки не вылезут. */
   overflow: clip;
 }
-.reader-bar { display: flex; align-items: center; gap: 8px; min-height: var(--tap); }
+/* Ряд кнопок над карточкой.
+   Кнопок в нём до восьми: закрыть, ссылка, запись голоса, файл,
+   сердечко, звёздочка, корзинка и правка. Восемь кружков по 44 точки —
+   это 352 точки, и на телефоне шириной 390 они помещаются впритык.
+   С постоянным просветом в 8 точек последняя кнопка — карандаш правки —
+   уезжала за край экрана и была недоступна.
+
+   Поэтому просвет здесь не постоянный, а по остатку ширины: сколько её
+   осталось, столько и будет, но не больше прежних восьми точек. На
+   компьютере и на крупном телефоне ничего не меняется. */
+.reader-bar {
+  display: flex;
+  align-items: center;
+  gap: clamp(0px, (100vw - 376px) / 8, 8px);
+  min-height: var(--tap);
+}
+/* Если и вплотную не помещается — кнопки сжимаются, но не ниже 40
+   точек: меньше этого палец начинает промахиваться. На телефоне от 375
+   точек шириной все они остаются прежними, 44.
+
+   Сжимаются только сами кнопки ряда. Запись голоса и выбор файла лежат
+   в своих обёртках, и их не трогаем: там внутри своя разметка — во
+   время записи вместо одной кнопки появляются пауза и стоп со своими
+   размерами. Попытка сжимать и их сделала эти две кнопки меньше соседей
+   на любом экране, даже широком. */
+.reader-bar > .iconbtn { flex: 0 1 var(--tap); min-width: 40px; }
 /* Пустое место в ряду кнопок: крестик слева, кнопки справа */
-.reader-gap { flex: 1; }
+.reader-gap { flex: 1 1 0; min-width: 0; }
 
 /* Номер карточки — отдельной строкой, ровно по центру экрана и прямо
    над карточкой. Ширина во всю строку, поэтому середина текста совпадает
@@ -1584,6 +1666,9 @@ body {
 }
 .menu-item:active { background: #F0EEE9; }
 .menu-sign { font-size: 22px; line-height: 1; width: 24px; text-align: center; flex: none; }
+/* Нарисованный значок в этом же месте (корзинка) — по центру той же
+   колонки, что и знаки из шрифта у соседних строк. */
+.menu-sign .bin-mark { margin: 0 auto; }
 .menu-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .menu-name { font-size: 16px; }
 .menu-hint { font-size: 13px; color: var(--ink-soft); }
@@ -2026,7 +2111,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '13.08.2026, 13:35';
+  const BUILD = '13.08.2026, 18:09';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -3131,6 +3216,88 @@ body {
  * Карта всех частей: КАРТА-ПРОЕКТА.md
  * ────────────────────────────────────────────────────────────── */
 
+  /**
+   * Одна карточка из сохранённого. null — если это не карточка вовсе или
+   * текста в ней нет: пустых карточек мы не заводим.
+   *
+   * Вынесено отдельной работой не для красоты: такие же карточки лежат в
+   * корзинке, и проверять их надо ровно тем же способом. Иначе стоит
+   * добавить карточке новое поле — и в одном из двух мест его забудут.
+   */
+  function sanitizeCard(c) {
+    if (!c || typeof c !== 'object') return null;
+    const text = clampStr(c.text, LIMITS.cardText);
+    if (!text.trim()) return null;
+    const card = {
+      id: clampStr(c.id, 40) || uid(),
+      text: text,
+      // Цвет только из списка: иначе через файл копии можно было бы
+      // подсунуть в стиль произвольное значение
+      color: KNOWN_COLORS.includes(c.color) ? c.color : CARD_COLORS[0],
+      fav: c.fav === true,          // строго булево, не «похожее на правду»
+      // Отметка «показывать в напоминаниях» — вторая, отдельная
+      // от избранного: у них разный смысл и разные списки.
+      remind: c.remind === true,
+      // Название карточки. Своё поле со своим оформлением: жирный,
+      // цвет и выравнивание у него отдельные от текста аффирмации.
+      head: clampStr(c.head, LIMITS.cardHead),
+      headMarks: sanitizeMarks(c.headMarks,
+        clampStr(c.head, LIMITS.cardHead).length),
+      headAlign: sanitizeAlign(c.headAlign),
+      headInk: sanitizeInk(c.headInk),
+      audio: c.audio === true,      // сама запись лежит в IndexedDB
+      // Длину записи держим рядом с карточкой. Спрашивать её у
+      // самого файла ненадёжно: браузеры часто отдают Infinity для
+      // записей, сделанных на лету, и полоса времени ломается.
+      audioLen: (typeof c.audioLen === 'number' && isFinite(c.audioLen)
+                 && c.audioLen > 0) ? Math.min(c.audioLen, 3600) : 0,
+      // Куски записи, если к ней дописывали продолжение. У обычной
+      // записи список пуст — она и так одно целое.
+      parts: sanitizeParts(c.parts),
+      // Форма волны: столбики громкости, целые числа 0–100.
+      // Считается один раз при записи и хранится рядом с карточкой,
+      // иначе при каждом открытии пришлось бы заново раскодировать
+      // весь звук — на телефоне это заметная задержка.
+      peaks: sanitizePeaks(c.peaks),
+      // Оформление куска текста: только числа и четыре буквы.
+      // Разметкой это не становится нигде — рисуется через
+      // createElement, поэтому подсунуть через отметки нечего.
+      marks: sanitizeMarks(c.marks, text.length),
+      // Выравнивание и цвет текста — по одному значению на
+      // карточку. Оба проверяются по списку: попадают в стиль.
+      align: sanitizeAlign(c.align),
+      ink: sanitizeInk(c.ink),
+      // Ссылка: только http и https, всё прочее отбрасывается
+      link: sanitizeLink(c.link),
+      // Вторая и третья записи. Каждая — со своим номером в
+      // хранилище и со своими кусками, как у первой.
+      extra: sanitizeExtra(c.extra),
+      // Место записи самой карточки в показе. Дорожки можно
+      // переставлять, и первой не обязательно стоит её собственная.
+      trackPos: sanitizePos(c.trackPos),
+      // На какой секунде остановили прослушивание. В следующий раз
+      // запись продолжится отсюда, а не начнётся заново.
+      at: sanitizeAt(c.at),
+      // Плейлист: взята ли запись в очередь и какая она там по
+      // счёту. Отметка живёт на самой дорожке, а не отдельным
+      // списком, — тогда она не может от неё отстать.
+      inList: c.inList === true,
+      listAt: sanitizeListAt(c.listAt),
+      // Снимки: только номера и размеры. Сами картинки лежат
+      // в хранилище устройства, как и голос.
+      shots: sanitizeShots(c.shots),
+      // Какой стороной карточка лежит. Помнится вместе с ней: как
+      // оставил, так в следующий раз и откроется.
+      side: sanitizeSideNo(c.side),
+    };
+    // Оборот кладём, только если он и правда есть: у того, кто
+    // оборотами не пользуется, в хранилище не заводится ни одного
+    // лишнего поля.
+    const back = sanitizeBack(c.back);
+    if (back) card.back = back;
+    return card;
+  }
+
   /** Привести любой ввод к заведомо корректной структуре. */
   function sanitizeState(raw) {
     const out = { sections: [] };
@@ -3173,82 +3340,17 @@ body {
         };
         const cards = Array.isArray(d.cards) ? d.cards : [];
         for (const c of cards.slice(0, LIMITS.cardsPerDeck)) {
-          if (!c || typeof c !== 'object') continue;
-          const text = clampStr(c.text, LIMITS.cardText);
-          if (!text.trim()) continue;
-          const card = {
-            id: clampStr(c.id, 40) || uid(),
-            text: text,
-            // Цвет только из списка: иначе через файл копии можно было бы
-            // подсунуть в стиль произвольное значение
-            color: KNOWN_COLORS.includes(c.color) ? c.color : CARD_COLORS[0],
-            fav: c.fav === true,          // строго булево, не «похожее на правду»
-            // Отметка «показывать в напоминаниях» — вторая, отдельная
-            // от избранного: у них разный смысл и разные списки.
-            remind: c.remind === true,
-            // Название карточки. Своё поле со своим оформлением: жирный,
-            // цвет и выравнивание у него отдельные от текста аффирмации.
-            head: clampStr(c.head, LIMITS.cardHead),
-            headMarks: sanitizeMarks(c.headMarks,
-              clampStr(c.head, LIMITS.cardHead).length),
-            headAlign: sanitizeAlign(c.headAlign),
-            headInk: sanitizeInk(c.headInk),
-            audio: c.audio === true,      // сама запись лежит в IndexedDB
-            // Длину записи держим рядом с карточкой. Спрашивать её у
-            // самого файла ненадёжно: браузеры часто отдают Infinity для
-            // записей, сделанных на лету, и полоса времени ломается.
-            audioLen: (typeof c.audioLen === 'number' && isFinite(c.audioLen)
-                       && c.audioLen > 0) ? Math.min(c.audioLen, 3600) : 0,
-            // Куски записи, если к ней дописывали продолжение. У обычной
-            // записи список пуст — она и так одно целое.
-            parts: sanitizeParts(c.parts),
-            // Форма волны: столбики громкости, целые числа 0–100.
-            // Считается один раз при записи и хранится рядом с карточкой,
-            // иначе при каждом открытии пришлось бы заново раскодировать
-            // весь звук — на телефоне это заметная задержка.
-            peaks: sanitizePeaks(c.peaks),
-            // Оформление куска текста: только числа и четыре буквы.
-            // Разметкой это не становится нигде — рисуется через
-            // createElement, поэтому подсунуть через отметки нечего.
-            marks: sanitizeMarks(c.marks, text.length),
-            // Выравнивание и цвет текста — по одному значению на
-            // карточку. Оба проверяются по списку: попадают в стиль.
-            align: sanitizeAlign(c.align),
-            ink: sanitizeInk(c.ink),
-            // Ссылка: только http и https, всё прочее отбрасывается
-            link: sanitizeLink(c.link),
-            // Вторая и третья записи. Каждая — со своим номером в
-            // хранилище и со своими кусками, как у первой.
-            extra: sanitizeExtra(c.extra),
-            // Место записи самой карточки в показе. Дорожки можно
-            // переставлять, и первой не обязательно стоит её собственная.
-            trackPos: sanitizePos(c.trackPos),
-            // На какой секунде остановили прослушивание. В следующий раз
-            // запись продолжится отсюда, а не начнётся заново.
-            at: sanitizeAt(c.at),
-            // Плейлист: взята ли запись в очередь и какая она там по
-            // счёту. Отметка живёт на самой дорожке, а не отдельным
-            // списком, — тогда она не может от неё отстать.
-            inList: c.inList === true,
-            listAt: sanitizeListAt(c.listAt),
-            // Снимки: только номера и размеры. Сами картинки лежат
-            // в хранилище устройства, как и голос.
-            shots: sanitizeShots(c.shots),
-            // Какой стороной карточка лежит. Помнится вместе с ней: как
-            // оставил, так в следующий раз и откроется.
-            side: sanitizeSideNo(c.side),
-          };
-          // Оборот кладём, только если он и правда есть: у того, кто
-          // оборотами не пользуется, в хранилище не заводится ни одного
-          // лишнего поля.
-          const back = sanitizeBack(c.back);
-          if (back) card.back = back;
-          deck.cards.push(card);
+          const card = sanitizeCard(c);
+          if (card) deck.cards.push(card);
         }
         section.decks.push(deck);
       }
       out.sections.push(section);
     }
+    // Корзинка лежит рядом с разделами, а не внутри: на главном экране
+    // рисуются разделы, и так она туда попасть не может.
+    const bin = sanitizeBin(raw.bin);
+    if (bin.cards.length) out.bin = bin;
     return out;
   }
 
@@ -3304,6 +3406,338 @@ body {
     };
   }
 
+/* ─── 06b-bin.js ───────────────────────────────────────────────────────
+ * Корзинка: карточка убрана из колоды, но не удалена
+ *
+ * Часть общего кода приложения. Собирается: python3 build.py
+ * Карта всех частей: КАРТА-ПРОЕКТА.md
+ * ────────────────────────────────────────────────────────────── */
+
+  // ------------------------------------------------------------------
+  // Корзинка.
+  //
+  // Устроена как КОЛОДА, лежащая вне разделов: у неё те же поля, что у
+  // любой другой, — имя, цвет, список карточек. Отсюда два следствия, и
+  // ради них всё и сделано именно так.
+  //
+  // Первое: она физически не может показаться на главном экране. Там
+  // рисуются разделы, а корзинки среди них нет вовсе — забыть скрыть её
+  // где-нибудь просто негде.
+  //
+  // Второе: для остального кода это обычная колода. Список карточек,
+  // читалка, свайпы, перестановка удержанием, переворот на оборот, звук,
+  // фотографии — всё это работает в корзинке само, без единой новой
+  // строки. Понадобилось научить лишь поиск колоды находить её по имени.
+  //
+  // У карточки, попавшей в корзинку, рядом лежит записка «откуда пришла»:
+  // раздел, колода, место в списке. По ней и происходит возврат — ровно
+  // туда, где карточка стояла.
+  // ------------------------------------------------------------------
+
+  // Имя корзинки. Оно же служит и номером раздела, и номером колоды:
+  // настоящих разделов с таким именем не бывает — номера выдаются
+  // случайными.
+  const BIN_ID = 'bin';
+
+  /** Корзинка. Заводится при первом обращении. */
+  function binDeck() {
+    if (!state.bin || typeof state.bin !== 'object') {
+      state.bin = { id: BIN_ID, name: 'Корзинка', color: COLORS[0], cards: [] };
+    }
+    if (!Array.isArray(state.bin.cards)) state.bin.cards = [];
+    return state.bin;
+  }
+
+  /** Сколько карточек лежит в корзинке. */
+  function binSize() {
+    return (state.bin && Array.isArray(state.bin.cards))
+      ? state.bin.cards.length : 0;
+  }
+
+  /** Эта ли колода — корзинка. */
+  function isBin(deck) { return !!deck && deck.id === BIN_ID; }
+
+  /** Лежит ли карточка в корзинке. */
+  function inBin(card) {
+    return binSize() > 0 && state.bin.cards.indexOf(card) >= 0;
+  }
+
+  /**
+   * Есть ли уже в колодах карточка с таким текстом. И наоборот — есть ли
+   * такая в корзинке.
+   *
+   * Нужны при слиянии с файлом. «Добавить» ищет совпадения по тексту, но
+   * искало только в своей половине: колоды сверялись с колодами,
+   * корзинка с корзинкой. А карточка, убранная на одном устройстве и
+   * оставшаяся в колоде на другом, лежит в разных половинах — и
+   * приезжала второй раз. Получалось две одинаковых: одна в колоде,
+   * другая в корзинке. Вернёшь её — и в колоде их станет две.
+   */
+  function textInDecks(text) {
+    const key = String(text || '').trim();
+    if (!key) return false;
+    for (const sec of state.sections) {
+      for (const deck of sec.decks) {
+        if (deck.cards.some((c) => c.text.trim() === key)) return true;
+      }
+    }
+    return false;
+  }
+
+  function textInBin(text) {
+    const key = String(text || '').trim();
+    if (!key || !binSize()) return false;
+    return state.bin.cards.some((c) => c.text.trim() === key);
+  }
+
+  /**
+   * Все карточки приложения, включая лежащие в корзинке.
+   *
+   * Нужна там, где речь о карточке как о носителе звука и снимков:
+   * в файле обмена и при сверке отметок с хранилищем. Убранная карточка
+   * цела, её записи никуда не делись, и обойти её стороной значило бы
+   * тихо оставить их без присмотра.
+   */
+  function everyCard() {
+    const out = [];
+    state.sections.forEach((sec) => sec.decks.forEach((deck) =>
+      deck.cards.forEach((c) => out.push(c))));
+    if (state.bin && Array.isArray(state.bin.cards)) {
+      state.bin.cards.forEach((c) => out.push(c));
+    }
+    return out;
+  }
+
+  /**
+   * Записка «откуда пришла карточка» из сохранённого.
+   *
+   * Имя колоды храним рядом с её номером не для красоты: по нему человек
+   * поймёт, куда она вернётся, даже если самой колоды уже нет.
+   */
+  function sanitizeFrom(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const at = (typeof raw.at === 'number' && isFinite(raw.at) && raw.at >= 0)
+      ? Math.min(LIMITS.cardsPerDeck, Math.round(raw.at)) : 0;
+    return {
+      sectionId: clampStr(raw.sectionId, 40),
+      deckId: clampStr(raw.deckId, 40),
+      name: clampStr(raw.name, LIMITS.deckName),
+      at: at,
+    };
+  }
+
+  /** Корзинка из сохранённого. Пустая, если её там не было. */
+  function sanitizeBin(raw) {
+    const bin = { id: BIN_ID, name: 'Корзинка', color: COLORS[0], cards: [] };
+    const cards = (raw && Array.isArray(raw.cards)) ? raw.cards : [];
+    for (const c of cards.slice(0, LIMITS.cardsPerDeck)) {
+      const card = sanitizeCard(c);
+      if (!card) continue;
+      // Записка «откуда пришла» есть только у карточек корзинки: у тех,
+      // что лежат в колодах, возвращаться неоткуда и незачем
+      const from = sanitizeFrom(c.from);
+      if (from) card.from = from;
+      bin.cards.push(card);
+    }
+    return bin;
+  }
+
+  /**
+   * Убрать карточку в корзинку.
+   *
+   * Ничего не удаляется: карточка переезжает целиком — со своим текстом,
+   * оборотом, записями голоса и фотографиями. Запоминаем, откуда она, и
+   * кладём наверх корзинки: последнее убранное всегда на виду.
+   */
+  function cardToBin(deck, card) {
+    const at = deck.cards.indexOf(card);
+    if (at < 0) return false;
+    // Предел тот же, что и у колоды. Без него корзинка росла бы без
+    // конца, а при следующем чтении хранилища лишние карточки молча
+    // отбрасывались бы: там список обрезается по этому же числу.
+    if (binSize() >= LIMITS.cardsPerDeck) {
+      alert('В корзинке уже ' + LIMITS.cardsPerDeck
+        + ' карточек — больше не помещается.\n'
+        + 'Верните что-нибудь обратно или удалите насовсем.');
+      return false;
+    }
+    const sec = state.sections.find((s) => s.decks.indexOf(deck) >= 0);
+    card.from = {
+      sectionId: sec ? sec.id : '',
+      deckId: deck.id,
+      name: deck.name,
+      at: at,
+    };
+    deck.cards.splice(at, 1);
+    binDeck().cards.unshift(card);
+    return true;
+  }
+
+  /**
+   * Колода, откуда карточка пришла.
+   *
+   * Сначала по номеру — так на своём устройстве находится ровно та
+   * колода, из которой её убрали, даже если колод с одинаковым именем
+   * несколько.
+   *
+   * Не нашлось — ищем по имени. Это не запасной путь на всякий случай,
+   * а обычная жизнь: на втором устройстве у той же колоды свой номер, и
+   * приехавшая по файлу обмена карточка иначе всегда возвращалась бы
+   * «в никуда». Имена колод человек и различает глазами.
+   */
+  function deckOfCard(from) {
+    if (!from) return null;
+    const byId = findDeck(from.sectionId, from.deckId);
+    if (byId && !isBin(byId)) return byId;
+    const name = from.name || '';
+    if (!name) return null;
+    for (const sec of state.sections) {
+      const d = sec.decks.find((x) => x.name === name);
+      if (d) return d;
+    }
+    return null;
+  }
+
+  /**
+   * Вернуть карточку из корзинки на своё место.
+   *
+   * Отвечает одним словом: 'ok' — вернулась; 'full' — колода уже полна,
+   * и человеку про это сказано; 'gone' — колоды больше нет, и куда
+   * класть, решать человеку.
+   */
+  function cardFromBin(card) {
+    const deck = deckOfCard(card.from);
+    if (!deck) return 'gone';
+    if (deck.cards.length >= LIMITS.cardsPerDeck) {
+      alert('В колоде «' + deck.name + '» уже ' + LIMITS.cardsPerDeck
+        + ' карточек — вернуть некуда.');
+      return 'full';
+    }
+    const bin = binDeck();
+    const k = bin.cards.indexOf(card);
+    if (k >= 0) bin.cards.splice(k, 1);
+    // На то же место, где карточка стояла. Карточек с тех пор могло
+    // стать меньше — тогда встаёт последней.
+    const from = card.from || {};
+    const at = Math.max(0, Math.min(from.at || 0, deck.cards.length));
+    deck.cards.splice(at, 0, card);
+    delete card.from;
+    return 'ok';
+  }
+
+  /**
+   * Значок корзинки: крышка с ручкой и ведро под ней.
+   *
+   * Нарисован рамками, как звено цепи у ссылки и галочки у «свернуть
+   * всё», а не взят из шрифта. Причина та же: у ведра из набора значков
+   * нет пары «пустое — закрашенное», а именно ею тут всё и сказано.
+   * Нарисованное ведро наливается цветом одной строкой стиля — и на
+   * любом устройстве выглядит одинаково, без цветных картинок в ряду
+   * чёрных кнопок.
+   */
+  function binMark() {
+    return el('span', { class: 'bin-mark', attrs: { 'aria-hidden': 'true' } }, [
+      el('span', { class: 'bin-lid' }),
+      el('span', { class: 'bin-can' }),
+    ]);
+  }
+
+  /**
+   * Кнопка корзинки для ряда кнопок карточки.
+   *
+   * В обычной колоде — пустая: нажали, карточка ушла в корзинку. В самой
+   * корзинке — закрашенная: нажали, карточка вернулась на своё место.
+   */
+  function makeBinButton(deck, card) {
+    const here = isBin(deck);
+    const name = here ? 'Вернуть из корзинки' : 'Убрать в корзинку';
+    return el('button', {
+      class: 'iconbtn bin' + (here ? ' on' : ''),
+      attrs: {
+        type: 'button',
+        'aria-pressed': String(here),
+        'aria-label': name,
+        title: name,
+      },
+      on: { click: () => { if (here) returnCard(card); else binCard(deck, card); } },
+    }, [binMark()]);
+  }
+
+  /**
+   * Закрашенная корзинка в строке списка — только внутри самой корзинки.
+   *
+   * Стоит там же, где в обычной колоде стоит сердечко, и работает так
+   * же: одно нажатие прямо из списка, карточку открывать не нужно.
+   *
+   * busy — общий сторож строки: пока у неё открыта кнопка свайпа,
+   * нажатие эту кнопку только закрывает.
+   */
+  function makeBinUndo(card, busy) {
+    return el('button', {
+      class: 'iconbtn bin on',
+      attrs: {
+        type: 'button',
+        'aria-pressed': 'true',
+        'aria-label': 'Вернуть из корзинки',
+        title: 'Вернуть из корзинки',
+      },
+      on: { click: () => { if (busy && busy()) return; returnCard(card); } },
+    }, [binMark()]);
+  }
+
+  /**
+   * Убрать карточку в корзинку из читалки.
+   *
+   * Экран ведёт себя так же, как при удалении: остаёмся в колоде и
+   * показываем следующую карточку, а если колода опустела — выходим в
+   * список. Разница только в том, что карточка цела.
+   */
+  function binCard(deck, card) {
+    const idx = deck.cards.indexOf(card);
+    if (!cardToBin(deck, card)) return;
+    if (view.name === 'read') {
+      if (deck.cards.length === 0) {
+        go({ name: 'deck', sectionId: view.sectionId, deckId: view.deckId });
+        save();
+        return;
+      }
+      view.index = Math.max(0, Math.min(idx, deck.cards.length - 1));
+    }
+    save();
+    render();
+  }
+
+  /**
+   * Вернуть карточку из корзинки.
+   *
+   * Колоды, откуда она пришла, может уже не быть — тогда спрашиваем, куда
+   * положить, тем же окном выбора, что и «Перенести в колоду».
+   */
+  function returnCard(card) {
+    const bin = binDeck();
+    const idx = bin.cards.indexOf(card);
+    const how = cardFromBin(card);
+    if (how === 'full') return;             // человеку сказано, ничего не менялось
+    if (how === 'ok') {
+      if (view.name === 'read' && view.deckId === BIN_ID) {
+        if (bin.cards.length === 0) {
+          go({ name: 'deck', sectionId: BIN_ID, deckId: BIN_ID });
+          save();
+          return;
+        }
+        view.index = Math.max(0, Math.min(idx, bin.cards.length - 1));
+      }
+      save();
+      render();
+      return;
+    }
+    // Прежней колоды нет. Спрашиваем, куда положить, — и говорим, откуда
+    // карточка была: так понятнее, что выбирать.
+    const was = (card.from && card.from.name) ? card.from.name : '';
+    moveCardTo(bin, card, was
+      ? 'Колоды «' + was + '» больше нет. Выберите, куда вернуть карточку.'
+      : 'Выберите, куда вернуть карточку.');
+  }
 /* ─── 07-audio-store.js ────────────────────────────────────────────────
  * Хранилище голосовых записей (IndexedDB)
  *
@@ -3477,16 +3911,14 @@ body {
     const done = (n) => { if (typeof onDone === 'function') onDone(n); };
     if (!AudioStore.available()) { done(0); return; }
 
+    // Обе стороны карточки: у оборота свои записи под своими номерами, и
+    // сверять их надо так же, как записи лица. Карточки корзинки — тоже:
+    // они целы, звук у них цел, и отметки на них должны сходиться с
+    // хранилищем наравне со всеми.
     const cards = [];
-    for (const sec of state.sections) {
-      for (const deck of sec.decks) {
-        // Обе стороны карточки: у оборота свои записи под своими
-        // номерами, и сверять их надо так же, как записи лица
-        for (const card of deck.cards) {
-          cardSides(card).forEach((s) => cards.push(s));
-        }
-      }
-    }
+    everyCard().forEach((card) => {
+      cardSides(card).forEach((s) => cards.push(s));
+    });
     if (!cards.length) { done(0); return; }
 
     // Спрашиваем у хранилища ВЕСЬ список ключей разом.
@@ -3652,6 +4084,10 @@ body {
 
   function findSection(id) { return state.sections.find((s) => s.id === id) || null; }
   function findDeck(sectionId, deckId) {
+    // Корзинка — единственная колода вне разделов. Отвечаем на неё здесь,
+    // и дальше всё приложение работает с ней как с обычной колодой:
+    // список, читалка, свайпы, перестановка, оборот, звук, снимки.
+    if (deckId === BIN_ID) return binDeck();
     const s = findSection(sectionId);
     return s ? (s.decks.find((d) => d.id === deckId) || null) : null;
   }
@@ -3996,9 +4432,13 @@ body {
   // Экран 2: карточки колоды
   // ------------------------------------------------------------------
   function renderDeck() {
-    const section = findSection(view.sectionId);
     const deck = findDeck(view.sectionId, view.deckId);
-    if (!section || !deck) return renderHome();
+    if (!deck) return renderHome();
+    // Корзинка лежит вне разделов, и раздела у неё нет вовсе. Всё
+    // остальное на этом экране у неё общее с обычной колодой.
+    const bin = isBin(deck);
+    const section = bin ? null : findSection(view.sectionId);
+    if (!bin && !section) return renderHome();
 
     const frag = document.createDocumentFragment();
     frag.appendChild(el('div', { class: 'topbar' }, [
@@ -4007,7 +4447,9 @@ body {
         text: '‹', on: { click: () => go({ name: 'home' }) },
       }),
       el('h1', { class: 'small', text: deck.name }),
-      el('button', {
+      // Имя и цвет у корзинки не свои: менять их незачем, и кнопка правки
+      // ей ни к чему. Пустое место вместо неё держит заголовок по центру.
+      bin ? el('span', { class: 'iconbtn ghost hidden' }) : el('button', {
         class: 'iconbtn ghost', attrs: { 'aria-label': 'Изменить колоду', type: 'button' },
         text: '✎', on: { click: () => editDeck(section, deck) },
       }),
@@ -4015,7 +4457,9 @@ body {
 
     const list = el('div', { class: 'card-list' });
     if (deck.cards.length === 0) {
-      list.appendChild(el('p', { class: 'empty', text: 'В колоде пока нет карточек.' }));
+      list.appendChild(el('p', { class: 'empty', text: bin
+        ? 'Корзинка пуста.'
+        : 'В колоде пока нет карточек.' }));
     }
     deck.cards.forEach((card, i) => {
       const swatch = el('span', { class: 'mini-swatch' });
@@ -4039,7 +4483,8 @@ body {
         class: 'mini-open', attrs: { type: 'button' },
         on: { click: () => {
           if (busy()) return;
-          go({ name: 'read', sectionId: section.id, deckId: deck.id, index: i });
+          go({ name: 'read', sectionId: bin ? BIN_ID : section.id,
+               deckId: deck.id, index: i });
         } },
       }, [
         el('span', { class: 'mini-num', text: String(i + 1) }),
@@ -4080,9 +4525,14 @@ body {
         } },
       });
 
+      // В корзинке на месте сердечка стоит закрашенная корзинка: нажал —
+      // карточка вернулась туда, откуда пришла, не открывая её. Место то
+      // же самое, повадка та же — одно нажатие прямо из списка.
+      const undo = bin ? makeBinUndo(card, busy) : null;
+
       // Строка — не кнопка, а контейнер: внутри две независимые зоны.
       // Иначе нажатие на сердечко открывало бы заодно и карточку.
-      const row = el('div', { class: 'mini' }, [open, heart]);
+      const row = el('div', { class: 'mini' }, [open, bin ? undo : heart]);
 
       // Обёртка нужна двум разным жестам сразу. Кнопка «В колоду» лежит
       // под строкой у правого края и открывается, когда строка уезжает
@@ -4122,12 +4572,15 @@ body {
     });
     frag.appendChild(list);
 
-    frag.appendChild(el('div', { class: 'section' }, [
-      el('button', {
-        class: 'btn', attrs: { type: 'button' }, text: '+ Карточка',
-        on: { click: () => editCard(deck, null) },
-      }),
-    ]));
+    // В корзинке карточки не заводят: сюда они только попадают из колод.
+    if (!bin) {
+      frag.appendChild(el('div', { class: 'section' }, [
+        el('button', {
+          class: 'btn', attrs: { type: 'button' }, text: '+ Карточка',
+          on: { click: () => editCard(deck, null) },
+        }),
+      ]));
+    }
 
     // Возврат на главный экран — двумя пальцами вправо, в любом месте
     // экрана. Одним пальцем здесь занято: движение вправо по строке
@@ -5668,15 +6121,20 @@ body {
    * Куда перенести карточку. Список всех колод, кроме той, в которой она
    * сейчас лежит, с названием раздела — иначе одинаковые названия колод
    * в разных разделах не различить.
+   *
+   * hint — строка над списком. Ею пользуется возврат из корзинки, когда
+   * прежней колоды уже нет: там надо объяснить, почему спрашиваем.
+   * Сама корзинка в списке не появляется — она лежит вне разделов.
    */
-  function moveCardTo(fromDeck, card) {
+  function moveCardTo(fromDeck, card, hint) {
     const wrap = el('div', { class: 'modal' });
     const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
     const short = card.text.length > 60 ? card.text.slice(0, 60) + '…' : card.text;
     const sheet = el('div', { class: 'sheet' }, [
-      el('h3', { text: 'Перенести карточку' }),
+      el('h3', { text: hint ? 'Вернуть карточку' : 'Перенести карточку' }),
+      hint ? el('p', { class: 'hint', text: hint }) : null,
       el('p', { class: 'hint', text: short }),
-    ]);
+    ].filter(Boolean));
 
     const list = el('div', { class: 'card-list scroll' });
     let any = false;
@@ -5700,8 +6158,24 @@ body {
             // идентификатору. Новая карточка осталась бы без звука.
             fromDeck.cards.splice(k, 1);
             deck.cards.push(card);
+            // Ушла из корзинки — записка «откуда пришла» больше не нужна:
+            // карточка теперь лежит в настоящей колоде, и возвращать её
+            // некуда и незачем.
+            if (isBin(fromDeck)) delete card.from;
             openRow = null;
-            save(); close(); render();
+            close();
+            // Если карточку унесли прямо из читалки, смотреть на прежнее
+            // место уже нельзя: карточки там нет, а колода могла и вовсе
+            // опустеть.
+            if (view.name === 'read' && view.deckId === fromDeck.id) {
+              if (fromDeck.cards.length === 0) {
+                go({ name: 'deck', sectionId: view.sectionId, deckId: view.deckId });
+                save();
+                return;
+              }
+              view.index = Math.max(0, Math.min(k, fromDeck.cards.length - 1));
+            }
+            save(); render();
           } },
         }, [
           swatch,
@@ -6453,7 +6927,14 @@ body {
         makeLinkButton(face, linkRow),
         makeRecordControls(face, audioBar),
         makeAudioPicker(face, audioBar),
-        el('button', {
+        // Сердечка и звёздочки в корзинке нет, и это не придирка.
+        // «Избранное» на главном экране и очередь плейлиста собираются
+        // обходом разделов, а корзинка лежит вне их. Отметка поставилась
+        // бы, значок загорелся — и не появилось бы ничего: ни строки в
+        // избранном, ни записи в очереди. Кнопка, которая горит и ничего
+        // не делает, хуже, чем её отсутствие. Отметки, поставленные до
+        // того, целы и вернутся вместе с карточкой.
+        inBin(card) ? null : el('button', {
           class: 'iconbtn heart' + (card.fav ? ' on' : ''),
           attrs: {
             type: 'button',
@@ -6472,7 +6953,12 @@ body {
         //
         // На стороне без записей её нет вовсе: брать в плейлист нечего, а
         // кнопка, которая ничего не делает, только сбивает с толку.
-        makeListStar(face),
+        inBin(card) ? null : makeListStar(face),
+        // Корзинка. В обычной колоде пустая: нажал — карточка ушла с глаз,
+        // но цела. В самой корзинке закрашенная: нажал — вернулась на своё
+        // место. Одна кнопка и туда, и обратно, потому что это одно
+        // действие, а не два разных.
+        makeBinButton(deck, card),
         el('button', {
           class: 'iconbtn ghost', attrs: { 'aria-label': 'Изменить', type: 'button' },
           text: '✎', on: { click: () => editCard(deck, card, face) },
@@ -9672,11 +10158,15 @@ body {
     const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
     const pick = (fn) => () => { close(); fn(); };
 
+    // sign — либо знак строкой, либо готовый нарисованный значок. У
+    // корзинки он нарисован рамками: подходящего знака в шрифте нет.
     const item = (sign, name, hint, fn) => el('button', {
       class: 'menu-item', attrs: { type: 'button', 'aria-label': name },
       on: { click: pick(fn) },
     }, [
-      el('span', { class: 'menu-sign', text: sign }),
+      typeof sign === 'string'
+        ? el('span', { class: 'menu-sign', text: sign })
+        : el('span', { class: 'menu-sign' }, [sign]),
       el('span', { class: 'menu-body' }, [
         el('span', { class: 'menu-name', text: name }),
         el('span', { class: 'menu-hint', text: hint }),
@@ -9692,6 +10182,14 @@ body {
           'Забрать данные с другого устройства', () => openSync('load')),
         item('★', 'Напоминания',
           'Показывать отмеченные звёздочкой на экране устройства', openRemind),
+        // Корзинка. Единственный вход в неё — отсюда: среди колод на
+        // главном экране её нет и быть не может, она лежит вне разделов.
+        // Подпись сразу говорит, пусто там или нет, — иначе пришлось бы
+        // заходить и проверять.
+        item(binMark(), 'Корзинка',
+          binSize() ? 'Убранные карточки: ' + cardsLabel(binSize())
+            : 'Убранные карточки. Пока пусто',
+          () => go({ name: 'deck', sectionId: BIN_ID, deckId: BIN_ID })),
         item('↻', 'Обновить приложение',
           'Скачать свежую версию самого приложения', openRefresh),
       ]),
@@ -11258,15 +11756,12 @@ body {
      */
     function buildPayload() {
       const withAudio = [];
-      for (const s of state.sections) {
-        for (const d of s.decks) {
-          // В файл идут все дорожки: у карточки их может быть до трёх на
-          // каждой стороне, и каждая — со своими кусками. Оборот
-          // переносится наравне с лицом: иначе на втором устройстве
-          // карточка приезжала бы наполовину пустой.
-          for (const c of d.cards) sidesSlots(c).forEach((sl) => withAudio.push(sl));
-        }
-      }
+      // В файл идут все дорожки: у карточки их может быть до трёх на
+      // каждой стороне, и каждая — со своими кусками. Оборот переносится
+      // наравне с лицом: иначе на втором устройстве карточка приезжала
+      // бы наполовину пустой. Карточки корзинки — наравне с остальными:
+      // они целы, и звук у них тоже цел.
+      everyCard().forEach((c) => sidesSlots(c).forEach((sl) => withAudio.push(sl)));
       // Раньше здесь был короткий путь: нет записей — сразу отдаём файл.
       // С появлением снимков он стал ловушкой: на карточках без голоса,
       // но с фотографиями, файл уходил бы пустым. Теперь короткого пути
@@ -11305,8 +11800,7 @@ body {
       // ровно то, о чём и просили.
       const grabShots = () => {
         const all = [];
-        state.sections.forEach((sec) => sec.decks.forEach((deck) =>
-          deck.cards.forEach((c) => sidesShotKeys(c).forEach((k) => all.push(k)))));
+        everyCard().forEach((c) => sidesShotKeys(c).forEach((k) => all.push(k)));
         if (!all.length) return Promise.resolve();
         report('Собираю фотографии: 0 из ' + all.length + '…', 'wait');
         const one = (i) => {
@@ -11525,6 +12019,13 @@ body {
         decks += s.decks.length;
         for (const d of s.decks) cards += d.cards.length;
       }
+      // Убранные в корзинку считаем наравне с остальными: они целы, они
+      // приедут — и в итоговом «добавлено карточек» они тоже учтены.
+      // Считать их отдельно значило бы показать два разных числа за одно
+      // и то же и заставить человека гадать, какое верное.
+      const inBinCount = (clean.bin && Array.isArray(clean.bin.cards))
+        ? clean.bin.cards.length : 0;
+      cards += inBinCount;
       const clips = (parsed && typeof parsed.clips === 'object' && parsed.clips)
         ? parsed.clips : {};
       const clipCount = Object.keys(clips).length;
@@ -11539,7 +12040,8 @@ body {
       sheet.appendChild(el('div', { class: 'sync-status ok' }, [
         el('div', { text: 'Разделов: ' + clean.sections.length }),
         el('div', { text: 'Колод: ' + decks }),
-        el('div', { text: 'Карточек: ' + cards }),
+        el('div', { text: 'Карточек: ' + cards
+          + (inBinCount ? ' (из них в корзинке: ' + inBinCount + ')' : '') }),
         el('div', { text: 'Голосовых записей: ' + clipCount }),
       ]));
       // Сколько карточек в файле заявляют звук — если записей при этом
@@ -11864,8 +12366,47 @@ body {
         deck.cards.forEach((c) => { if (!inTexts.has(c.text.trim())) cards++; });
       }
     }
+    // Корзинка считается наравне с колодами. Убранная карточка — не
+    // удалённая: замена «как в файле» вычистила бы её насовсем, и
+    // промолчать об этом нельзя.
+    const inBinTexts = new Set(binCardsOf(incoming).map((c) =>
+      String((c && c.text) || '').trim()));
+    binDeck().cards.forEach((c) => {
+      if (!inBinTexts.has(c.text.trim())) cards++;
+    });
     return { sections: sections, decks: decks, cards: cards,
              any: sections.length + decks.length + cards > 0 };
+  }
+
+  /** Карточки корзинки из присланного. Пусто — значит, её там не было. */
+  function binCardsOf(incoming) {
+    return (incoming && incoming.bin && Array.isArray(incoming.bin.cards))
+      ? incoming.bin.cards : [];
+  }
+
+  /**
+   * Заготовка карточки корзинки из файла — новой, со своим номером.
+   *
+   * Звук и снимки сюда не переписываются: у нас они лягут под своими
+   * ключами, и раскладывает их linkTracks/linkShots — ровно так же, как
+   * у карточек в колодах.
+   */
+  function binCardFromFile(inCard) {
+    const c = sanitizeCard(inCard);
+    if (!c) return null;
+    c.id = uid();
+    c.audio = false; c.audioLen = 0; c.parts = [];
+    c.extra = []; c.shots = [];
+    // Записи ещё нет — значит, и в очереди ей пока делать нечего
+    c.inList = false; c.listAt = 0;
+    const back = backFromFile(inCard.back);
+    if (back) c.back = back; else delete c.back;
+    c.side = sanitizeSideNo(inCard.side);
+    // Записка «откуда пришла» едет с карточкой: без неё возвращать было
+    // бы некуда, и на втором устройстве корзинка стала бы тупиком.
+    const from = sanitizeFrom(inCard.from);
+    if (from) c.from = from; else delete c.from;
+    return c;
   }
 
   /**
@@ -11978,7 +12519,7 @@ body {
           }
         }
         // Всё, что осталось в byText, в файле не значится
-        byText.forEach((c) => { sidesSlots(c).forEach((sl) => dropped.push(sl)); });
+        byText.forEach((c) => dropCardData(c, dropped));
         sec.decks.push(deck);
       }
       // Колоды нашего раздела, которых в файле нет
@@ -11986,7 +12527,7 @@ body {
         const kept = new Set(inSec.decks.map((d) => d.name));
         mine.decks.forEach((d) => {
           if (kept.has(d.name)) return;
-          d.cards.forEach((c) => { sidesSlots(c).forEach((sl) => dropped.push(sl)); });
+          d.cards.forEach((c) => dropCardData(c, dropped));
         });
       }
       sections.push(sec);
@@ -11995,12 +12536,13 @@ body {
     const kept = new Set(incoming.sections.map((s) => s.name));
     state.sections.forEach((sec) => {
       if (kept.has(sec.name)) return;
-      sec.decks.forEach((d) => d.cards.forEach((c) => {
-        sidesSlots(c).forEach((sl) => dropped.push(sl));
-      }));
+      sec.decks.forEach((d) => d.cards.forEach((c) => dropCardData(c, dropped)));
     });
 
     state.sections = sections;
+    // Корзинка лежит вне разделов, поэтому обходится отдельно — но по
+    // тем же правилам.
+    mirrorBin(incoming, dropped);
     // Звук удалённых карточек — из хранилища. Иначе он остался бы лежать
     // мёртвым грузом: карточки нет, а место занято.
     dropped.forEach((c) => {
@@ -12009,6 +12551,78 @@ body {
     });
     return dropped.length;
   }
+
+  /**
+   * Карточка уходит совсем: её звук и снимки больше никому не нужны.
+   *
+   * Снимки убираем здесь же, отдельной строкой, а не заодно с дорожками.
+   * Причина: у карточки без голоса дорожек нет вовсе, список выходит
+   * пустым — и её фотографии оставались лежать в хранилище навсегда.
+   */
+  function dropCardData(card, dropped) {
+    sidesSlots(card).forEach((sl) => dropped.push(sl));
+    sidesShotKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+  }
+
+  /**
+   * Корзинка «как в файле».
+   *
+   * Устроена так же, как разделы выше, и по той же причине: карточка,
+   * которая есть и там и там, остаётся собой вместе со своей записью —
+   * пересоздать её значило бы потерять звук. Лишние уходят, и их звук
+   * уходит вместе с ними.
+   *
+   * Связи для записей здесь не собираются: сразу за этой работой идёт
+   * обычное слияние, и оно соберёт их для всех карточек разом.
+   */
+  function mirrorBin(incoming, dropped) {
+    const mine = binDeck();
+    // Не карта «текст → карточка», а список, из которого совпавшие
+    // вынимаются по одной. В корзинку стекаются карточки из всех колод
+    // разом, и одинаковые тексты тут — обычное дело. Карта оставляла бы
+    // из них только первую: вторая ни с чем не сравнивалась, в новый
+    // список не попадала и пропадала вместе со своей записью, которая
+    // так и оставалась лежать в хранилище.
+    const left = mine.cards.slice();
+    const takeByText = (key) => {
+      const i = left.findIndex((c) => c.text.trim() === key);
+      return i >= 0 ? left.splice(i, 1)[0] : null;
+    };
+    const cards = [];
+    for (const inCard of binCardsOf(incoming).slice(0, LIMITS.cardsPerDeck)) {
+      const fresh = binCardFromFile(inCard);
+      if (!fresh) continue;
+      const key = fresh.text.trim();
+      const keep = takeByText(key);
+      if (!keep) { cards.push(fresh); continue; }
+      // Свои дополнительные дорожки и свой оборот уходят: и то и другое
+      // соберётся заново из файла, а иначе их звук остался бы лежать
+      // мёртвым грузом — ссылаться на него будет уже нечему.
+      (Array.isArray(keep.extra) ? keep.extra : []).forEach((e) => {
+        if (e && e.audio) dropped.push(e);
+      });
+      keep.extra = [];
+      if (keep.back) {
+        audioSlots(keep.back).forEach((sl) => dropped.push(sl));
+        shotKeys(keep.back).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+      }
+      // Всё, кроме номера и своей первой записи, — из файла
+      BIN_MIRRORED.forEach((f) => { keep[f] = fresh[f]; });
+      if (fresh.back) keep.back = fresh.back; else delete keep.back;
+      if (fresh.from) keep.from = fresh.from; else delete keep.from;
+      cards.push(keep);
+    }
+    // Что осталось у нас и в файле не значится — вместе со звуком
+    left.forEach((c) => dropCardData(c, dropped));
+    mine.cards = cards;
+  }
+
+  // Поля карточки корзинки, которые при замене берутся из файла. Номер,
+  // отметка о собственной записи и её куски сюда НЕ входят: они держат
+  // связь со звуком, уже лежащим в хранилище этого устройства.
+  const BIN_MIRRORED = ['color', 'fav', 'remind', 'head', 'headMarks',
+    'headAlign', 'headInk', 'marks', 'align', 'ink', 'link', 'peaks',
+    'at', 'inList', 'listAt', 'side'];
 
   /**
    * Связать дорожки из файла с местами у нас.
@@ -12170,6 +12784,10 @@ body {
             continue;
           }
           if (deck.cards.length >= LIMITS.cardsPerDeck) break;
+          // Такая карточка на устройстве уже есть — просто убрана в
+          // корзинку. Класть её ещё и в колоду нельзя: вернёте из
+          // корзинки, и в колоде окажутся две одинаковых.
+          if (textInBin(key)) continue;
           // Форму волны переносим сразу: пересчитать её из файла на
           // iPhone нечем, а без неё дорожка выглядела бы пустой
           // Оформление переносим вместе с текстом: без него карточка
@@ -12210,7 +12828,66 @@ body {
         }
       }
     }
+    // Корзинка — теми же правилами, но отдельно: она лежит вне разделов
+    added += mergeBin(incoming, audioLinks, shotLinks);
     return { added: added, audioLinks: audioLinks, shotLinks: shotLinks };
+  }
+
+  /**
+   * Корзинка «добавить»: чего у нас нет — приезжает, что есть —
+   * остаётся на месте вместе со своей записью.
+   *
+   * Возвращает, сколько карточек прибавилось.
+   */
+  function mergeBin(incoming, audioLinks, shotLinks) {
+    const inCards = binCardsOf(incoming);
+    if (!inCards.length) return 0;
+    const bin = binDeck();
+    const byText = new Map(bin.cards.map((c) => [c.text.trim(), c]));
+    let added = 0;
+    for (const inCard of inCards) {
+      const key = String((inCard && inCard.text) || '').trim();
+      if (!key) continue;
+      const mine = byText.get(key);
+      if (mine) {
+        linkTracks(inCard, mine, audioLinks, true);
+        linkShots(inCard, mine, shotLinks, true);
+        // Записка «откуда пришла» берётся из файла, только если своей
+        // нет: на этом устройстве карточку могли убрать из другой
+        // колоды, и её собственный адрес возврата вернее.
+        if (!mine.from) {
+          const from = sanitizeFrom(inCard.from);
+          if (from) mine.from = from;
+        }
+        if (inCard.back && typeof inCard.back === 'object') {
+          if (!backFilled(mine)) {
+            const nb = backFromFile(inCard.back);
+            if (nb) { mine.back = nb; mine.side = sanitizeSideNo(inCard.side); }
+          }
+          const myBack = backOf(mine);
+          linkTracks(inCard.back, myBack, audioLinks, true);
+          linkShots(inCard.back, myBack, shotLinks, true);
+        }
+        continue;
+      }
+      if (bin.cards.length >= LIMITS.cardsPerDeck) break;
+      // Такая карточка на устройстве уже есть — только лежит в колоде, а
+      // не в корзинке. Второй раз, да ещё и убранной, ей тут делать
+      // нечего: вернёте её потом, и в колоде окажутся две одинаковых.
+      if (textInDecks(key)) continue;
+      const fresh = binCardFromFile(inCard);
+      if (!fresh) continue;
+      bin.cards.push(fresh);
+      byText.set(key, fresh);
+      added++;
+      linkTracks(inCard, fresh, audioLinks, false);
+      linkShots(inCard, fresh, shotLinks, false);
+      if (fresh.back && inCard.back) {
+        linkTracks(inCard.back, fresh.back, audioLinks, false);
+        linkShots(inCard.back, fresh.back, shotLinks, false);
+      }
+    }
+    return added;
   }
 
   /** Разложить голосовые записи из файла по карточкам. */
