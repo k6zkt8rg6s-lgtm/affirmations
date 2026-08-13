@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-x6uJRctFpLAxqVGqMFJ7q29Y2QXuDazHqhTgYhXgHwk=';
-               style-src 'sha256-pkLCp8T82UcdiSTrkRzSKMhkskV5V1SzcHLnqT2CcjI=';
+               script-src 'sha256-qEQ6BR4hVQurCr2yKi3bnje1PGw1SeOVmijgf0LwxbY=';
+               style-src 'sha256-+4/VB2c76xcHgPNN/dyk8pd8LowNMNKeZsvYLjDHmUA=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1767,6 +1767,96 @@ body {
 .drop-into { border-radius: var(--radius-m); }
 .drop-into > .section-head h2,
 .drop-into > .section-head .chev { color: var(--ink); }
+
+
+/* ------------------------------------------------------------------
+   Полоска записи внизу экрана.
+
+   Появляется, когда человек ушёл с карточки, а запись играет дальше.
+   Внутри — та самая дорожка, что играла в карточке: не копия и не
+   картинка, а она сама, переставленная сюда вместе со всеми своими
+   обработчиками. Поэтому кнопка, волна и перемотка работают здесь
+   ровно так же.
+
+   Стоит у нижнего края и не уезжает при прокрутке: на телефоне туда
+   палец дотягивается легче всего. Отступ снизу — под домашнюю черту
+   iPhone, иначе она перечёркивала бы дорожку.
+   ------------------------------------------------------------------ */
+.mini-play {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;                 /* выше страницы, но ниже окон правки */
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: rgba(250, 249, 246, .96);
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+  border-top: 1px solid rgba(0, 0, 0, .10);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, .07);
+}
+
+/* Верхняя строка: откуда играет и крестик */
+.mini-play-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+/* Начало текста карточки. Нажатие возвращает туда, откуда играет. */
+.mini-play-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  padding: 4px 2px;
+  margin: 0;
+  font: 400 13px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Helvetica Neue", Arial, sans-serif;
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mini-play-note { flex: none; opacity: .7; }
+.mini-play-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mini-play-open:active .mini-play-text { opacity: .55; }
+
+.mini-play-close {
+  flex: none;
+  min-width: 32px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mini-play-close:active { background: rgba(0, 0, 0, .07); }
+
+/* Дозапись и удаление в полоске не показываем: здесь слушают, а не
+   правят. Ошибиться и стереть запись, промахнувшись мимо паузы, было бы
+   слишком дорого. */
+.mini-play .audio-side { display: none; }
+.mini-play .track-box { flex: 1; min-width: 0; }
+.mini-play .audio-label { font-size: 11px; }
+
+/* Место под полоску, чтобы она не накрывала последнюю строку списка и
+   кнопки внизу читалки. */
+.app.with-mini { padding-bottom: 96px; }
 </style>
 </head>
 <body>
@@ -1814,7 +1904,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '13.08.2026, 07:52';
+  const BUILD = '13.08.2026, 08:25';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -2282,6 +2372,18 @@ body {
   }
 
   /**
+   * Место, на котором остановили запись, из сохранённого.
+   *
+   * Число секунд и только оно. Дальше часа не бывает: столько не длится
+   * ни одна запись, а испорченное значение не должно уводить ползунок
+   * неведомо куда.
+   */
+  function sanitizeAt(value) {
+    if (typeof value !== 'number' || !isFinite(value) || value <= 0) return 0;
+    return Math.min(3600, Math.round(value * 100) / 100);
+  }
+
+  /**
    * Вторая и третья записи карточки из сохранённого.
    *
    * Каждая проверяется теми же мерками, что и запись самой карточки:
@@ -2305,6 +2407,8 @@ body {
         parts: sanitizeParts(e.parts),
         peaks: sanitizePeaks(e.peaks),
         trackPos: sanitizePos(e.trackPos),
+        // Где остановились в прошлый раз — у каждой дорожки своё
+        at: sanitizeAt(e.at),
       });
       if (out.length >= TRACKS_MAX - 1) break;
     }
@@ -2777,6 +2881,7 @@ body {
       peaks: sanitizePeaks(raw.peaks),
       extra: sanitizeExtra(raw.extra),
       trackPos: sanitizePos(raw.trackPos),
+      at: sanitizeAt(raw.at),
       shots: sanitizeShots(raw.shots),
     };
   }
@@ -2795,7 +2900,7 @@ body {
         align: ALIGN_DEFAULT, ink: INK_DEFAULT,
         head: '', headMarks: [],
         headAlign: ALIGN_DEFAULT, headInk: INK_DEFAULT,
-        link: '', audio: false, audioLen: 0, parts: [], peaks: [],
+        link: '', audio: false, audioLen: 0, parts: [], peaks: [], at: 0,
         extra: [], shots: [],
       };
     }
@@ -2975,6 +3080,9 @@ body {
             // Место записи самой карточки в показе. Дорожки можно
             // переставлять, и первой не обязательно стоит её собственная.
             trackPos: sanitizePos(c.trackPos),
+            // На какой секунде остановили прослушивание. В следующий раз
+            // запись продолжится отсюда, а не начнётся заново.
+            at: sanitizeAt(c.at),
             // Снимки: только номера и размеры. Сами картинки лежат
             // в хранилище устройства, как и голос.
             shots: sanitizeShots(c.shots),
@@ -7396,10 +7504,16 @@ body {
     const many = slots.length > 1;
     const again = () => { paintTracks(bar, card); };
     slots.forEach((slot, k) => {
-      const box = el('div', { class: 'track-box' });
-      const row = el('div', { class: 'track-row' + (many ? ' many' : '') }, many
-        ? [trackGrip(bar, card, k, again), box]
-        : [box]);
+      // Дорожка, которая сейчас звучит, возвращается в карточку тем же
+      // самым узлом, каким уехала. Собрать её заново значило бы оборвать
+      // звук — а он должен идти, пока человек ходит по колодам.
+      const alive = liveIs(slot);
+      const box = alive ? livePlay.box : el('div', { class: 'track-box' });
+      // Живой узел вставляем не здесь, а ниже, через liveHome: он сейчас
+      // висит в полоске внизу, и снять его оттуда надо по-честному —
+      // иначе он окажется в двух местах сразу.
+      const row = el('div', { class: 'track-row' + (many ? ' many' : '') },
+        (many ? [trackGrip(bar, card, k, again)] : []).concat(alive ? [] : [box]));
       // Обёртка нужна двум разным движениям сразу. Вбок едет сама строка,
       // и из-под неё открывается кнопка «В карточку». Вверх-вниз, при
       // перестановке дорожек, едет обёртка целиком — вместе со своей
@@ -7423,10 +7537,15 @@ body {
         if (ev.stopPropagation) ev.stopPropagation();
       });
       attachRowSwipe(row);
-      buildPlayer(box, slot, {
+      const opts = {
         repaint: again,
         gone: () => { dropTrack(card, slot); save(); again(); },
-      });
+        // Начало текста — для полоски внизу: по нему видно, чья это
+        // запись, когда самой карточки на экране уже нет
+        title: shortText(card.text) || 'Запись',
+      };
+      if (alive) liveHome(row, opts);
+      else buildPlayer(box, slot, opts);
     });
   }
 
@@ -7729,7 +7848,16 @@ body {
    * убирается только своя запись, а соседние остаются.
    */
   function buildPlayer(bar, card, opts) {
-    const killTrack = opts && opts.gone;
+    opts = opts || {};
+    // Что делать по крестику, спрашиваем каждый раз заново, а не
+    // запоминаем при сборке. Звучащий проигрыватель переезжает между
+    // экранами и живёт дольше той отрисовки, в которой родился: с
+    // запомненным действием он однажды удалил бы дорожку, дёрнув за
+    // обработчик экрана, которого давно нет.
+    const killTrack = () => opts.gone;
+    // Метка для отложенной уборки. Пока эта запись звучит, перерисовка
+    // экрана её уборку не выполняет — проигрыватель переезжает целым.
+    const token = {};
     const face = playerFace(card);
     const play = face.play, wave = face.wave, fill = face.fill;
     const barBox = face.barBox, head = face.head, label = face.label;
@@ -7830,6 +7958,27 @@ body {
     };
     const stopFollow = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
 
+    // Место, с которого продолжать. Берётся с дорожки: там оно и
+    // осталось с прошлого раза — хоть с прошлой минуты, хоть с прошлой
+    // недели, хоть с другого устройства.
+    let resumeAt = sanitizeAt(card.at);
+
+    /**
+     * Запомнить, где остановились.
+     *
+     * У самого конца запоминать нечего: в следующий раз человек хочет
+     * услышать запись сначала, а не последние полсекунды. Поэтому конец
+     * записывается нулём — как будто её и не слушали.
+     */
+    const rememberAt = () => {
+      const dur = duration();
+      const t = at();
+      const keep = (!dur || t >= dur - 0.3) ? 0 : Math.round(t * 100) / 100;
+      if (Math.abs(sanitizeAt(card.at) - keep) < 0.05) return;
+      card.at = keep;
+      save();
+    };
+
     /** Остановить всё, чем бы оно ни игралось. */
     const hush = () => {
       stopFollow();
@@ -7847,7 +7996,8 @@ body {
           hush();
           // Убираем ровно эту дорожку. Остальные — соседние записи той
           // же карточки — остаются на месте: за это отвечает killTrack.
-          if (killTrack) { killTrack(); return; }
+          const kill = killTrack();
+          if (kill) { kill(); return; }
           forgetAudio(card);              // вместе со всеми продолжениями
           save(); clear(bar);
         },
@@ -8080,6 +8230,8 @@ body {
             stopFollow();
             setTime(0);
             if (many) goPart(0, false);   // вернуться к началу для повтора
+            card.at = 0; save();          // слушали до конца — начинать снова сначала
+            liveEnded(card);
           };
           a.onerror = () => {
             if (a === audio && owner === 'element') {
@@ -8156,7 +8308,7 @@ body {
         }
       } catch (e) { /* система не поддерживает — не беда */ }
     }
-    audioCleanup.push(() => {
+    onCleanup(() => {
       const ms = (typeof navigator !== 'undefined') ? navigator.mediaSession : null;
       if (!ms) return;
       try {
@@ -8166,24 +8318,58 @@ body {
           ms.setActionHandler('pause', null);
         }
       } catch (e) { /* уже нечего снимать */ }
-    });
+    }, token);
 
     /** Пометить экран как «играет» — общее для обоих способов. */
     const markPlaying = () => {
       play.textContent = '❚❚'; playing = true;
       tellSystem('playing');
+      // С этого мгновения проигрыватель переживает переходы: уходя с
+      // карточки, он переедет в полоску внизу и продолжит играть
+      liveTake(card, bar, opts, api, token, opts.title || 'Запись');
       setTime(at()); stopFollow(); follow();
     };
     const markStopped = () => {
       play.textContent = '▶'; playing = false;
       tellSystem('paused');
+      rememberAt();
       stopFollow(); setTime(at());
     };
+
+    // Что полоска внизу разрешает делать с этой записью снаружи.
+    const api = {
+      playing: () => playing,
+      close: () => { rememberAt(); hush(); markStopped(); },
+      // После переезда дорожка стала другой ширины — столбиков в неё
+      // помещается другое число
+      refit: () => { if (face.refit()) { bars = face.bars; setTime(at()); } },
+    };
+
+    /**
+     * Встать туда, где остановились в прошлый раз.
+     *
+     * Делается внутри уже готового элемента, а не отдельным заходом в
+     * хранилище: второй заход столкнулся бы с первым, тот ответил бы
+     * «занято», и нажатие «играть» кончалось бы тишиной.
+     */
+    function applyResume(a) {
+      if (resumeAt <= 0) return;
+      const t = resumeAt;
+      resumeAt = 0;
+      if (!many) { try { a.currentTime = t; } catch (e) { /* не принял */ } return; }
+      let i = 0;
+      while (i + 1 < list.length && t >= offs[i + 1]) i++;
+      const local = Math.max(0, t - offs[i]);
+      if (i === idx) { try { a.currentTime = local; } catch (e) { /* не принял */ } return; }
+      want = local;
+      goPart(i, false);
+    }
 
     // Прежний способ — на случай, если движок откажет
     const playByElement = () => {
       ensureAudio().then((a) => {
         if (!a) return;
+        applyResume(a);
         try { a.volume = 1; } catch (e) { /* громкость не наша */ }
         const pr = a.play();
         if (pr && pr.catch) pr.catch(() => {});
@@ -8270,6 +8456,10 @@ body {
      * вызов ничего не делает.
      */
     const gone = () => {
+      // Приложение уходит с экрана — и может не вернуться вовсе:
+      // человек закроет его совсем. Место запоминаем сейчас, пока есть
+      // у кого спросить.
+      rememberAt();
       handToBackground();
     };
     const onVisible = () => {
@@ -8302,25 +8492,28 @@ body {
     };
     if (typeof document !== 'undefined' && document.addEventListener) {
       document.addEventListener('visibilitychange', onVisible);
-      audioCleanup.push(() => {
+      onCleanup(() => {
         if (document.removeEventListener) {
           document.removeEventListener('visibilitychange', onVisible);
         }
-      });
+      }, token);
     }
     if (typeof window !== 'undefined' && window.addEventListener) {
       window.addEventListener('pagehide', gone);
       window.addEventListener('blur', gone);
-      audioCleanup.push(() => {
+      onCleanup(() => {
         if (window.removeEventListener) {
           window.removeEventListener('pagehide', gone);
           window.removeEventListener('blur', gone);
         }
-      });
+      }, token);
     }
 
     if (smooth) {
-      smooth.onEnd(() => { markStopped(); smooth.seek(0); setTime(0); });
+      smooth.onEnd(() => {
+        markStopped(); smooth.seek(0); setTime(0);
+        liveEnded(card);        // доиграла — в полоске внизу ей больше нечего делать
+      });
       smooth.onAsleep(() => { handToBackground(); });
       smooth.onFail(() => {
         // Движок не справился — тихо отдаём звук прежнему способу.
@@ -8344,6 +8537,7 @@ body {
         smooth.start().then((ok) => {
           if (!ok || !smooth) return;
           fixLengths();
+          if (resumeAt > 0) { smooth.seek(resumeAt); resumeAt = 0; }
           markPlaying();
           // Пока экран горит, готовим передачу звука. При блокировке
           // экрана телефон замораживает приложение почти мгновенно, и
@@ -8437,6 +8631,7 @@ body {
       const dur = duration();
       if (!dur) return;
       const t = p * dur;
+      resumeAt = 0;          // человек сам выбрал место — прошлое ни к чему
       setTime(t);
       // Бесшовный путь перематывает сам: куски заново выкладываются на
       // шкалу от нужной секунды, без всякой догрузки
@@ -8472,7 +8667,7 @@ body {
     wave.addEventListener('pointerup', () => { seeking = false; });
     wave.addEventListener('pointercancel', () => { seeking = false; });
 
-    if (total) setTime(0);   // без длины подпись остаётся «Запись»
+    if (total) setTime(resumeAt);   // без длины подпись остаётся «Запись»
     else head.style.setProperty('opacity', '0');
     // Со следующего кадра ширина дорожки уже известна — берём столько
     // столбиков, сколько в неё влезает, и заново красим пройденную часть
@@ -8484,14 +8679,14 @@ body {
 
     // Ссылки на объекты надо освободить, иначе память держится до
     // перезагрузки страницы. Кусков может быть несколько — отпускаем все.
-    audioCleanup.push(() => {
+    onCleanup(() => {
       stopFollow();
       // Разобранный звук занимает в памяти в десятки раз больше сжатого —
       // отпускаем его сразу, а не ждём перезагрузки страницы
       if (smooth) { try { smooth.close(); } catch (e) { /* уже */ } smooth = null; }
       pool.forEach((a) => { if (a) { try { a.pause(); } catch (e) { /* уже */ } } });
       urls.forEach((u) => { if (u) URL.revokeObjectURL(u); });
-    });
+    }, token);
 
     bar.appendChild(el('div', { class: 'audio-row' }, [play, wave,
       el('div', { class: 'audio-side' }, [more, del])]));
@@ -8500,6 +8695,246 @@ body {
 
   let audioCleanup = [];
 
+/* ─── 19b-live-play.js ─────────────────────────────────────────────────
+ * Запись, которая играет дальше при переходах, и полоска внизу экрана
+ *
+ * Часть общего кода приложения. Собирается: python3 build.py
+ * Карта всех частей: КАРТА-ПРОЕКТА.md
+ * ────────────────────────────────────────────────────────────── */
+
+  // ------------------------------------------------------------------
+  // Запись не обрывается при переходе на другую карточку.
+  //
+  // Как это сделано — и почему именно так. Каждый переход собирает экран
+  // заново: старое содержимое выбрасывается целиком, и проигрыватель
+  // вместе с ним. Перенести звук в отдельный, независимый от экрана
+  // проигрыватель значило бы переписать заново самое сложное место
+  // приложения — сшивку кусков без стыка, передачу звука в фон при
+  // блокировке экрана, два элемента по очереди. Всё это далось долго и
+  // работает.
+  //
+  // Поэтому звучащий проигрыватель не пересобирается, а ПЕРЕЕЗЖАЕТ. Его
+  // узел снимается с уходящего экрана до того, как тот будет очищен, и
+  // переставляется в полоску внизу. Ни один обработчик при этом не
+  // теряется, ни один элемент звука не закрывается: для самого
+  // проигрывателя ничего не произошло, он даже не заметил переезда.
+  // Вернулись на ту же карточку — тот же самый узел переезжает обратно
+  // на своё место в полосе записей.
+  //
+  // Отсюда и правило: живой проигрыватель ровно один. Второй звук,
+  // пущенный поверх, просто забирает опеку себе.
+  // ------------------------------------------------------------------
+
+  // Кто сейчас под опекой. null — играть нечему.
+  //
+  //   slot  — дорожка (карточка или место записи), чей это звук
+  //   box   — тот самый узел, который переезжает
+  //   opts  — что делать по крестику и после дозаписи; обновляется при
+  //           каждом возвращении в карточку, потому что перерисовка
+  //           заводит новые обработчики
+  //   api   — что проигрыватель разрешает делать снаружи
+  //   token — метка для уборки: по ней его уборка не выполняется вместе
+  //           с уборкой уходящего экрана
+  //   home  — узел сейчас в карточке (true) или в полоске (false)
+  //   spot  — где эта карточка лежит: по нажатию на полоску туда и идём
+  let livePlay = null;
+  let miniBar = null;
+
+  /**
+   * Отложенная уборка с меткой хозяина.
+   *
+   * Раньше это был просто список действий, и перерисовка выполняла его
+   * целиком. Теперь у звучащего проигрывателя своя метка, и его уборка
+   * остаётся ждать: он переезжает, а не закрывается.
+   */
+  function onCleanup(fn, own) {
+    audioCleanup.push({ run: fn, own: own || null });
+  }
+
+  /** Выполнить отложенную уборку, кроме уборки живого проигрывателя. */
+  function runCleanup(keep) {
+    const rest = [];
+    audioCleanup.forEach((c) => {
+      if (keep && c.own === keep) { rest.push(c); return; }
+      try { c.run(); } catch (e) { /* уже убрано */ }
+    });
+    audioCleanup = rest;
+  }
+
+  /** Переставить узел, отцепив его от прежнего места. */
+  function adopt(parent, node) {
+    if (!parent || !node) return;
+    if (node.parentNode && node.parentNode.removeChild) {
+      node.parentNode.removeChild(node);
+    }
+    parent.appendChild(node);
+  }
+
+  /** Эта ли дорожка сейчас под опекой. */
+  function liveIs(slot) { return !!(livePlay && livePlay.slot === slot); }
+
+  /**
+   * Взять проигрыватель под опеку. Вызывается в тот миг, когда пошёл
+   * звук, — а не при сборке экрана: пока никто не нажал «играть»,
+   * переживать переходы нечему.
+   */
+  function liveTake(slot, box, opts, api, token, title) {
+    // Уже под опекой — ничего не трогаем. Иначе нажатие «играть» в самой
+    // полоске сочло бы, что проигрыватель вернулся в карточку.
+    if (liveIs(slot)) return;
+    if (livePlay) {
+      // Прежний звучал в этой же карточке — пусть остаётся обычным
+      // проигрывателем, его уберут вместе с экраном. Прежний висел в
+      // полоске — закрываем совсем, иначе он остался бы ничей.
+      if (livePlay.home) liveForget();
+      else liveDrop();
+    }
+    livePlay = {
+      slot: slot, box: box, opts: opts, api: api, token: token,
+      title: title || 'Запись', home: true,
+      spot: { sectionId: view.sectionId, deckId: view.deckId, index: view.index },
+    };
+  }
+
+  /** Снять опеку, ничего не закрывая: узел остаётся обычным на экране. */
+  function liveForget() {
+    if (!livePlay) return;
+    const token = livePlay.token;
+    livePlay = null;
+    // Его уборка больше не особенная — пусть выполнится с общим экраном
+    audioCleanup.forEach((c) => { if (c.own === token) c.own = null; });
+    miniHide();
+  }
+
+  /**
+   * Закрыть совсем: остановить звук, запомнить место, убрать полоску.
+   *
+   * Именно это делает крестик на полоске. Место, на котором остановились,
+   * остаётся записанным на дорожке — в следующий раз запись продолжится
+   * отсюда, а не начнётся заново.
+   */
+  function liveDrop() {
+    const it = livePlay;
+    if (!it) return;
+    livePlay = null;
+    try { it.api.close(); } catch (e) { /* закрывать уже нечего */ }
+    runCleanup(null);           // теперь и его уборка выполняется
+    if (it.box && it.box.parentNode && it.box.parentNode.removeChild) {
+      it.box.parentNode.removeChild(it.box);
+    }
+    miniHide();
+  }
+
+  /**
+   * Запись доиграла до конца.
+   *
+   * Стоит она в карточке — пусть стоит: человек на неё смотрит. Висит в
+   * полоске внизу — убираем: полоска говорит «идёт запись», а она уже
+   * не идёт.
+   */
+  function liveEnded(slot) {
+    if (!liveIs(slot) || livePlay.home) return;
+    liveDrop();
+  }
+
+  /**
+   * Перед перерисовкой: снять живой узел с уходящего экрана.
+   *
+   * Возвращает метку, уборку которой выполнять нельзя. null — живого
+   * проигрывателя нет или он больше не нужен.
+   */
+  function livePark() {
+    if (!livePlay) return null;
+    // Замолчавший проигрыватель, стоящий в карточке, ничем не отличается
+    // от обычного: везти с собой молчание незачем.
+    if (livePlay.home && !livePlay.api.playing()) { liveForget(); return null; }
+    livePlay.home = false;
+    if (livePlay.box.parentNode && livePlay.box.parentNode.removeChild) {
+      livePlay.box.parentNode.removeChild(livePlay.box);
+    }
+    return livePlay.token;
+  }
+
+  /**
+   * После перерисовки: узел вернулся в карточку — полоска не нужна;
+   * не вернулся — показываем полоску.
+   */
+  function liveSettle() {
+    if (!livePlay || livePlay.home) { miniHide(); return; }
+    miniShow();
+  }
+
+  /**
+   * Вернуть живой узел на его место в карточке.
+   *
+   * Обработчики у него старые, с прошлой отрисовки, и часть из них
+   * смотрит на узлы, которых уже нет. Поэтому вместе с узлом обновляем
+   * и то, что он зовёт наружу: перерисовку полосы и удаление дорожки.
+   */
+  function liveHome(row, opts) {
+    if (!livePlay) return;
+    livePlay.home = true;
+    if (opts) {
+      livePlay.opts.repaint = opts.repaint;
+      livePlay.opts.gone = opts.gone;
+    }
+    livePlay.spot = { sectionId: view.sectionId, deckId: view.deckId,
+                      index: view.index };
+    adopt(row, livePlay.box);
+    if (livePlay.api.refit) livePlay.api.refit();
+  }
+
+  // ------------------------------------------------------------------
+  // Полоска внизу экрана.
+  //
+  // Стоит у нижнего края и никуда не уезжает: на телефоне туда палец
+  // дотягивается легче всего. Внутри — та самая дорожка, что играла в
+  // карточке, целиком: кнопка, волна, время. Она живая — можно
+  // остановить, продолжить и перемотать, не возвращаясь в карточку.
+  //
+  // Сверху строка с началом текста карточки: нажатие на неё
+  // возвращает туда, откуда играет. Крестик справа закрывает совсем.
+  // ------------------------------------------------------------------
+  function miniShow() {
+    if (!miniBar) {
+      miniBar = el('div', {
+        class: 'mini-play',
+        attrs: { role: 'region', 'aria-label': 'Идёт запись' },
+      });
+      document.body.appendChild(miniBar);
+    }
+    clear(miniBar);
+    const open = el('button', {
+      class: 'mini-play-open',
+      attrs: { type: 'button', 'aria-label': 'Вернуться к карточке' },
+      on: { click: () => {
+        const s = livePlay && livePlay.spot;
+        if (!s) return;
+        go({ name: 'read', sectionId: s.sectionId, deckId: s.deckId, index: s.index });
+      } },
+    }, [
+      el('span', { class: 'mini-play-note', attrs: { 'aria-hidden': 'true' }, text: '♪' }),
+      el('span', { class: 'mini-play-text', text: livePlay.title }),
+    ]);
+    const close = el('button', {
+      class: 'mini-play-close',
+      attrs: { type: 'button', 'aria-label': 'Закрыть проигрыватель' },
+      text: '✕',
+      on: { click: () => { liveDrop(); render(); } },
+    });
+    miniBar.appendChild(el('div', { class: 'mini-play-top' }, [open, close]));
+    adopt(miniBar, livePlay.box);
+    if (livePlay.api.refit) livePlay.api.refit();
+    if (root && root.classList) root.classList.add('with-mini');
+  }
+
+  function miniHide() {
+    if (miniBar && miniBar.parentNode && miniBar.parentNode.removeChild) {
+      miniBar.parentNode.removeChild(miniBar);
+    }
+    miniBar = null;
+    if (root && root.classList) root.classList.remove('with-mini');
+  }
 /* ─── 20-modals.js ─────────────────────────────────────────────────────
  * Модальные окна: правка раздела, колоды, карточки
  *
@@ -9189,7 +9624,7 @@ body {
       try { url = URL.createObjectURL(blob); } catch (e) { if (done) done(false); return; }
       node.setAttribute('src', url);
       // Ссылку держим до ухода с экрана: пока картинка видна, она нужна
-      audioCleanup.push(() => { try { URL.revokeObjectURL(url); } catch (e) { /* уже */ } });
+      onCleanup(() => { try { URL.revokeObjectURL(url); } catch (e) { /* уже */ } });
       if (done) done(true);
     }).catch(() => { if (done) done(false); });
   }
@@ -10763,6 +11198,7 @@ body {
             keep.headAlign = sanitizeAlign(inCard.headAlign);
             keep.headInk = sanitizeInk(inCard.headInk);
             keep.peaks = sanitizePeaks(inCard.peaks);
+            keep.at = sanitizeAt(inCard.at);
             // Оборот — тоже «как в файле». Свой уходит целиком: его
             // записи и снимки убираем из хранилища, а список собирается
             // заново из присланного. Иначе на устройстве осталась бы
@@ -10795,6 +11231,10 @@ body {
                               // файл, применённый дважды, менял бы вид
                               // карточки во второй раз
                               extra: [],
+                              // Место остановки заводим сразу, пустым: без
+                              // него один и тот же файл, применённый дважды,
+                              // менял бы карточку во второй раз
+                              at: sanitizeAt(inCard.at),
                               peaks: sanitizePeaks(inCard.peaks) };
             // Оборот и то, какой стороной карточка лежала, — из файла.
             // Звук и снимки оборота приедут следом, своими кусками.
@@ -10858,6 +11298,10 @@ body {
       const dst = k === 0 ? mine
         : { id: uid(), audio: false, audioLen: 0, parts: [], peaks: [] };
       dst.trackPos = k;
+      // Место, на котором запись остановили, едет вместе с ней. Своё у
+      // карточки, которая была здесь и раньше, не трогаем при обычном
+      // «добавить»: человек слушает её на этом устройстве.
+      if (k > 0 || !existing) dst.at = sanitizeAt(src.at);
       if (k > 0) mine.extra.push(dst);
       out.push({ from: src.id, card: dst, len: src.audioLen,
                  peaks: sanitizePeaks(src.peaks),
@@ -11006,6 +11450,7 @@ body {
                           ink: sanitizeInk(inCard.ink),
                           link: sanitizeLink(inCard.link),
                           extra: [],
+                          at: sanitizeAt(inCard.at),
                           peaks: sanitizePeaks(inCard.peaks) };
           // Оборот новой карточки — из файла, вместе с тем, какой
           // стороной её оставили на том устройстве
@@ -11205,11 +11650,13 @@ body {
       document.removeEventListener('keydown', readerKeyHandler);
       readerKeyHandler = null;
     }
-    // Останавливаем звук и освобождаем ссылки прошлого экрана: без этого
-    // запись продолжала бы играть после перехода на другую карточку
+    // Освобождаем ссылки прошлого экрана. Всё, кроме одного: запись,
+    // которая играет прямо сейчас, переезжает на новый экран целой.
+    // Раньше здесь обрывалось всё подряд, и переход на другую карточку
+    // обрывал и звук — ровно то, чего быть не должно.
     stopRecording();
-    audioCleanup.forEach((fn) => { try { fn(); } catch (e) { /* уже убрано */ } });
-    audioCleanup = [];
+    const keepPlaying = livePark();
+    runCleanup(keepPlaying);
     // Обработчики жеста «назад» висят на корне и переживают перерисовку —
     // снимаем их сами, иначе накопятся и начнут срабатывать по нескольку раз
     if (backSwipeCleanup) { backSwipeCleanup(); backSwipeCleanup = null; }
@@ -11221,6 +11668,9 @@ body {
     else if (view.name === 'deck') content = renderDeck();
     else content = renderHome();
     root.appendChild(content);
+    // Звучащая запись либо вернулась в свою карточку, либо ей нужна
+    // полоска внизу: играет-то она в любом случае
+    liveSettle();
 
     // Возвращаемся туда, где стояли на этом экране. Если человек здесь
     // ещё не был — начинаем сверху, как и раньше.
