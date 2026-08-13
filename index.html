@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-OcoDJnc0fFkAiT9GtRKYMH1aTBXIC0A/+QneawuFStw=';
-               style-src 'sha256-RfMjlyX2zgdZHr7pNrLtfwgB9rQdwozimeSP1I4m+uU=';
+               script-src 'sha256-iEHU+7Qmt83N+MH5nn9HB17tlA6519ofjPMNBEYqr1c=';
+               style-src 'sha256-ZScj6U1XP7jUPsv/dYVENOGD6HpAGcJ7xkd3z5K+TDI=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1868,23 +1868,37 @@ body {
    какая именно запись карточки стоит в очереди, а не только то, что
    что-то стоит. Место под цифры держим всегда, даже пустым, иначе
    кнопка прыгала бы по высоте в тот миг, когда запись берут. */
+/* В покое — тёмная, как все кнопки ряда; загорается только когда запись
+   взята в очередь. Размер и место те же, что у сердечка слева и
+   карандаша справа: закрашивание не должно двигать её с места. */
 .iconbtn.liststar {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  line-height: 1;
+  position: relative;
+  background: transparent;
+  font-size: 21px;
+  color: var(--ink-soft);
 }
 .iconbtn.liststar.on { color: var(--star); }
-.liststar-sign { font-size: 17px; line-height: 1; }
+
+/* Номера взятых записей — только когда записей на стороне несколько.
+   Лежат ПОВЕРХ кнопки, а не в её потоке: сама звёздочка от них не
+   сдвигается и не мельчает. У единственной записи их нет вовсе — цифра
+   «1» там ничего не сообщает. */
 .liststar-nums {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2px;
+  text-align: center;
+  pointer-events: none;
   font: 600 9px/1 -apple-system, BlinkMacSystemFont, sans-serif;
   letter-spacing: .5px;
   color: var(--star);
-  height: 10px;
-  margin-top: 1px;
 }
+/* Звёздочку с цифрами не двигаем вовсе: она остаётся ровно по центру
+   кнопки, как и без них. Цифры помещаются ниже её лучей сами — значок
+   не занимает всю высоту строки. Метка нужна только чтобы отличить это
+   состояние в разметке. */
+.iconbtn.liststar.numbered { line-height: 1; }
 
 /* Окно «какие записи взять» — когда их на карточке больше одной */
 .pick-tracks { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 12px; }
@@ -1941,15 +1955,23 @@ body {
 
 /* Стрелки по краям живой дорожки: предыдущая и следующая запись очереди.
    Гаснут, когда шагать некуда, — и тогда просто ничего не делают. */
-.mini-play-line { display: flex; align-items: center; gap: 6px; }
+.mini-play-line { display: flex; align-items: center; gap: 8px; }
+/* Кружок ровно такой же, как у кнопки проигрывания рядом: три круглые
+   кнопки в одну линию читаются как один набор, а не как «кнопка и два
+   значка по краям». */
 .mini-play-step {
-  min-width: 34px;
-  min-height: 34px;
-  font-size: 19px;
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .14);
+  color: #2B2408;
+  font-size: 17px;
   line-height: 1;
-  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.mini-play-step:active { background: rgba(0, 0, 0, .07); }
+.mini-play-step:active { background: rgba(0, 0, 0, .22); }
 .mini-play-step.off { opacity: .28; cursor: default; }
 </style>
 </head>
@@ -1998,7 +2020,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '13.08.2026, 13:05';
+  const BUILD = '13.08.2026, 13:22';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -10907,21 +10929,28 @@ body {
     if (!slots.length) return null;
     const nums = sideListNumbers(side);
     const on = nums.length > 0;
+    // Цифры под звёздочкой нужны только там, где записей несколько:
+    // тогда по ним видно, какая именно взята. У единственной записи
+    // цифра ничего не сообщает — «запись 1» и так единственная, —
+    // поэтому звёздочка просто загорается, как сердечко рядом.
+    const many = slots.length > 1;
     const star = el('button', {
-      class: 'iconbtn liststar' + (on ? ' on' : ''),
+      class: 'iconbtn liststar' + (on ? ' on' : '') + (many && on ? ' numbered' : ''),
       attrs: {
         type: 'button',
         'aria-pressed': String(on),
         'aria-label': on ? 'Убрать из плейлиста' : 'В плейлист',
-        title: on ? 'Записи в плейлисте: ' + nums.join(', ') : 'В плейлист',
+        title: on
+          ? (many ? 'Записи в плейлисте: ' + nums.join(', ') : 'Запись в плейлисте')
+          : 'В плейлист',
       },
-    }, [
-      el('span', { class: 'liststar-sign', text: on ? '★' : '☆' }),
-      // Номера взятых записей — маленькими цифрами под звёздочкой.
-      // Место под них держим всегда, даже пустым: иначе кнопка прыгала
-      // бы по высоте в тот миг, когда запись берут в очередь.
+      text: on ? '★' : '☆',
+    }, many && on ? [
+      // Цифры стоят поверх кнопки, а не в её потоке: сама звёздочка от
+      // них не сдвигается и не мельчает — она остаётся ровно там же, где
+      // сердечко и карандаш по сторонам.
       el('span', { class: 'liststar-nums', text: nums.join('·') }),
-    ]);
+    ] : []);
     star.addEventListener('click', () => {
       if (slots.length === 1) {
         if (slots[0].inList) playlistDrop(slots[0]);
