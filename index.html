@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-qEQ6BR4hVQurCr2yKi3bnje1PGw1SeOVmijgf0LwxbY=';
-               style-src 'sha256-+4/VB2c76xcHgPNN/dyk8pd8LowNMNKeZsvYLjDHmUA=';
+               script-src 'sha256-OcoDJnc0fFkAiT9GtRKYMH1aTBXIC0A/+QneawuFStw=';
+               style-src 'sha256-RfMjlyX2zgdZHr7pNrLtfwgB9rQdwozimeSP1I4m+uU=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1857,6 +1857,100 @@ body {
 /* Место под полоску, чтобы она не накрывала последнюю строку списка и
    кнопки внизу читалки. */
 .app.with-mini { padding-bottom: 96px; }
+
+
+/* ------------------------------------------------------------------
+   Плейлист: звёздочка на карточке, окно выбора записей, экран списка.
+   ------------------------------------------------------------------ */
+
+/* Звёздочка «взять голос в плейлист».
+   Под значком — номера взятых записей маленькими цифрами: по ним видно,
+   какая именно запись карточки стоит в очереди, а не только то, что
+   что-то стоит. Место под цифры держим всегда, даже пустым, иначе
+   кнопка прыгала бы по высоте в тот миг, когда запись берут. */
+.iconbtn.liststar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  line-height: 1;
+}
+.iconbtn.liststar.on { color: var(--star); }
+.liststar-sign { font-size: 17px; line-height: 1; }
+.liststar-nums {
+  font: 600 9px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: .5px;
+  color: var(--star);
+  height: 10px;
+  margin-top: 1px;
+}
+
+/* Окно «какие записи взять» — когда их на карточке больше одной */
+.pick-tracks { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 12px; }
+.pick-track {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 8px 12px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-m);
+  background: var(--sheet);
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.pick-track.on { border-color: var(--star); background: rgba(217, 147, 11, .08); }
+.pick-mark { flex: none; font-size: 17px; color: var(--star); }
+.pick-track-no { flex: 1; }
+.pick-track-len { flex: none; font-size: 13px; color: var(--ink-soft); }
+
+/* Экран плейлиста. Строка та же, что в колоде, но под текстом — вторая
+   строчка помельче: какая это запись, сколько длится, играет ли. */
+.list-count { font-size: 13px; color: var(--ink-soft); flex: none; }
+.list-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.list-sub { font-size: 12px; color: var(--ink-soft); }
+.mini.playing { box-shadow: 0 0 0 2px var(--star), 0 1px 2px rgba(0, 0, 0, .05); }
+
+/* Кнопка плейлиста в шапке главного экрана и в полоске внизу */
+.iconbtn.listbtn { color: var(--star); }
+
+.mini-play-list,
+.mini-play-step {
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  font: inherit;
+}
+.mini-play-list {
+  min-width: 32px;
+  min-height: 32px;
+  font-size: 14px;
+  color: var(--star);
+  background: rgba(217, 147, 11, .14);
+}
+.mini-play-list:active { background: rgba(217, 147, 11, .26); }
+
+/* Стрелки по краям живой дорожки: предыдущая и следующая запись очереди.
+   Гаснут, когда шагать некуда, — и тогда просто ничего не делают. */
+.mini-play-line { display: flex; align-items: center; gap: 6px; }
+.mini-play-step {
+  min-width: 34px;
+  min-height: 34px;
+  font-size: 19px;
+  line-height: 1;
+  color: var(--ink);
+}
+.mini-play-step:active { background: rgba(0, 0, 0, .07); }
+.mini-play-step.off { opacity: .28; cursor: default; }
 </style>
 </head>
 <body>
@@ -1904,7 +1998,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '13.08.2026, 08:25';
+  const BUILD = '13.08.2026, 13:05';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -2383,6 +2477,18 @@ body {
     return Math.min(3600, Math.round(value * 100) / 100);
   }
 
+  // Сколько записей помещается в плейлист. Стоит здесь, а не рядом с
+  // самим плейлистом: сохранённое читается при запуске приложения, и
+  // проверка места в очереди нужна раньше, чем до плейлиста доходит
+  // очередь объявлений.
+  const LIST_MAX = 300;
+
+  /** Место записи в плейлисте из сохранённого. */
+  function sanitizeListAt(v) {
+    if (typeof v !== 'number' || !isFinite(v) || v < 0) return 0;
+    return Math.min(LIST_MAX, Math.round(v));
+  }
+
   /**
    * Вторая и третья записи карточки из сохранённого.
    *
@@ -2409,6 +2515,9 @@ body {
         trackPos: sanitizePos(e.trackPos),
         // Где остановились в прошлый раз — у каждой дорожки своё
         at: sanitizeAt(e.at),
+        // Взята ли запись в плейлист и какая она там по счёту
+        inList: e.inList === true,
+        listAt: sanitizeListAt(e.listAt),
       });
       if (out.length >= TRACKS_MAX - 1) break;
     }
@@ -2882,6 +2991,8 @@ body {
       extra: sanitizeExtra(raw.extra),
       trackPos: sanitizePos(raw.trackPos),
       at: sanitizeAt(raw.at),
+      inList: raw.inList === true,
+      listAt: sanitizeListAt(raw.listAt),
       shots: sanitizeShots(raw.shots),
     };
   }
@@ -2901,7 +3012,7 @@ body {
         head: '', headMarks: [],
         headAlign: ALIGN_DEFAULT, headInk: INK_DEFAULT,
         link: '', audio: false, audioLen: 0, parts: [], peaks: [], at: 0,
-        extra: [], shots: [],
+        inList: false, listAt: 0, extra: [], shots: [],
       };
     }
     return card.back;
@@ -2956,6 +3067,10 @@ body {
     b.parts = [];
     b.extra = [];
     b.shots = [];
+    // Записи ещё нет — значит, и в очереди ей пока делать нечего.
+    // Отметка вернётся вместе со звуком, когда он ляжет в хранилище.
+    b.inList = false;
+    b.listAt = 0;
     return b;
   }
 
@@ -3083,6 +3198,11 @@ body {
             // На какой секунде остановили прослушивание. В следующий раз
             // запись продолжится отсюда, а не начнётся заново.
             at: sanitizeAt(c.at),
+            // Плейлист: взята ли запись в очередь и какая она там по
+            // счёту. Отметка живёт на самой дорожке, а не отдельным
+            // списком, — тогда она не может от неё отстать.
+            inList: c.inList === true,
+            listAt: sanitizeListAt(c.listAt),
             // Снимки: только номера и размеры. Сами картинки лежат
             // в хранилище устройства, как и голос.
             shots: sanitizeShots(c.shots),
@@ -3581,6 +3701,14 @@ body {
         // и берёт цвет у самой кнопки.
         el('span', { class: 'fold-mark' }),
       ]),
+      // Плейлист — прямо отсюда, не открывая ни одной карточки и не
+      // запуская звука. Показывается, только когда в нём что-то есть:
+      // пустой список открывать незачем.
+      playlistSize() ? el('button', {
+        class: 'iconbtn listbtn', attrs: {
+          'aria-label': 'Плейлист', title: 'Плейлист', type: 'button' },
+        text: '☰', on: { click: () => openPlaylist() },
+      }) : null,
       el('button', {
         class: 'iconbtn', attrs: {
           'aria-label': 'Ещё', title: 'Ещё', type: 'button' },
@@ -6310,20 +6438,13 @@ body {
         // Звёздочка — вторая отметка, рядом с сердечком и с той же
         // повадкой: нажал — загорелась, нажал ещё — погасла. Смысл
         // другой: сердечко собирает любимое в отдельный список наверху
-        // главного экрана, звёздочка отбирает карточки в напоминания.
+        // главного экрана, звёздочка берёт голос этой стороны в плейлист.
         // Цвет тоже другой, тёплый: два одинаково красных значка рядом
         // читались бы как одно и то же, нажатое дважды.
-        el('button', {
-          class: 'iconbtn star' + (card.remind ? ' on' : ''),
-          attrs: {
-            type: 'button',
-            'aria-pressed': String(!!card.remind),
-            'aria-label': card.remind ? 'Убрать из напоминаний' : 'В напоминания',
-            title: card.remind ? 'Убрать из напоминаний' : 'В напоминания',
-          },
-          text: card.remind ? '★' : '☆',
-          on: { click: () => { card.remind = !card.remind; save(); render(); } },
-        }),
+        //
+        // На стороне без записей её нет вовсе: брать в плейлист нечего, а
+        // кнопка, которая ничего не делает, только сбивает с толку.
+        makeListStar(face),
         el('button', {
           class: 'iconbtn ghost', attrs: { 'aria-label': 'Изменить', type: 'button' },
           text: '✎', on: { click: () => editCard(deck, card, face) },
@@ -7876,7 +7997,12 @@ body {
 
     // Бесшовный путь для склеенной записи. Пока он жив, элементы звука
     // не участвуют вовсе — куски выложены на общую шкалу движка.
-    let smooth = many ? smoothChain(card, list) : null;
+    //
+    // Для очереди он не годится и потому выключается. Движок оживает
+    // только по нажатию человека, а очередь запускает следующую запись
+    // сама, без нажатия: там нужен обычный элемент звука — тот самый,
+    // разбуженный когда-то и слушающийся дальше без спроса.
+    let smooth = (many && !opts.element) ? smoothChain(card, list) : null;
     const seamless = () => !!(smooth && smooth.ready());
 
     const duration = () => {
@@ -7901,7 +8027,7 @@ body {
     // приложение уходит в фон, звук переходит к обычному проигрывателю,
     // и обратно уже не возвращается. Всё остальное — время, ползунок,
     // кнопка — спрашивает именно у хозяина, а не угадывает.
-    let owner = many ? 'smooth' : 'element';
+    let owner = (many && smooth) ? 'smooth' : 'element';
 
     /** Сколько прошло с начала всей записи, а не текущего куска. */
     const at = () => {
@@ -8241,7 +8367,15 @@ body {
           return a;
         };
 
-        audio = wire(new Audio(u));
+        // Очередь даёт свой, заранее разбуженный элемент: только ему
+        // разрешено зазвучать без нажатия человека
+        if (opts.element) {
+          audio = wire(opts.element);
+          audio.src = u;
+          if (typeof audio.load === 'function') audio.load();
+        } else {
+          audio = wire(new Audio(u));
+        }
         audio.__part = 0;
         pool[0] = audio;
         live = 0;
@@ -8327,6 +8461,9 @@ body {
       // С этого мгновения проигрыватель переживает переходы: уходя с
       // карточки, он переедет в полоску внизу и продолжит играть
       liveTake(card, bar, opts, api, token, opts.title || 'Запись');
+      // Пока играет запись из плейлиста, следующей понадобится
+      // разбуженный элемент — будим его, пока мы внутри нажатия
+      if (card.inList) queueWake();
       setTime(at()); stopFollow(); follow();
     };
     const markStopped = () => {
@@ -8525,7 +8662,8 @@ body {
       });
     }
 
-    play.addEventListener('click', () => {
+    /** Нажали «играть» — или очередь запустила запись сама. */
+    const togglePlay = () => {
       if (taping) return;                    // сейчас пишем, а не слушаем
       if (owner === 'smooth' && smooth && smooth.playing()) {
         smooth.pause(); markStopped(); return;
@@ -8547,7 +8685,9 @@ body {
         return;
       }
       playByElement();
-    });
+    };
+    play.addEventListener('click', togglePlay);
+    api.toggle = togglePlay;
 
     /**
      * Запомнить настоящие длины кусков.
@@ -8691,6 +8831,7 @@ body {
     bar.appendChild(el('div', { class: 'audio-row' }, [play, wave,
       el('div', { class: 'audio-side' }, [more, del])]));
     bar.appendChild(label);
+    return api;
   }
 
   let audioCleanup = [];
@@ -8791,9 +8932,22 @@ body {
     }
     livePlay = {
       slot: slot, box: box, opts: opts, api: api, token: token,
-      title: title || 'Запись', home: true,
-      spot: { sectionId: view.sectionId, deckId: view.deckId, index: view.index },
+      title: title || 'Запись',
+      // Запись, пущенную очередью, никто в карточку не ставил: её узел
+      // сразу живёт в полоске внизу, и место карточки приходит извне.
+      home: !opts.queue,
+      spot: opts.spot || { sectionId: view.sectionId, deckId: view.deckId,
+                           index: view.index },
     };
+    // Запись пустила очередь: её узел никто в карточку не ставил, и
+    // показать полоску, кроме нас, некому. Звук трогается не сразу, а
+    // когда хранилище отдаст запись, — поэтому и полоска появляется
+    // здесь, а не в той отрисовке, из которой запись запустили.
+    if (!livePlay.home) {
+      miniShow();
+      // На экране списка отмечена играющая строка — она сменилась
+      if (view.name === 'list') render();
+    }
   }
 
   /** Снять опеку, ничего не закрывая: узел остаётся обычным на экране. */
@@ -8833,8 +8987,128 @@ body {
    * не идёт.
    */
   function liveEnded(slot) {
-    if (!liveIs(slot) || livePlay.home) return;
+    if (!liveIs(slot)) return;
+    // Запись из плейлиста не заканчивает дело, а передаёт его дальше:
+    // следующая идёт сразу, без паузы и без нажатия.
+    const i = playlistIndexOf(slot);
+    if (i >= 0 && playlistAt(i + 1)) { playQueueAt(i + 1); return; }
+    if (livePlay.home) return;
     liveDrop();
+  }
+
+  // ------------------------------------------------------------------
+  // Очередь: один элемент звука на весь плейлист.
+  //
+  // Здесь всё держится на одном правиле браузера: элемент, которому
+  // однажды разрешили зазвучать внутри нажатия человека, дальше слушается
+  // без спроса — ему можно ставить новый источник и запускать сколько
+  // угодно раз. Новый элемент такого права не имеет, и на iPhone
+  // следующая запись просто не пошла бы.
+  //
+  // Поэтому элемент у очереди один и тот же на всё время работы. Будим
+  // его крошечной тишиной — в тот самый миг, когда человек нажимает
+  // «играть» на записи из плейлиста или выбирает запись в самом списке.
+  // ------------------------------------------------------------------
+  let queueEl = null;
+  let silence = '';
+
+  /** Ссылка на пол-мгновения тишины. Нужна только чтобы разбудить звук. */
+  function silenceUrl() {
+    if (silence) return silence;
+    // Простейший wav: заголовок и горстка нулей. Строим сами, потому что
+    // ссылка вида data: запрещена политикой безопасности, а объект —
+    // разрешён: он рождён на этом же устройстве.
+    const n = 400;
+    const buf = new Uint8Array(44 + n * 2);
+    const put = (at, str) => {
+      for (let i = 0; i < str.length; i++) buf[at + i] = str.charCodeAt(i);
+    };
+    const put32 = (at, v) => {
+      buf[at] = v & 255; buf[at + 1] = (v >> 8) & 255;
+      buf[at + 2] = (v >> 16) & 255; buf[at + 3] = (v >> 24) & 255;
+    };
+    const put16 = (at, v) => { buf[at] = v & 255; buf[at + 1] = (v >> 8) & 255; };
+    put(0, 'RIFF'); put32(4, 36 + n * 2); put(8, 'WAVE');
+    put(12, 'fmt '); put32(16, 16); put16(20, 1); put16(22, 1);
+    put32(24, 8000); put32(28, 16000); put16(32, 2); put16(34, 16);
+    put(36, 'data'); put32(40, n * 2);
+    try {
+      silence = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+    } catch (e) { silence = ''; }
+    return silence;
+  }
+
+  /**
+   * Разбудить общий элемент очереди.
+   *
+   * Звать только изнутри нажатия человека — в этом весь смысл.
+   * Повторные вызовы ничего не делают: элемент уже разбужен.
+   */
+  function queueWake() {
+    if (queueEl || typeof Audio !== 'function') return queueEl;
+    try {
+      const a = new Audio();
+      const u = silenceUrl();
+      if (u) a.src = u;
+      a.muted = true;
+      const calm = () => {
+        try { a.pause(); a.muted = false; a.currentTime = 0; }
+        catch (e) { /* уже */ }
+      };
+      const pr = a.play();
+      if (pr && pr.then) pr.then(calm).catch(calm);
+      else calm();
+      queueEl = a;
+    } catch (e) { queueEl = null; }
+    return queueEl;
+  }
+
+  /**
+   * Передать звук очереди: то, что играло раньше, замолкает.
+   *
+   * Стояло оно в карточке — узел там и остаётся, обычным проигрывателем:
+   * убирать его нельзя, человек на него смотрит. Висело в полоске —
+   * закрываем совсем.
+   */
+  function liveHandOver() {
+    if (!livePlay) return;
+    if (!livePlay.home) { liveDrop(); return; }
+    try { livePlay.api.close(); } catch (e) { /* уже нечего */ }
+    liveForget();
+  }
+
+  /** Запустить запись, стоящую в очереди под этим номером. */
+  function playQueueAt(i) {
+    const it = playlistAt(i);
+    if (!it) return false;
+    queueWake();
+    liveHandOver();
+    const box = el('div', { class: 'track-box' });
+    const api = buildPlayer(box, it.slot, {
+      title: shortText(it.side.text) || shortText(it.card.text) || 'Запись',
+      element: queueEl,
+      queue: true,
+      spot: { sectionId: it.sectionId, deckId: it.deckId, index: it.index },
+      repaint: () => render(),
+      gone: () => { playlistDrop(it.slot); save(); render(); },
+    });
+    api.toggle();
+    return true;
+  }
+
+  /** Предыдущая или следующая запись очереди — прямо из полоски. */
+  function queueStep(delta) {
+    if (!livePlay) return false;
+    const i = playlistIndexOf(livePlay.slot);
+    if (i < 0) return false;
+    return playQueueAt(i + delta);
+  }
+
+  /** Есть ли куда шагнуть от того, что играет сейчас. */
+  function queueCan(delta) {
+    if (!livePlay) return false;
+    const i = playlistIndexOf(livePlay.slot);
+    return i >= 0 && !!playlistAt(i + delta);
   }
 
   /**
@@ -8916,14 +9190,41 @@ body {
       el('span', { class: 'mini-play-note', attrs: { 'aria-hidden': 'true' }, text: '♪' }),
       el('span', { class: 'mini-play-text', text: livePlay.title }),
     ]);
+    // Кнопка списка. Нажатие на пустое место полоски возвращает к
+    // карточке, а эта — открывает плейлист: два разных места, два разных
+    // действия, промахнуться нельзя.
+    const toList = el('button', {
+      class: 'mini-play-list',
+      attrs: { type: 'button', 'aria-label': 'Открыть плейлист',
+               title: 'Плейлист' },
+      text: '☰',
+      on: { click: () => openPlaylist() },
+    });
     const close = el('button', {
       class: 'mini-play-close',
       attrs: { type: 'button', 'aria-label': 'Закрыть проигрыватель' },
       text: '✕',
       on: { click: () => { liveDrop(); render(); } },
     });
-    miniBar.appendChild(el('div', { class: 'mini-play-top' }, [open, close]));
-    adopt(miniBar, livePlay.box);
+    miniBar.appendChild(el('div', { class: 'mini-play-top' },
+      [open, toList, close]));
+
+    // Стрелки по краям живой дорожки: предыдущая и следующая запись
+    // очереди, не открывая список. Гаснут, когда шагать некуда, —
+    // и тогда просто ничего не делают.
+    const step = (delta, sign, name) => el('button', {
+      class: 'mini-play-step' + (queueCan(delta) ? '' : ' off'),
+      attrs: { type: 'button', 'aria-label': name, title: name,
+               'aria-disabled': String(!queueCan(delta)) },
+      text: sign,
+      on: { click: () => { queueStep(delta); } },
+    });
+    const line = el('div', { class: 'mini-play-line' }, [
+      step(-1, '‹', 'Предыдущая запись'),
+    ]);
+    miniBar.appendChild(line);
+    adopt(line, livePlay.box);
+    line.appendChild(step(1, '›', 'Следующая запись'));
     if (livePlay.api.refit) livePlay.api.refit();
     if (root && root.classList) root.classList.add('with-mini');
   }
@@ -10392,6 +10693,399 @@ body {
     document.body.appendChild(wrap);
   }
 
+/* ─── 24b-playlist.js ──────────────────────────────────────────────────
+ * Плейлист: список записей, экран со списком, выбор записей карточки
+ *
+ * Часть общего кода приложения. Собирается: python3 build.py
+ * Карта всех частей: КАРТА-ПРОЕКТА.md
+ * ────────────────────────────────────────────────────────────── */
+
+  // ------------------------------------------------------------------
+  // Плейлист — очередь голосовых записей.
+  //
+  // В нём лежат ЗАПИСИ, а не карточки: у карточки их может быть до трёх
+  // на каждой стороне, и в очередь можно взять любую — хоть все, хоть
+  // одну вторую.
+  //
+  // Хранится он не отдельным списком, а двумя числами на самой дорожке:
+  //   inList — взята в очередь,
+  //   listAt — какая она в очереди по счёту.
+  //
+  // Так сделано намеренно, а не из лени. Отдельный список пришлось бы
+  // держать в согласии с карточками: удалили карточку — вычисти список,
+  // перенесли запись на другое устройство — там у неё другой номер, и
+  // список ссылается в пустоту. С отметкой на самой дорожке ничего этого
+  // нет: она уезжает вместе с записью в файле обмена, исчезает вместе с
+  // удалённой карточкой и не может «отстать» от неё ни при каких
+  // обстоятельствах. Ровно тем же способом уже устроен порядок дорожек
+  // внутри карточки (trackPos) — и по той же причине.
+  // ------------------------------------------------------------------
+
+  // LIST_MAX и sanitizeListAt объявлены не здесь, а рядом с остальными
+  // проверками звука, в самом начале файла. Причина та же, по которой
+  // там же стоят буквы оформления: сохранённое читается при самом
+  // запуске приложения, и до этой части очередь тогда ещё не доходит —
+  // приложение обрывалось бы на первом же чтении хранилища.
+
+  /**
+   * Вся очередь по порядку.
+   *
+   * Возвращает не голые дорожки, а всё, что нужно показать строкой:
+   * сама дорожка, её карточка, сторона, номер записи на карточке и где
+   * эта карточка лежит — чтобы по нажатию открыть её.
+   */
+  function playlistItems() {
+    const out = [];
+    state.sections.forEach((sec) => {
+      sec.decks.forEach((deck) => {
+        deck.cards.forEach((card, index) => {
+          cardSides(card).forEach((side, sideNo) => {
+            audioSlots(side).forEach((slot, k) => {
+              if (!slot.inList) return;
+              out.push({
+                slot: slot, card: card, side: side, sideNo: sideNo,
+                no: k + 1,                     // какая это запись на стороне
+                at: sanitizeListAt(slot.listAt),
+                was: out.length,               // порядок обхода — на случай равных
+                sectionId: sec.id, deckId: deck.id, index: index,
+              });
+            });
+          });
+        });
+      });
+    });
+    // При равных числах порядок остаётся прежним: сравнение по «was»
+    // добавлено намеренно — иначе две записи с одним числом могли бы
+    // меняться местами сами по себе при каждой отрисовке.
+    out.sort((A, B) => (A.at - B.at) || (A.was - B.was));
+    return out;
+  }
+
+  /** Сколько записей в очереди. */
+  function playlistSize() { return playlistItems().length; }
+
+  /** Где эта дорожка в очереди. -1 — её там нет. */
+  function playlistIndexOf(slot) {
+    const all = playlistItems();
+    for (let i = 0; i < all.length; i++) if (all[i].slot === slot) return i;
+    return -1;
+  }
+
+  /** Строка очереди по её месту. null — такого места нет. */
+  function playlistAt(i) {
+    const all = playlistItems();
+    return (i >= 0 && i < all.length) ? all[i] : null;
+  }
+
+  /**
+   * Выдать числа мест заново, подряд от нуля.
+   *
+   * После любого изменения: числа всегда плотные и не расходятся,
+   * сколько бы раз ни переставляли.
+   */
+  function playlistRenumber(order) {
+    (order || playlistItems()).forEach((it, i) => { it.slot.listAt = i; });
+  }
+
+  /** Взять запись в очередь — в самый конец. */
+  function playlistAdd(slot) {
+    if (slot.inList) return;
+    const all = playlistItems();
+    if (all.length >= LIST_MAX) {
+      alert('В плейлисте уже ' + LIST_MAX + ' записей — больше не помещается.');
+      return;
+    }
+    slot.inList = true;
+    slot.listAt = all.length;
+    playlistRenumber();
+  }
+
+  /** Убрать запись из очереди. */
+  function playlistDrop(slot) {
+    if (!slot || !slot.inList) return;
+    slot.inList = false;
+    slot.listAt = 0;
+    playlistRenumber();
+  }
+
+  /** Переставить: та, что стояла на месте from, встаёт на to. */
+  function playlistMove(from, to) {
+    const all = playlistItems();
+    if (from === to || from < 0 || to < 0
+        || from >= all.length || to >= all.length) return false;
+    const moved = all.splice(from, 1)[0];
+    all.splice(to, 0, moved);
+    playlistRenumber(all);
+    return true;
+  }
+
+  /** Записи этой стороны, взятые в очередь, — по номерам на карточке. */
+  function sideListNumbers(side) {
+    const out = [];
+    audioSlots(side).forEach((slot, k) => { if (slot.inList) out.push(k + 1); });
+    return out;
+  }
+
+  // ------------------------------------------------------------------
+  // Звёздочка на карточке: взять записи в плейлист.
+  //
+  // Одна запись — нажатие сразу кладёт её в очередь и сразу убирает.
+  // Две или три — спрашиваем, какие именно: человек мог надиктовать на
+  // одну карточку и утреннюю, и вечернюю версию, и в очередь ему нужна
+  // сегодня одна из них.
+  // ------------------------------------------------------------------
+
+  /**
+   * Окно выбора записей карточки.
+   *
+   * Галочки стоят там, где запись уже в очереди. Закрыли «Готово» —
+   * очередь пришла в согласие с галочками: снятые ушли, поставленные
+   * встали в конец.
+   */
+  function pickTracks(side, done) {
+    const slots = audioSlots(side);
+    const wrap = el('div', { class: 'modal' });
+    const close = () => {
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    };
+    const want = slots.map((s) => !!s.inList);
+    const sheet = el('div', { class: 'sheet' }, [
+      el('h3', { text: 'Взять в плейлист' }),
+      el('p', { class: 'hint',
+        text: 'На этой карточке ' + slots.length + ' записи. Отметьте те, '
+          + 'что должны играть в плейлисте.' }),
+    ]);
+    const list = el('div', { class: 'pick-tracks' });
+    slots.forEach((slot, k) => {
+      const mark = el('span', { class: 'pick-mark', text: want[k] ? '★' : '☆' });
+      const row = el('button', {
+        class: 'pick-track' + (want[k] ? ' on' : ''),
+        attrs: { type: 'button', 'aria-pressed': String(want[k]) },
+      }, [
+        mark,
+        el('span', { class: 'pick-track-no', text: 'Запись ' + (k + 1) }),
+        el('span', { class: 'pick-track-len', text: mmss(slot.audioLen || 0) }),
+      ]);
+      row.addEventListener('click', () => {
+        want[k] = !want[k];
+        mark.textContent = want[k] ? '★' : '☆';
+        row.classList.toggle('on', want[k]);
+        row.setAttribute('aria-pressed', String(want[k]));
+      });
+      list.appendChild(row);
+    });
+    sheet.appendChild(list);
+    sheet.appendChild(el('div', { class: 'sheet-actions' }, [
+      el('button', { class: 'btn sec', attrs: { type: 'button' }, text: 'Отмена',
+                     on: { click: close } }),
+      el('button', {
+        class: 'btn', attrs: { type: 'button' }, text: 'Готово',
+        on: { click: () => {
+          slots.forEach((slot, k) => {
+            if (want[k]) playlistAdd(slot);
+            else playlistDrop(slot);
+          });
+          close(); save();
+          if (typeof done === 'function') done();
+          render();
+        } },
+      }),
+    ]));
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+  }
+
+  /**
+   * Кнопка-звёздочка для верхней полосы читалки.
+   *
+   * Показывается только там, где есть что брать: на стороне без записей
+   * она была бы кнопкой, которая ничего не делает.
+   */
+  function makeListStar(side) {
+    const slots = audioSlots(side);
+    if (!slots.length) return null;
+    const nums = sideListNumbers(side);
+    const on = nums.length > 0;
+    const star = el('button', {
+      class: 'iconbtn liststar' + (on ? ' on' : ''),
+      attrs: {
+        type: 'button',
+        'aria-pressed': String(on),
+        'aria-label': on ? 'Убрать из плейлиста' : 'В плейлист',
+        title: on ? 'Записи в плейлисте: ' + nums.join(', ') : 'В плейлист',
+      },
+    }, [
+      el('span', { class: 'liststar-sign', text: on ? '★' : '☆' }),
+      // Номера взятых записей — маленькими цифрами под звёздочкой.
+      // Место под них держим всегда, даже пустым: иначе кнопка прыгала
+      // бы по высоте в тот миг, когда запись берут в очередь.
+      el('span', { class: 'liststar-nums', text: nums.join('·') }),
+    ]);
+    star.addEventListener('click', () => {
+      if (slots.length === 1) {
+        if (slots[0].inList) playlistDrop(slots[0]);
+        else playlistAdd(slots[0]);
+        save(); render();
+        return;
+      }
+      pickTracks(side);
+    });
+    return star;
+  }
+
+  // ------------------------------------------------------------------
+  // Экран плейлиста.
+  //
+  // Отдельный экран, устроенный как колода: та же шапка с кнопкой
+  // «назад», те же строки. Играющая обведена. Строку можно взять
+  // удержанием и перенести вверх или вниз — тем же движением, каким
+  // переставляются карточки в колоде.
+  // ------------------------------------------------------------------
+
+  /** Столько-то записей. */
+  function tracksLabel(n) {
+    const mod10 = n % 10, mod100 = n % 100;
+    let word = 'записей';
+    if (mod10 === 1 && mod100 !== 11) word = 'запись';
+    else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) word = 'записи';
+    return n + ' ' + word;
+  }
+
+  // Куда возвращаться из плейлиста. Пришли с главного — на главный,
+  // пришли из карточки — в карточку: иначе «назад» уводило бы совсем не
+  // туда, откуда пришли.
+  let listBack = null;
+
+  /** Открыть плейлист, запомнив, откуда пришли. */
+  function openPlaylist() {
+    listBack = { name: view.name, sectionId: view.sectionId,
+                 deckId: view.deckId, index: view.index };
+    go({ name: 'list' });
+  }
+
+  /** Перенос строки плейлиста: только вверх и вниз, внутри списка. */
+  function dragListRow(row, holder, from) {
+    attachHold(row, (id, x0, y0) => {
+      const host = holder.parentNode;
+      const st = lift(holder, id, x0, y0, 'as-card');
+      let at = -1;
+
+      const aim = (cy) => {
+        const rows = Array.prototype.slice.call(
+          host && host.querySelectorAll ? host.querySelectorAll('.card-row') : [])
+          .filter((n) => n !== holder);
+        let k = 0;
+        for (const n of rows) {
+          const r = rectOf(n);
+          if (cy > r.top + r.height / 2) k++; else break;
+        }
+        return { index: k, rows: rows };
+      };
+
+      const put = (cx, cy) => {
+        const t = aim(cy);
+        if (t.index === at) return;
+        if (!farEnough(st, cx, cy)) return;
+        at = t.index;
+        flipMove(shiftable(), () => {
+          const parent = st.slot.parentNode;
+          if (parent) parent.removeChild(st.slot);
+          const after = t.rows[at] || null;
+          if (after && host.insertBefore) host.insertBefore(st.slot, after);
+          else if (host) host.appendChild(st.slot);
+        });
+      };
+
+      drag = {
+        id: id, lastX: x0, lastY: y0,
+        cancel: () => back(holder, st),
+        move: (cx, cy) => {
+          drag.lastX = cx; drag.lastY = cy;
+          follow(holder, st, cx, cy);
+          put(cx, cy);
+          edgeScroll(cy);
+        },
+        drop: () => {
+          const to = at;
+          drop(holder, st, () => {
+            if (to < 0 || to === from) return;
+            playlistMove(from, to);
+            save();
+          });
+        },
+      };
+      st.putAt = null;
+      put(x0, y0);
+    });
+  }
+
+  function renderPlaylist() {
+    const items = playlistItems();
+    const frag = document.createDocumentFragment();
+    frag.appendChild(el('div', { class: 'topbar' }, [
+      el('button', {
+        class: 'iconbtn', attrs: { 'aria-label': 'Назад', type: 'button' },
+        text: '‹', on: { click: () => go(listBack || { name: 'home' }) },
+      }),
+      el('h1', { class: 'small', text: 'Плейлист' }),
+      el('span', { class: 'list-count',
+                   text: items.length ? tracksLabel(items.length) : '' }),
+    ]));
+
+    const list = el('div', { class: 'card-list' });
+    if (!items.length) {
+      list.appendChild(el('p', { class: 'empty',
+        text: 'Плейлист пуст. Откройте карточку с записью и нажмите звёздочку '
+          + 'в верхнем ряду — запись встанет сюда.' }));
+    }
+
+    items.forEach((it, i) => {
+      const playing = liveIs(it.slot);
+      const swatch = el('span', { class: 'mini-swatch' });
+      swatch.style.setProperty('background-color', it.card.color);
+      swatch.style.setProperty('border-color',
+        CARD_EDGE[it.card.color] || it.card.color);
+
+      const open = el('button', {
+        class: 'mini-open', attrs: { type: 'button' },
+        on: { click: () => { playQueueAt(i); } },
+      }, [
+        el('span', { class: 'mini-num', text: String(i + 1) }),
+        swatch,
+        el('span', { class: 'list-mid' }, [
+          el('span', { class: 'mini-text',
+                       text: shortText(it.side.text) || shortText(it.card.text)
+                         || 'Без текста' }),
+          el('span', { class: 'list-sub', text:
+            'запись ' + it.no
+            + (it.sideNo === 1 ? ' · оборот' : '')
+            + ' · ' + mmss(it.slot.audioLen || 0)
+            + (playing ? ' · играет' : '') }),
+        ]),
+      ]);
+
+      // Закрашенная звёздочка справа: нажали — запись ушла из плейлиста
+      const off = el('button', {
+        class: 'iconbtn liststar on', attrs: { type: 'button',
+          'aria-label': 'Убрать из плейлиста' },
+        text: '★',
+        on: { click: () => { playlistDrop(it.slot); save(); render(); } },
+      });
+
+      const row = el('div', { class: 'mini' + (playing ? ' playing' : '') },
+        [open, off]);
+      const holder = el('div', { class: 'card-row' }, [row]);
+      dragListRow(row, holder, i);
+      list.appendChild(holder);
+    });
+
+    frag.appendChild(list);
+    const page = el('div', { class: 'page no-zoom' });
+    page.appendChild(frag);
+    attachBackSwipe(page, () => go(listBack || { name: 'home' }), true);
+    return page;
+  }
 /* ─── 25-sync-window.js ────────────────────────────────────────────────
  * Окно обмена между устройствами — openSync
  *
@@ -11199,6 +11893,8 @@ body {
             keep.headInk = sanitizeInk(inCard.headInk);
             keep.peaks = sanitizePeaks(inCard.peaks);
             keep.at = sanitizeAt(inCard.at);
+            keep.inList = inCard.inList === true;
+            keep.listAt = sanitizeListAt(inCard.listAt);
             // Оборот — тоже «как в файле». Свой уходит целиком: его
             // записи и снимки убираем из хранилища, а список собирается
             // заново из присланного. Иначе на устройстве осталась бы
@@ -11235,6 +11931,8 @@ body {
                               // него один и тот же файл, применённый дважды,
                               // менял бы карточку во второй раз
                               at: sanitizeAt(inCard.at),
+                              inList: inCard.inList === true,
+                              listAt: sanitizeListAt(inCard.listAt),
                               peaks: sanitizePeaks(inCard.peaks) };
             // Оборот и то, какой стороной карточка лежала, — из файла.
             // Звук и снимки оборота приедут следом, своими кусками.
@@ -11301,7 +11999,13 @@ body {
       // Место, на котором запись остановили, едет вместе с ней. Своё у
       // карточки, которая была здесь и раньше, не трогаем при обычном
       // «добавить»: человек слушает её на этом устройстве.
-      if (k > 0 || !existing) dst.at = sanitizeAt(src.at);
+      if (k > 0 || !existing) {
+        dst.at = sanitizeAt(src.at);
+        // И то, стоит ли запись в плейлисте: очередь собрана на одном
+        // устройстве — пусть она же будет и на другом
+        dst.inList = src.inList === true;
+        dst.listAt = sanitizeListAt(src.listAt);
+      }
       if (k > 0) mine.extra.push(dst);
       out.push({ from: src.id, card: dst, len: src.audioLen,
                  peaks: sanitizePeaks(src.peaks),
@@ -11451,6 +12155,8 @@ body {
                           link: sanitizeLink(inCard.link),
                           extra: [],
                           at: sanitizeAt(inCard.at),
+                          inList: inCard.inList === true,
+                          listAt: sanitizeListAt(inCard.listAt),
                           peaks: sanitizePeaks(inCard.peaks) };
           // Оборот новой карточки — из файла, вместе с тем, какой
           // стороной её оставили на том устройстве
@@ -11666,6 +12372,7 @@ body {
     let content;
     if (view.name === 'read') content = renderReader();
     else if (view.name === 'deck') content = renderDeck();
+    else if (view.name === 'list') content = renderPlaylist();
     else content = renderHome();
     root.appendChild(content);
     // Звучащая запись либо вернулась в свою карточку, либо ей нужна
