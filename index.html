@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-iEHU+7Qmt83N+MH5nn9HB17tlA6519ofjPMNBEYqr1c=';
-               style-src 'sha256-ZScj6U1XP7jUPsv/dYVENOGD6HpAGcJ7xkd3z5K+TDI=';
+               script-src 'sha256-Qv3NMJEdk3WneGduRVL2Ix+8W4jokwDxd0Iv3BSwpFg=';
+               style-src 'sha256-hXVbdJJnQBLtmmpUFiXokF80OU4poOhIYB78ucUxGTM=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1955,7 +1955,13 @@ body {
 
 /* Стрелки по краям живой дорожки: предыдущая и следующая запись очереди.
    Гаснут, когда шагать некуда, — и тогда просто ничего не делают. */
-.mini-play-line { display: flex; align-items: center; gap: 8px; }
+/* Стрелки равняются по ВЕРХУ, а не по середине.
+   Причина: рядом с ними не одна кнопка, а вся дорожка целиком — ряд с
+   кнопкой и волной, а под ним ещё строка времени. По середине такой
+   стопки стрелки уезжали вниз и вставали ниже кнопки проигрывания.
+   Верх у ряда с кнопкой и у стрелок общий, высота одна и та же (40 px),
+   поэтому по верху они встают ровно в одну линию с ней. */
+.mini-play-line { display: flex; align-items: flex-start; gap: 8px; }
 /* Кружок ровно такой же, как у кнопки проигрывания рядом: три круглые
    кнопки в одну линию читаются как один набор, а не как «кнопка и два
    значка по краям». */
@@ -2020,7 +2026,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '13.08.2026, 13:22';
+  const BUILD = '13.08.2026, 13:35';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
