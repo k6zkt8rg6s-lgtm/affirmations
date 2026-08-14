@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-AlLluFzziunZF5msq8HnfdxwP/zmeZk4vzJFz55fogM=';
-               style-src 'sha256-0gD58dGf40wN6mmtQ81gIRiDkS6gpg5Hvj1dzKf+A2E=';
+               script-src 'sha256-SEiy/qwwGb1cFR2Gbwqszax3Z5N2rBLWDQtZ+K763MU=';
+               style-src 'sha256-DmgnnsqoQqfVX+aytEMRiNROiTVUbBqwPsEmcp4yZBI=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -200,10 +200,20 @@ body {
 .fresh-go:active { opacity: .75; }
 
 /* ---------- Шапка ---------- */
+/* Кнопок в шапке главного экрана стало три: свернуть всё, плейлист и
+   «ещё». Вместе с заголовком «Аффирмации» они требуют без малого 394
+   точки, а на iPhone их 390 — и последняя кнопка уезжала за край экрана.
+   Уезжала совсем: вбок страница не прокручивается (touch-action), и
+   «ещё» становилось попросту недоступно, а с ним и обмен файлами,
+   напоминания, корзинка и обновление.
+
+   Поэтому просвет между ними считается по остатку ширины, как в ряду
+   кнопок над карточкой, а заголовку разрешено ужиматься. На широком
+   экране всё остаётся как было. */
 .topbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: clamp(4px, (100vw - 366px) / 3, 10px);
   min-height: var(--tap);
   margin-bottom: 6px;
 }
@@ -211,9 +221,24 @@ body {
   font: 700 30px/1.15 -apple-system, BlinkMacSystemFont, "SF Pro Display",
         "Helvetica Neue", Arial, sans-serif;
   margin: 0;
-  flex: 1;
+  flex: 1 1 auto;
+  /* min-width: auto у элемента гибкой раскладки — это ширина самого
+     длинного слова, а «Аффирмации» не переносится нигде. Без нуля
+     заголовок не ужимался ни на точку и выдавливал кнопки. */
+  min-width: 0;
   letter-spacing: -.4px;
 }
+/* На узком экране заголовок сперва становится мельче, и только если и
+   этого мало — обрезается многоточием. Обрезанное название приложения
+   читается как поломка, уменьшенное — нет. Кнопки при этом остаются на
+   своих местах и в полном размере: до них должен дотягиваться палец. */
+.topbar h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 389px) { .topbar h1 { font-size: 26px; } }
+@media (max-width: 349px) { .topbar h1 { font-size: 22px; } }
 .topbar h1.small { font-size: 22px; }
 
 .iconbtn {
@@ -796,7 +821,26 @@ body {
   flex: none;
 }
 .chev.closed { transform: rotate(-90deg); }
-.section-count { color: var(--ink-soft); font-size: 13px; margin-left: auto; }
+/* Сколько колод в разделе — подпись справа от названия.
+   Переносить её по словам нельзя: на узком экране, когда название
+   раздела длинное, «2 колоды» разъезжалось на две строки — цифра
+   сверху, слово под ней. Место ей отдаём целиком, а тесно становится
+   названию: оно и так занимает столько, сколько может. */
+.section-count {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin-left: auto;
+  flex: none;
+  white-space: nowrap;
+}
+/* Название раздела может ужаться, а подпись справа — нет.
+   Длинное слово при этом переносится посреди себя, а не выталкивает
+   экран вбок: одно слово в сорок букв раздвигало страницу вдвое, и
+   главный экран начинал ездить вправо-влево. */
+/* anywhere, а не break-word: только он позволяет самому заголовку стать
+   уже своего длинного слова. break-word разрешает разрыв, но ширину
+   считает по-прежнему по целому слову — и экран всё равно раздвигался. */
+.section-head h2 { min-width: 0; overflow-wrap: anywhere; }
 .section.collapsed { margin-bottom: 0; }
 
 /* Список избранного в окне управления не должен вытеснять кнопки */
@@ -2016,7 +2060,12 @@ body {
 .mini.playing { box-shadow: 0 0 0 2px var(--star), 0 1px 2px rgba(0, 0, 0, .05); }
 
 /* Кнопка плейлиста в шапке главного экрана и в полоске внизу */
-.iconbtn.listbtn { color: var(--star); }
+/* Кнопки плейлиста в шапке главного экрана своего вида не имеет вовсе:
+   она стоит в одном ряду со «свернуть всё» и «ещё» и выглядит так же.
+   Раньше была янтарной — единственное цветное пятно в шапке. Отдельного
+   класса у неё поэтому больше нет: класс без единой строки стиля — это
+   мусор, и проверка в test.js ловит такие. Найти её в проверках можно
+   по подписи «Плейлист». */
 
 .mini-play-list,
 .mini-play-step {
@@ -2029,14 +2078,23 @@ body {
   -webkit-tap-highlight-color: transparent;
   font: inherit;
 }
+/* Тот же значок и тот же цвет, что и в шапке главного экрана: это одна
+   и та же кнопка, ведущая в одно и то же место. */
 .mini-play-list {
   min-width: 32px;
   min-height: 32px;
-  font-size: 14px;
-  color: var(--star);
-  background: rgba(217, 147, 11, .14);
+  /* Тон — как у соседей по полоске: ноты слева и крестика справа.
+     Чернильно-чёрный значок оказывался в этом ряду самым тяжёлым
+     пятном, хотя кнопка тут не главная. */
+  color: var(--ink-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.mini-play-list:active { background: rgba(217, 147, 11, .26); }
+/* Кнопка вдвое меньше, чем в шапке, — и значок в ней чуть меньше, чтобы
+   занимать в ней ту же долю, а не распирать её изнутри. */
+.mini-play-list .note-mark { width: 16px; height: 16px; }
+.mini-play-list:active { background: rgba(0, 0, 0, .10); }
 
 /* Стрелки по краям живой дорожки: предыдущая и следующая запись очереди.
    Гаснут, когда шагать некуда, — и тогда просто ничего не делают. */
@@ -2064,6 +2122,50 @@ body {
 }
 .mini-play-step:active { background: rgba(0, 0, 0, .22); }
 .mini-play-step.off { opacity: .28; cursor: default; }
+
+/* ──────────────────────────────────────────────────────────────────
+   Значок плейлиста: три строки списка, а вместо последней — нота.
+   Так это и называется: список записей.
+
+   Нарисован рамками, как звено цепи у ссылки и ведро у корзинки. Взять
+   его из шрифта нельзя: подходящего знака там нет, а те, что есть,
+   цветные — в ряду чёрных кнопок такой смотрелся бы наклейкой.
+   ────────────────────────────────────────────────────────────── */
+.note-mark {
+  display: block;
+  position: relative;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+.note-mark .nm-line {
+  position: absolute;
+  left: 0;
+  border-top: 1.8px solid currentColor;
+  border-radius: 1px;
+}
+.note-mark .nm-l1 { top: 2px; right: 0; }
+.note-mark .nm-l2 { top: 7px; right: 0; }
+/* Третья строка короче: её конец занимает нота */
+.note-mark .nm-l3 { top: 12px; right: 9px; }
+.note-mark .nm-stem {
+  position: absolute;
+  right: 1.5px;
+  top: 6px;
+  width: 0;
+  height: 8px;
+  border-left: 1.8px solid currentColor;
+}
+.note-mark .nm-head {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 5.5px;
+  height: 4.5px;
+  background: currentColor;
+  border-radius: 50%;
+  transform: rotate(-18deg);
+}
 </style>
 </head>
 <body>
@@ -2111,7 +2213,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '14.08.2026, 08:48';
+  const BUILD = '14.08.2026, 15:33';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -4177,13 +4279,23 @@ body {
         el('span', { class: 'fold-mark' }),
       ]),
       // Плейлист — прямо отсюда, не открывая ни одной карточки и не
-      // запуская звука. Показывается, только когда в нём что-то есть:
-      // пустой список открывать незачем.
-      playlistSize() ? el('button', {
-        class: 'iconbtn listbtn', attrs: {
-          'aria-label': 'Плейлист', title: 'Плейлист', type: 'button' },
-        text: '☰', on: { click: () => openPlaylist() },
-      }) : null,
+      // запуская звука.
+      //
+      // Стоит здесь всегда, даже когда список пуст. Раньше кнопка
+      // появлялась и пропадала вместе с содержимым списка, и это выходило
+      // хуже, чем задумывалось: место в шапке то занято, то нет, соседние
+      // кнопки прыгают, а тот, кто ещё ни одной записи не отметил, вовсе
+      // не догадывается, что плейлист в приложении есть. Пустой список
+      // сам расскажет о себе — там про это написано.
+      el('button', {
+        class: 'iconbtn', attrs: {
+          // Сколько записей в очереди — прямо в подписи. Кнопка стоит
+          // здесь всегда, и по одному значку не понять, пуст список или
+          // нет; голосовое чтение и подсказка мышью говорят это словами.
+          'aria-label': playlistLabel(), title: playlistLabel(),
+          type: 'button' },
+        on: { click: () => openPlaylist() },
+      }, [noteMark()]),
       el('button', {
         class: 'iconbtn', attrs: {
           'aria-label': 'Ещё', title: 'Ещё', type: 'button' },
@@ -10014,9 +10126,8 @@ body {
       class: 'mini-play-list',
       attrs: { type: 'button', 'aria-label': 'Открыть плейлист',
                title: 'Плейлист' },
-      text: '☰',
       on: { click: () => openPlaylist() },
-    });
+    }, [noteMark()]);
     const close = el('button', {
       class: 'mini-play-close',
       attrs: { type: 'button', 'aria-label': 'Закрыть проигрыватель' },
@@ -11560,6 +11671,36 @@ body {
   // там же стоят буквы оформления: сохранённое читается при самом
   // запуске приложения, и до этой части очередь тогда ещё не доходит —
   // приложение обрывалось бы на первом же чтении хранилища.
+
+  /**
+   * Значок плейлиста. Один и тот же в шапке главного экрана и в полоске
+   * внизу: это одна и та же кнопка, ведущая в одно и то же место, и
+   * выглядеть она должна одинаково.
+   *
+   * Нарисован рамками, как звено цепи у ссылки и ведро у корзинки: чёткий
+   * на любом экране, берёт цвет у самой кнопки и не зависит от того, какие
+   * значки нашлись в шрифте устройства.
+   */
+  function noteMark() {
+    return el('span', { class: 'note-mark', attrs: { 'aria-hidden': 'true' } }, [
+      el('span', { class: 'nm-line nm-l1' }),
+      el('span', { class: 'nm-line nm-l2' }),
+      el('span', { class: 'nm-line nm-l3' }),
+      el('span', { class: 'nm-stem' }),
+      el('span', { class: 'nm-head' }),
+    ]);
+  }
+
+  /**
+   * Подпись кнопки плейлиста: сколько записей в очереди.
+   *
+   * Кнопка стоит в шапке всегда, и по одному значку не понять, пусто там
+   * или нет. Голосовому чтению и подсказке мышью говорим это словами.
+   */
+  function playlistLabel() {
+    const n = playlistSize();
+    return n ? 'Плейлист — ' + tracksLabel(n) : 'Плейлист — пусто';
+  }
 
   /**
    * Вся очередь по порядку.
