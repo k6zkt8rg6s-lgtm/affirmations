@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-SEiy/qwwGb1cFR2Gbwqszax3Z5N2rBLWDQtZ+K763MU=';
-               style-src 'sha256-DmgnnsqoQqfVX+aytEMRiNROiTVUbBqwPsEmcp4yZBI=';
+               script-src 'sha256-7YqiFaGk8d3+rhzNWDl8lzMYCvHTC76qO2bnfJcbwoY=';
+               style-src 'sha256-moSMvUbvBVTSRaWoyfeQ/xe5hZK235gfwpgU26RbEWM=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -377,6 +377,87 @@ body {
    бы как одно и то же, случайно нажатое дважды. */
 .iconbtn.star { background: transparent; font-size: 21px; color: var(--ink-soft); }
 .iconbtn.star.on { color: var(--star); }
+
+/* ──────────────────────────────────────────────────────────────────
+   Заметка стороны: подробный текст, которого на карточке не видно.
+
+   Значок — страничка со строками. С плейлистовым его не спутать: у
+   того строки голые, а здесь они в рамке. Точка в углу — в заметке уже
+   что-то написано; по одному взгляду на ряд видно, есть у этой стороны
+   разбор или нет.
+   ────────────────────────────────────────────────────────────── */
+.iconbtn.note { background: transparent; color: var(--ink-soft); }
+.iconbtn.note.on { color: var(--ink); }
+.page-mark {
+  display: block;
+  position: relative;
+  width: 15px;
+  height: 18px;
+  border: 1.7px solid currentColor;
+  border-radius: 2.5px;
+  pointer-events: none;
+}
+.page-mark > span {
+  position: absolute;
+  left: 2.5px;
+  border-top: 1.5px solid currentColor;
+  border-radius: 1px;
+}
+.page-mark .pg-l1 { top: 3px; right: 2.5px; }
+.page-mark .pg-l2 { top: 7px; right: 2.5px; }
+/* Третья строка короче — так страница читается как текст, а не решётка */
+.page-mark .pg-l3 { top: 11px; right: 6px; }
+/* Точка «в заметке есть текст». Стоит поверх правого верхнего угла и
+   слегка выходит за него — иначе теряется среди строк. */
+.page-mark .pg-dot {
+  top: -3px;
+  right: -3px;
+  left: auto;
+  width: 6px;
+  height: 6px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--heart);
+}
+
+/* Экран заметки. Всё, что на нём есть, — поле ввода во всю высоту:
+   длинный текст читают и правят подолгу, и место ему нужно всё. */
+.note-page { display: flex; flex-direction: column; }
+.note-side {
+  flex: none;
+  min-width: var(--tap);
+  text-align: center;
+  color: var(--ink-soft);
+  font: 700 20px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  opacity: .5;
+}
+/* Чья это заметка: начало текста стороны. Открыв заметку с оборота,
+   легко забыть, к чему она. */
+.note-whose {
+  margin: 0 2px 8px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-area {
+  flex: 1;
+  width: 100%;
+  min-height: 40vh;
+  box-sizing: border-box;
+  padding: 14px 14px 16px;
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: 400 17px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Helvetica Neue", Arial, sans-serif;
+  resize: none;
+  /* Safari на iPhone увеличивает страницу, когда встаёшь в поле мельче
+     16 пикселей. У нас 17 — не увеличит. */
+}
+.note-area:focus { outline: 2px solid var(--hair); outline-offset: -2px; }
 
 /* Корзинка — «убрать карточку из колоды, но не удалять».
    Ведёт себя как сердечко: в покое бледная, отмеченная — закрашенная.
@@ -1394,19 +1475,75 @@ body {
 .reader-bar {
   display: flex;
   align-items: center;
-  gap: clamp(0px, (100vw - 376px) / 8, 8px);
+  gap: clamp(0px, (100vw - 420px) / 9, 8px);
   min-height: var(--tap);
+  /* Насколько кнопке позволено ужаться. Держим переменной, потому что на
+     самых узких экранах предел приходится опускать, а правил, которые на
+     него смотрят, сразу несколько. */
+  --floor: 36px;
+  /* Переносить ряд нельзя — и это проверено, а не предположено. С
+     переносом кнопки перестают сжиматься вовсе: браузер сначала
+     раскладывает их по строкам в полный рост и только потом ужимает
+     каждую строку отдельно. Ряд честно вставал в две строки на всех
+     телефонах, включая широкие, — вместо одной сжатой. */
+  flex-wrap: nowrap;
 }
-/* Если и вплотную не помещается — кнопки сжимаются, но не ниже 40
-   точек: меньше этого палец начинает промахиваться. На телефоне от 375
-   точек шириной все они остаются прежними, 44.
+/* Кнопок в ряду стало девять — прибавилась заметка. Девять кружков по
+   44 точки это 396, и ни на один телефон они уже не помещаются. Поэтому
+   ряд сжимается: сперва просвет между кнопками, потом сами кнопки — до
+   40 точек на iPhone 390 и до 36 в тесноте.
 
-   Сжимаются только сами кнопки ряда. Запись голоса и выбор файла лежат
-   в своих обёртках, и их не трогаем: там внутри своя разметка — во
-   время записи вместо одной кнопки появляются пауза и стоп со своими
-   размерами. Попытка сжимать и их сделала эти две кнопки меньше соседей
-   на любом экране, даже широком. */
-.reader-bar > .iconbtn { flex: 0 1 var(--tap); min-width: 40px; }
+   Запись голоса и выбор файла лежат в своих обёртках, и обёртке надо
+   задать те же правила, что и голым кнопкам. Само по себе это не
+   выходит: у кнопки внутри задана ширина 44, и браузер берёт её за
+   наименьший размер всей обёртки. Обёртка оставалась при своих 44 на
+   любом экране, ужимались одни соседи — и на узком телефоне карандаш
+   правки уезжал за край, недосягаемый. Теперь обёртка сжимается вместе
+   со всеми и упирается в тот же предел, а кнопка внутри просто
+   занимает её целиком. Все девять кружков одного размера на любой
+   ширине. */
+.reader-bar > .iconbtn,
+.reader-bar > .rec-box,
+.reader-bar > .pick-box { flex: 0 1 var(--tap); min-width: var(--floor); }
+.reader-bar > .rec-box > .iconbtn.rec,
+.reader-bar > .pick-box > .iconbtn.pick {
+  width: 100%;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* Идёт запись.
+
+   В обёртке записи появляются ещё пауза, стоп и время — она становится
+   втрое шире. Девять кружков рядом с ней в строку уже не встают ни на
+   одном телефоне: карандаш правки уезжал за край, а время накладывалось
+   на соседнюю кнопку.
+
+   Поэтому на время записи в ряду остаётся только само нужное: крестик и
+   органы записи. Остальное не просто некуда девать — им там и делать
+   нечего: любое из них уводит с экрана и обрывает запись на полуслове.
+   Кончилась запись — ряд возвращается целиком. Класс ставится из кода
+   записи, а не подбирается стилями по содержимому: так это работает в
+   любом браузере, а не только в свежем. */
+.reader-bar.recording > .iconbtn.ghost,
+.reader-bar.recording > .iconbtn.heart,
+.reader-bar.recording > .iconbtn.liststar,
+.reader-bar.recording > .iconbtn.bin,
+.reader-bar.recording > .iconbtn.note,
+.reader-bar.recording > .pick-box { display: none; }
+.reader-bar.recording > .rec-box {
+  flex: 0 0 auto;
+  min-width: auto;
+}
+.reader-bar.recording > .rec-box > .iconbtn.rec { width: var(--tap); }
+/* Совсем узкие экраны — iPhone SE первых лет и ему подобные, 320 точек.
+   Девять кнопок по 36 это 324, а места под них 296: не помещаются даже
+   вплотную. Опускаем предел до 32 — ряд остаётся одной строкой, и все
+   девять кнопок на экране. По высоте кнопка по-прежнему 44, палец
+   промахивается вверх-вниз, а не вбок, поэтому потеря небольшая. */
+@media (max-width: 359px) {
+  .reader-bar { --floor: 32px; }
+}
 /* Пустое место в ряду кнопок: крестик слева, кнопки справа */
 .reader-gap { flex: 1 1 0; min-width: 0; }
 
@@ -2213,7 +2350,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '14.08.2026, 15:33';
+  const BUILD = '15.08.2026, 20:21';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -2224,6 +2361,11 @@ body {
     deckName: 60,
     cardText: 2000,
     cardHead: 200,       // название карточки: строка, а не второй текст
+    // Заметка стороны: подробное объяснение, которое на самой карточке
+    // не показывается. Предел щедрый — это как раз то место, где текст
+    // бывает длинным; но не бесконечный: всё это лежит в хранилище
+    // браузера, а его на телефоне немного.
+    note: 20000,
     sections: 50,
     decksPerSection: 100,
     cardsPerDeck: 500,
@@ -3199,6 +3341,8 @@ body {
       headAlign: sanitizeAlign(raw.headAlign),
       headInk: sanitizeInk(raw.headInk),
       link: sanitizeLink(raw.link),
+      // Заметка у оборота своя, отдельная от заметки лица
+      note: clampStr(raw.note, LIMITS.note),
       audio: raw.audio === true,
       audioLen: sanitizeLen(raw.audioLen),
       parts: sanitizeParts(raw.parts),
@@ -3226,7 +3370,8 @@ body {
         align: ALIGN_DEFAULT, ink: INK_DEFAULT,
         head: '', headMarks: [],
         headAlign: ALIGN_DEFAULT, headInk: INK_DEFAULT,
-        link: '', audio: false, audioLen: 0, parts: [], peaks: [], at: 0,
+        link: '', note: '',
+        audio: false, audioLen: 0, parts: [], peaks: [], at: 0,
         inList: false, listAt: 0, extra: [], shots: [],
       };
     }
@@ -3252,6 +3397,23 @@ body {
 
   /** Есть ли на обороте хоть что-нибудь. */
   function backFilled(card) {
+    const b = card && card.back;
+    if (!b || typeof b !== 'object') return false;
+    if (String(b.note || '').trim()) return true;
+    return backHasBody(card);
+  }
+
+  /**
+   * Есть ли на обороте своё СОДЕРЖИМОЕ — всё, кроме заметки.
+   *
+   * Разница нужна одному месту: обмену между устройствами. Там «оборот
+   * занят» значит «его нельзя заменить присланным». Заметка на эту роль
+   * не годится: написав на пустом обороте один разбор, человек навсегда
+   * закрыл бы дорогу настоящему обороту с телефона — с текстом и
+   * голосом, — и тот не приехал бы уже никогда. Сама заметка при замене
+   * не теряется: её переносят отдельно.
+   */
+  function backHasBody(card) {
     const b = card && card.back;
     if (!b || typeof b !== 'object') return false;
     if (String(b.text || '').trim()) return true;
@@ -3371,6 +3533,10 @@ body {
       ink: sanitizeInk(c.ink),
       // Ссылка: только http и https, всё прочее отбрасывается
       link: sanitizeLink(c.link),
+      // Заметка стороны: длинное объяснение, которое на карточке не
+      // показывается и её не удлиняет. Старые файлы её просто не имеют —
+      // выйдет пустая строка, как и у всякого другого поля здесь.
+      note: clampStr(c.note, LIMITS.note),
       // Вторая и третья записи. Каждая — со своим номером в
       // хранилище и со своими кусками, как у первой.
       extra: sanitizeExtra(c.extra),
@@ -3479,11 +3645,23 @@ body {
     return sanitizeState(raw);
   }
 
+  // Говорили ли уже, что места нет.
+  //
+  // Нужно, чтобы не повторяться. Заметка сохраняется сама, после каждой
+  // паузы в наборе, и при полном хранилище человек получал бы окно с
+  // ошибкой каждые полсекунды: оно отнимает у поля фокус, и писать
+  // становится нельзя вовсе. Скажем один раз — и молчим, пока хоть одно
+  // сохранение не пройдёт.
+  let saveFailed = false;
+
   function save() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(state));
+      saveFailed = false;
     } catch (e) {
       // Хранилище переполнено или заблокировано в приватном режиме
+      if (saveFailed) return;
+      saveFailed = true;
       alert('Не удалось сохранить: в браузере кончилось место для данных.');
     }
   }
@@ -4219,7 +4397,10 @@ body {
   // ------------------------------------------------------------------
   const spots = {};
   const spotKey = (v) => (v.name === 'deck' ? 'deck:' + v.deckId
-    : v.name === 'read' ? 'read:' + v.deckId : 'home');
+    : v.name === 'read' ? 'read:' + v.deckId
+    // У заметки место своё на каждую карточку: тексты там длинные, и
+    // вернувшись, человек хочет продолжить с того же абзаца.
+    : v.name === 'note' ? 'note:' + v.deckId + ':' + v.index : 'home');
   // Какой экран сейчас на виду. Нужно, чтобы отличить переход на другой
   // экран от простой перерисовки того же самого: место запоминается для
   // перехода, а при перерисовке трогать прокрутку нельзя.
@@ -4850,9 +5031,16 @@ body {
     // приложения не достаёт. Пассивному обработчику Safari прокрутку
     // отдаёт полностью и быстрым путём.
     const onWheel = (ev) => {
+      // Внутри поля ввода жест «назад» не берём. То же исключение, что и
+      // у касания выше, и по той же причине: в длинной заметке двумя
+      // пальцами по трекпаду ведут сам текст, а не уходят с экрана.
+      // Уехавший экран стоит человеку места в тексте и открытой
+      // клавиатуры — цена за случайное движение слишком велика.
+      const inField = ev.target && ev.target.closest
+        && ev.target.closest('input, textarea');
       // Вертикаль и пологая диагональ — обычная прокрутка списка. Такое
       // событие мы не трогаем вовсе: ни гасим, ни считаем.
-      const side = padSide(ev);
+      const side = inField ? 0 : padSide(ev);
       if (!side) { if (!padHeld) padReset(); return; }
       const ax = Math.abs(side);
       // Хвост уже сработавшего жеста — не второе движение
@@ -7082,6 +7270,10 @@ body {
         // место. Одна кнопка и туда, и обратно, потому что это одно
         // действие, а не два разных.
         makeBinButton(deck, card),
+        // Заметка — подробный текст этой стороны. На карточке его не
+        // видно и высоты он ей не добавляет; открывается отдельным
+        // экраном. Точка на значке — в заметке уже что-то написано.
+        makeNoteButton(card),
         el('button', {
           class: 'iconbtn ghost', attrs: { 'aria-label': 'Изменить', type: 'button' },
           text: '✎', on: { click: () => editCard(deck, card, face) },
@@ -7198,6 +7390,250 @@ body {
     return dist >= SWIPE_FLICK && speed >= SWIPE_SPEED;
   }
 
+/* ─── 15b-note.js ──────────────────────────────────────────────────────
+ * Заметка стороны: подробный текст, который на карточке не показывается
+ *
+ * Часть общего кода приложения. Собирается: python3 build.py
+ * Карта всех частей: КАРТА-ПРОЕКТА.md
+ * ────────────────────────────────────────────────────────────── */
+
+  // ------------------------------------------------------------------
+  // Заметка.
+  //
+  // Зачем она. На карточке хорош короткий текст: его читают быстро, по
+  // многу раз, и он должен помещаться на экран целиком. А объяснение,
+  // примеры, разбор ошибок и личные соображения — длинные. Написанные на
+  // самой карточке, они делают её в три экрана высотой, и карточка
+  // перестаёт быть карточкой.
+  //
+  // Поэтому у каждой СТОРОНЫ есть своя заметка: у лица своя, у оборота
+  // своя. На карточке её не видно вовсе и высоты она не добавляет; она
+  // открывается отдельным экраном во всю его высоту. Получается два
+  // уровня: карточка — чтобы вспоминать, заметка — чтобы разбираться.
+  //
+  // Хранится простой строкой в поле note рядом с текстом стороны. Значит,
+  // она сама собой уезжает в файл обмена, сама возвращается оттуда и сама
+  // исчезает вместе с удалённой карточкой — как и всё остальное, что
+  // лежит на стороне.
+  // ------------------------------------------------------------------
+
+  /** Текст заметки этой стороны. Пусто — заметки нет. */
+  function noteOf(side) {
+    return (side && typeof side.note === 'string') ? side.note : '';
+  }
+
+  /** Есть ли в заметке хоть что-нибудь, кроме пробелов. */
+  function noteFilled(side) { return !!noteOf(side).trim(); }
+
+  /**
+   * Значок заметки: страничка со строками текста.
+   *
+   * Нарисован рамками, как звено цепи у ссылки и ведро у корзинки. С
+   * значком плейлиста не спутать: у того строки голые, а здесь они
+   * заключены в рамку страницы.
+   *
+   * Точка в углу — когда в заметке уже что-то написано. Так по одному
+   * взгляду на ряд кнопок видно, есть у этой стороны разбор или нет.
+   */
+  function noteMarkPage(filled) {
+    return el('span', {
+      class: 'page-mark' + (filled ? ' filled' : ''),
+      attrs: { 'aria-hidden': 'true' },
+    }, [
+      el('span', { class: 'pg-l1' }),
+      el('span', { class: 'pg-l2' }),
+      el('span', { class: 'pg-l3' }),
+      filled ? el('span', { class: 'pg-dot' }) : null,
+    ].filter(Boolean));
+  }
+
+  /**
+   * Кнопка заметки в ряду кнопок карточки.
+   *
+   * Работает со СТОРОНОЙ, а не с карточкой: что написано на обороте,
+   * остаётся на обороте.
+   */
+  function makeNoteButton(card) {
+    const filled = noteFilled(faceOf(card));
+    const name = filled ? 'Заметка — есть текст' : 'Заметка';
+    return el('button', {
+      class: 'iconbtn note' + (filled ? ' on' : ''),
+      attrs: { type: 'button', 'aria-label': name, title: name },
+      on: { click: () => go({ name: 'note', sectionId: view.sectionId,
+                              deckId: view.deckId, index: view.index }) },
+    }, [noteMarkPage(filled)]);
+  }
+
+  // Сохранение на ходу.
+  //
+  // Кнопки «Сохранить» здесь нет намеренно: с ней написанное пропадало бы
+  // у того, кто закрыл приложение свайпом, не нажав её, — а в длинном
+  // тексте это потеря целого вечера. Но и писать в хранилище на каждую
+  // букву нельзя: save() перекладывает туда всё состояние целиком, со
+  // всеми волнами громкости. Поэтому ждём короткую паузу в наборе.
+  let noteTimer = null;
+  let notePending = null;
+
+  /** Записать заметку в хранилище прямо сейчас, если есть что писать. */
+  function noteFlush() {
+    if (noteTimer) { clearTimeout(noteTimer); noteTimer = null; }
+    if (!notePending) return;
+    const it = notePending;
+    notePending = null;
+    if (noteOf(it.side) === it.text) return;
+    it.side.note = it.text;
+    save();
+  }
+
+  /** Отложить запись: человек ещё печатает. */
+  function noteLater(side, text) {
+    notePending = { side: side, text: text };
+    if (noteTimer) clearTimeout(noteTimer);
+    noteTimer = setTimeout(noteFlush, NOTE_SAVE_MS);
+  }
+
+  // Сколько ждать тишины в наборе, прежде чем записать. Полсекунды: рука
+  // за это время не успевает набрать и слова, а хранилище трогается один
+  // раз вместо сотни.
+  const NOTE_SAVE_MS = 500;
+
+  // Приложение уходит с экрана — записываем немедленно.
+  //
+  // Одного blur мало, хотя раньше расчёт был на него. Когда человек
+  // смахивает приложение или система выгружает его из памяти, браузеры
+  // обещают не blur, а именно эти два события. Без них терялось всё,
+  // набранное после последней полусекундной паузы, — а это как раз конец
+  // мысли, ради которой заметку и открывали.
+  //
+  // Обработчики ставятся один раз на всё время работы: заметка внутри
+  // одна, и флаш у неё общий.
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') noteFlush();
+    });
+  }
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('pagehide', () => { noteFlush(); });
+  }
+
+  // Где человек стоял в тексте заметки: каретка и прокрутка поля.
+  //
+  // Тексты тут длинные, и вернуться в них «наверх» — значит мотать
+  // заново. Помним по карточке и стороне: у оборота свой текст и своё
+  // место в нём.
+  const noteSpots = {};
+  const noteSpotKey = (card) =>
+    view.deckId + ':' + view.index + ':' + (card.side === 1 ? 'б' : 'а');
+
+  /**
+   * Экран заметки — во всю высоту.
+   *
+   * Отдельный экран, а не окно поверх карточки: длинный текст читают и
+   * правят подолгу, и ему нужен весь экран, своя прокрутка и своя
+   * клавиатура. Выход — крестиком или жестом «назад», и оба возвращают
+   * к той же карточке и той же стороне: сторона записана на самой
+   * карточке (card.side), и трогать её тут незачем.
+   */
+  function renderNote() {
+    const deck = findDeck(view.sectionId, view.deckId);
+    if (!deck || deck.cards.length === 0) return renderDeck();
+    const i = Math.min(Math.max(view.index, 0), deck.cards.length - 1);
+    const card = deck.cards[i];
+    const side = faceOf(card);
+
+    const back = () => {
+      noteFlush();
+      go({ name: 'read', sectionId: view.sectionId, deckId: view.deckId,
+           index: i });
+    };
+
+    const area = el('textarea', {
+      class: 'note-area',
+      attrs: {
+        maxlength: String(LIMITS.note),
+        placeholder: 'Подробности, примеры, разбор — всё, чему не место '
+          + 'на самой карточке.',
+        'aria-label': 'Текст заметки',
+        spellcheck: 'false',
+      },
+    });
+    // Текст берём не только из карточки, но и из отложенной записи, если
+    // она ещё не легла. Экран может пересобраться прямо под руками —
+    // например, обработчик офлайна докачал новую версию и попросил
+    // показать полоску, — и тогда последний абзац исчезал бы с глаз,
+    // хотя таймер записал бы его секундой позже. Теперь на экране всегда
+    // самое свежее, что человек набрал.
+    area.value = (notePending && notePending.side === side)
+      ? notePending.text : noteOf(side);
+    area.addEventListener('input', () => { noteLater(side, area.value); });
+    // Ушли с экрана мимо наших кнопок — например, нажали что-то в
+    // полоске проигрывателя. Записываем немедленно.
+    area.addEventListener('blur', noteFlush);
+
+    // Место в тексте — каретка и прокрутка — запоминается на ходу и
+    // возвращается при следующем открытии этой же стороны.
+    const spotK = noteSpotKey(card);
+    const keepSpot = () => {
+      noteSpots[spotK] = { at: area.selectionStart || 0,
+                           top: area.scrollTop || 0 };
+    };
+    area.addEventListener('keyup', keepSpot);
+    area.addEventListener('click', keepSpot);
+    area.addEventListener('scroll', keepSpot);
+    area.addEventListener('blur', keepSpot);
+
+    // Чья это заметка — видно в шапке: начало текста стороны и её буква.
+    // Без этого, открыв заметку с оборота, легко забыть, к чему она.
+    const whose = shortText(side.text) || shortText(card.text) || 'Карточка';
+
+    const page = el('div', { class: 'page note-page no-zoom' }, [
+      el('div', { class: 'topbar' }, [
+        el('button', {
+          class: 'iconbtn', attrs: { 'aria-label': 'Закрыть заметку',
+                                     title: 'Закрыть', type: 'button' },
+          text: '✕', on: { click: back },
+        }),
+        el('h1', { class: 'small', text: 'Заметка' }),
+        el('span', { class: 'note-side',
+                     attrs: { title: 'Сторона карточки' },
+                     text: SIDE_LETTERS[card.side === 1 ? 1 : 0] }),
+      ]),
+      el('p', { class: 'note-whose', text: whose }),
+      area,
+    ]);
+
+    // Клавиатура: Esc закрывает, как и в читалке. Внутри поля ввода — тоже:
+    // человек пишет длинный текст и до крестика наверху ещё дотянись.
+    const onKey = (ev) => { if (ev.key === 'Escape') back(); };
+    document.addEventListener('keydown', onKey);
+    readerKeyHandler = onKey;
+
+    // Жест «назад»: от левого края одним пальцем, в других местах —
+    // двумя, как и на прочих экранах. Внутри самого поля ввода жест не
+    // берётся вовсе, ни пальцами, ни трекпадом: там своя прокрутка и
+    // своя каретка.
+    attachBackSwipe(page, back, true);
+
+    // Возвращаем человека туда, где он бросил чтение. Не сразу: до
+    // первого кадра поле ещё не разложено, и прокрутка в нём никуда не
+    // встанет.
+    const spot = noteSpots[spotK];
+    if (spot && typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        if (view.name !== 'note') return;
+        const at = Math.min(spot.at, area.value.length);
+        try {
+          area.setSelectionRange(at, at);
+        } catch (e) {
+          // Поле ещё не готово принять каретку — ставим напрямую
+          area.selectionStart = at;
+          area.selectionEnd = at;
+        }
+        area.scrollTop = spot.top;
+      });
+    }
+    return page;
+  }
 /* ─── 16-record.js ─────────────────────────────────────────────────────
  * Запись голоса: кнопки, уровень, выбор файла, старт и стоп
  *
@@ -7251,6 +7687,24 @@ body {
     });
     const timer = el('span', { class: 'rec-time' });
 
+    /**
+     * Сказать всему ряду кнопок, что идёт запись.
+     *
+     * Во время записи обёртка втрое шире обычной кнопки: в ней ещё пауза,
+     * стоп и время. Девять кружков рядом с такой обёрткой в строку не
+     * встают, и правый край ряда уезжал за экран. По этой отметке стили
+     * убирают на время записи всё лишнее — оно там и не нужно: любая из
+     * тех кнопок уводит с экрана и обрывает запись.
+     *
+     * Отметку ставим из кода, а не подбираем стилями по содержимому:
+     * :has() понимают не все браузеры, а ряд должен держаться везде.
+     */
+    const markRow = (on) => {
+      const row = box.parentNode;
+      if (!row || !row.classList) return;
+      row.classList[on ? 'add' : 'remove']('recording');
+    };
+
     // До старта видна только круглая кнопка. Пауза и стоп появляются
     // рядом с ней уже во время записи.
     const idle = () => {
@@ -7260,6 +7714,7 @@ body {
       startBtn.textContent = '●';
       startBtn.setAttribute('aria-label', 'Записать голос');
       timer.textContent = '';
+      markRow(false);
     };
     const live = () => {
       clear(box);
@@ -7268,6 +7723,7 @@ body {
       box.appendChild(stopBtn);
       box.appendChild(timer);
       markPaused(false);
+      markRow(true);
     };
 
     function canPause() {
@@ -12592,11 +13048,19 @@ body {
         lines.push('Колоды: ' + gone.decks.join(', '));
       }
       if (gone.cards) lines.push('Карточек всего: ' + gone.cards);
+      // Заметка пропадает и у карточки, которая никуда не девается:
+      // текст у неё тот же, а разбор в файле другой или его там нет
+      // вовсе. Молчать об этом нельзя — вернуть будет нечем, а вечер
+      // работы теряется незаметно.
+      if (gone.notes) {
+        lines.push('Заметок будет переписано: ' + gone.notes
+          + ' — станут как в файле');
+      }
       sheet.appendChild(el('div', { class: 'sync-status bad' },
         lines.map((x) => el('div', { text: x }))));
       sheet.appendChild(el('p', { class: 'hint', text:
-        'Всё, что есть и здесь, и в файле, останется на месте вместе со '
-        + 'своими голосовыми записями.' }));
+        'Всё остальное, что есть и здесь, и в файле, останется на месте '
+        + 'вместе со своими голосовыми записями.' }));
 
       sheet.appendChild(el('div', { class: 'sheet-actions' }, [
         el('button', { class: 'btn sec', attrs: { type: 'button' },
@@ -12813,6 +13277,19 @@ body {
   function extraHere(incoming) {
     const sections = [], decks = [];
     let cards = 0;
+    // Заметки считаются отдельно, и вот почему. Карточка есть и здесь, и
+    // в файле — по списку «что исчезнет» она не проходит. Но замена «как
+    // в файле» кладёт на неё заметку из файла, и свой разбор, написанный
+    // вечером на этом устройстве, пропадает молча. Ровно то, о чём
+    // предупредить обязательно: вернуть его будет нечем.
+    let notes = 0;
+    const countNote = (mine, inCard) => {
+      for (const [a, b] of [[mine, inCard],
+                            [mine && mine.back, inCard && inCard.back]]) {
+        const was = noteOf(a);
+        if (was.trim() && was !== noteOf(b)) notes++;
+      }
+    };
     for (const sec of state.sections) {
       const inSec = incoming.sections.find((x) => x.name === sec.name);
       if (!inSec) {
@@ -12827,20 +13304,60 @@ body {
           cards += deck.cards.length;
           continue;
         }
-        const inTexts = new Set(inDeck.cards.map((c) => c.text.trim()));
-        deck.cards.forEach((c) => { if (!inTexts.has(c.text.trim())) cards++; });
+        const inByText = new Map(inDeck.cards.map((c) => [c.text.trim(), c]));
+        deck.cards.forEach((c) => {
+          const twin = inByText.get(c.text.trim());
+          if (!twin) cards++;
+          else countNote(c, twin);
+        });
       }
     }
     // Корзинка считается наравне с колодами. Убранная карточка — не
     // удалённая: замена «как в файле» вычистила бы её насовсем, и
     // промолчать об этом нельзя.
-    const inBinTexts = new Set(binCardsOf(incoming).map((c) =>
-      String((c && c.text) || '').trim()));
+    const inBinByText = new Map(binCardsOf(incoming).map((c) =>
+      [String((c && c.text) || '').trim(), c]));
     binDeck().cards.forEach((c) => {
-      if (!inBinTexts.has(c.text.trim())) cards++;
+      const twin = inBinByText.get(c.text.trim());
+      if (!twin) cards++;
+      else countNote(c, twin);
     });
-    return { sections: sections, decks: decks, cards: cards,
-             any: sections.length + decks.length + cards > 0 };
+    return { sections: sections, decks: decks, cards: cards, notes: notes,
+             any: sections.length + decks.length + cards + notes > 0 };
+  }
+
+  /**
+   * Заметка из файла — на сторону, у которой своей нет.
+   *
+   * «Только добавить» ничего не стирает, поэтому чужой разбор поверх
+   * своего не ложится. Но если своего нет, а в файле он есть, — это
+   * ровно тот случай, ради которого обмен и заведён: написал подробно на
+   * телефоне, забрал на компьютере. Раньше заметка так не переносилась
+   * вовсе: карточка на втором устройстве уже была, и её обходили целиком.
+   */
+  function mergeNote(inSide, mySide) {
+    if (!inSide || !mySide) return;
+    if (noteOf(mySide).trim()) return;
+    const text = clampStr(inSide.note, LIMITS.note);
+    if (text.trim()) mySide.note = text;
+  }
+
+  /**
+   * Оборот из файла на место своего — если своего содержимого нет.
+   *
+   * Заметка при этом остаётся: она не в счёт «занятости» оборота, но и
+   * пропадать ей незачем. Пустой оборот с одним разбором — обычное дело:
+   * человек перевернул карточку и написал объяснение, а сам оборот
+   * набрал позже и на другом устройстве.
+   */
+  function takeBack(inCard, mine) {
+    if (backHasBody(mine)) return;
+    const nb = backFromFile(inCard.back);
+    if (!nb) return;
+    const was = noteOf(mine.back);
+    if (was.trim() && !noteOf(nb).trim()) nb.note = was;
+    mine.back = nb;
+    mine.side = sanitizeSideNo(inCard.side);
   }
 
   /** Карточки корзинки из присланного. Пусто — значит, её там не было. */
@@ -12927,6 +13444,10 @@ body {
             keep.align = sanitizeAlign(inCard.align);
             keep.ink = sanitizeInk(inCard.ink);
             keep.link = sanitizeLink(inCard.link);
+            // Заметка — тоже «как в файле». Она часть стороны наравне с
+            // текстом, и оставить свою значило бы получить карточку с
+            // чужим текстом и старым разбором.
+            keep.note = clampStr(inCard.note, LIMITS.note);
             keep.remind = inCard.remind === true;
             keep.head = clampStr(inCard.head, LIMITS.cardHead);
             keep.headMarks = sanitizeMarks(inCard.headMarks, keep.head.length);
@@ -12963,6 +13484,7 @@ body {
                               align: sanitizeAlign(inCard.align),
                               ink: sanitizeInk(inCard.ink),
                               link: sanitizeLink(inCard.link),
+                              note: clampStr(inCard.note, LIMITS.note),
                               // Место под дополнительные дорожки есть у
                               // каждой карточки: без него один и тот же
                               // файл, применённый дважды, менял бы вид
@@ -13086,7 +13608,7 @@ body {
   // отметка о собственной записи и её куски сюда НЕ входят: они держат
   // связь со звуком, уже лежащим в хранилище этого устройства.
   const BIN_MIRRORED = ['color', 'fav', 'remind', 'head', 'headMarks',
-    'headAlign', 'headInk', 'marks', 'align', 'ink', 'link', 'peaks',
+    'headAlign', 'headInk', 'marks', 'align', 'ink', 'link', 'note', 'peaks',
     'at', 'inList', 'listAt', 'side'];
 
   /**
@@ -13233,16 +13755,15 @@ body {
             // проверяется по самому хранилищу, а не по отметке.
             linkTracks(inCard, mine, audioLinks, true);
             linkShots(inCard, mine, shotLinks, true);
+            mergeNote(inCard, mine);
             // Оборот. Своего нет вовсе — берём из файла целиком: иначе
             // оборот, заведённый на телефоне, никогда бы не доехал до
             // карточки, которая на компьютере уже есть. Свой есть —
             // не трогаем его текст: «добавить» ничего не стирает.
             if (inCard.back && typeof inCard.back === 'object') {
-              if (!backFilled(mine)) {
-                const nb = backFromFile(inCard.back);
-                if (nb) { mine.back = nb; mine.side = sanitizeSideNo(inCard.side); }
-              }
+              takeBack(inCard, mine);
               const myBack = backOf(mine);
+              mergeNote(inCard.back, myBack);
               linkTracks(inCard.back, myBack, audioLinks, true);
               linkShots(inCard.back, myBack, shotLinks, true);
             }
@@ -13271,6 +13792,7 @@ body {
                           align: sanitizeAlign(inCard.align),
                           ink: sanitizeInk(inCard.ink),
                           link: sanitizeLink(inCard.link),
+                          note: clampStr(inCard.note, LIMITS.note),
                           extra: [],
                           at: sanitizeAt(inCard.at),
                           inList: inCard.inList === true,
@@ -13324,12 +13846,11 @@ body {
           const from = sanitizeFrom(inCard.from);
           if (from) mine.from = from;
         }
+        mergeNote(inCard, mine);
         if (inCard.back && typeof inCard.back === 'object') {
-          if (!backFilled(mine)) {
-            const nb = backFromFile(inCard.back);
-            if (nb) { mine.back = nb; mine.side = sanitizeSideNo(inCard.side); }
-          }
+          takeBack(inCard, mine);
           const myBack = backOf(mine);
+          mergeNote(inCard.back, myBack);
           linkTracks(inCard.back, myBack, audioLinks, true);
           linkShots(inCard.back, myBack, shotLinks, true);
         }
@@ -13529,6 +14050,12 @@ body {
     // успевает зажать прокрутку.
     const wasAt = (typeof window !== 'undefined'
       && (window.scrollY || window.pageYOffset)) || 0;
+    // Недописанная заметка ложится в карточку ДО того, как экран
+    // пересоберётся. Иначе поле построилось бы по старому тексту, и
+    // последний абзац пропал бы с глаз — а перерисовка приходит не
+    // только по нажатию: её просит и полоска «готова новая версия», и
+    // сверка отметок о звуке, и крестик на полоске проигрывателя.
+    noteFlush();
     if (readerKeyHandler) {
       document.removeEventListener('keydown', readerKeyHandler);
       readerKeyHandler = null;
@@ -13547,7 +14074,8 @@ body {
     const strip = freshStrip();
     if (strip) root.appendChild(strip);
     let content;
-    if (view.name === 'read') content = renderReader();
+    if (view.name === 'note') content = renderNote();
+    else if (view.name === 'read') content = renderReader();
     else if (view.name === 'deck') content = renderDeck();
     else if (view.name === 'list') content = renderPlaylist();
     else content = renderHome();
