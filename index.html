@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-p0gnpTZp4NMdTxlkiZ7qFBeht8QYM10V7NFWfUR3Ge0=';
-               style-src 'sha256-KbaWRv0cPTbdCXlDFi578gJ9FnTDNREJhO6mNAnMLmk=';
+               script-src 'sha256-AFl+dpbEg9IEQITpP00URKSNzrEyhgmfyGKLOWko3U0=';
+               style-src 'sha256-FAqvBYTWg5uUJSRD89fRBJVz8O5dYQC00uTMDQOKD00=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -420,9 +420,15 @@ body {
   background: var(--heart);
 }
 
-/* Экран заметки. Всё, что на нём есть, — поле ввода во всю высоту:
-   длинный текст читают и правят подолгу, и место ему нужно всё. */
-.note-page { display: flex; flex-direction: column; }
+/* Экран заметки. Панель остаётся на месте, а прокручивается только сам
+   лист: на длинном разборе кнопки оформления всегда под рукой. */
+.note-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
 .note-side {
   flex: none;
   min-width: var(--tap);
@@ -441,10 +447,137 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.note-editor-shell {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.note-toolbar {
+  flex: none;
+  margin: 0 0 7px;
+  padding: 6px;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .88);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .04);
+}
+/* Ряды прокручиваются вбок отдельно. На iPhone все инструменты остаются
+   доступными, но не ужимаются до кнопок, в которые невозможно попасть. */
+.note-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.note-tools-row::-webkit-scrollbar { display: none; }
+.note-tools-row + .note-tools-row {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0, 0, 0, .07);
+}
+.note-tool {
+  flex: 0 0 38px;
+  width: 38px;
+  min-width: 38px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--hair);
+  border-radius: 9px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: 600 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.note-tool:active { background: rgba(0, 0, 0, .07); }
+.note-tool.on { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.note-tool[aria-label="Жирный"] { font-weight: 800; }
+.note-tool[aria-label="Курсив"] { font-style: italic; }
+.note-tool[aria-label="Подчёркнутый"] { text-decoration: underline; }
+.note-tool[aria-label="Зачёркнутый"] { text-decoration: line-through; }
+.note-tool.note-align {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.note-tools-label {
+  flex: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  padding: 0 2px 0 5px;
+}
+.note-color,
+.note-highlight {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, .18);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.note-highlight { border-radius: 7px; }
+.note-color.on,
+.note-highlight.on {
+  box-shadow: 0 0 0 2px var(--sheet), 0 0 0 4px var(--ink);
+}
+.note-editor-status {
+  flex: none;
+  min-height: 16px;
+  margin: -1px 4px 4px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 16px;
+}
+.note-editor-status:empty { min-height: 4px; }
+
+/* Строки ссылки и поиска раскрываются только по своим кнопкам. */
+.note-link-row,
+.note-search-row {
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 7px;
+}
+.note-link-row.on,
+.note-search-row.on { display: flex; }
+.note-link-input,
+.note-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  box-sizing: border-box;
+  border: 1px solid var(--hair);
+  border-radius: 9px;
+  background: var(--sheet);
+  color: var(--ink);
+  padding: 0 10px;
+  font: 400 16px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.note-link-action,
+.note-search-action {
+  flex: 0 0 38px;
+  height: 38px;
+  border: 1px solid var(--hair);
+  border-radius: 9px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: 600 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.note-search-count { flex: none; color: var(--ink-soft); font-size: 12px; }
+
 .note-area {
   flex: 1;
   width: 100%;
-  min-height: 40vh;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   box-sizing: border-box;
   padding: 14px 14px 16px;
   border: 1px solid var(--hair);
@@ -453,11 +586,102 @@ body {
   color: var(--ink);
   font: 400 17px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text",
         "Helvetica Neue", Arial, sans-serif;
-  resize: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: pan-y;
   /* Safari на iPhone увеличивает страницу, когда встаёшь в поле мельче
      16 пикселей. У нас 17 — не увеличит. */
 }
 .note-area:focus { outline: 2px solid var(--hair); outline-offset: -2px; }
+.note-area.empty::before {
+  content: attr(data-placeholder);
+  display: block;
+  color: var(--ink-soft);
+  opacity: .7;
+  pointer-events: none;
+}
+
+/* Один абзац заметки. Переводы строк хранятся в простом note, а свойства
+   абзаца — отдельно, поэтому выравнивание одного не двигает соседей. */
+.note-block {
+  position: relative;
+  min-height: 1.5em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0 0 .42em;
+  padding: 0;
+}
+.note-block:last-child { margin-bottom: 0; }
+.note-block.just {
+  -webkit-hyphens: auto;
+  hyphens: auto;
+  text-align-last: left;
+}
+.note-block.just-eased { text-align: left !important; }
+.note-kind-heading {
+  margin-top: .35em;
+  margin-bottom: .45em;
+  font-size: 1.16em;
+  line-height: 1.35;
+  font-weight: 700;
+}
+.note-kind-bullet,
+.note-kind-number,
+.note-kind-check { padding-left: 30px; }
+.note-kind-bullet::before,
+.note-kind-number::before {
+  content: attr(data-note-marker);
+  position: absolute;
+  left: 2px;
+  top: 0;
+  width: 24px;
+  color: var(--ink-soft);
+  text-align: right;
+  pointer-events: none;
+}
+.note-check {
+  position: absolute;
+  left: 1px;
+  top: 2px;
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  font: 700 14px/18px -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.note-kind-check.checked .note-block-text {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+.note-block-text { min-width: 1px; }
+.note-run {
+  display: inline;
+  font-size: inherit;
+  line-height: inherit;
+  border-radius: 3px;
+  text-underline-offset: 2px;
+}
+.note-run-b { font-weight: 700; }
+.note-run-i { font-style: italic; }
+.note-run-link {
+  color: #155F91;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  cursor: text;
+}
+
+@media (max-width: 480px) {
+  .note-toolbar { margin-bottom: 5px; padding: 4px; }
+  .note-tools-row { gap: 5px; }
+  .note-tool { flex-basis: 36px; width: 36px; min-width: 36px; height: 34px; }
+  .note-area { padding: 12px 12px 15px; font-size: 16px; }
+  .note-whose { margin-bottom: 5px; }
+}
 
 /* Корзинка — «убрать карточку из колоды, но не удалять».
    Ведёт себя как сердечко: в покое бледная, отмеченная — закрашенная.
@@ -2365,7 +2589,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '16.08.2026, 09:24';
+  const BUILD = '16.08.2026, 17:15';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -3343,6 +3567,260 @@ body {
     })).catch(() => []);
   }
 
+/* ─── 05b-note-data.js ────────────────────────────────────────────────
+ * Безопасный формат оформления заметки
+ *
+ * Часть общего кода приложения. Собирается: python3 build.py
+ * Карта всех частей: КАРТА-ПРОЕКТА.md
+ * ────────────────────────────────────────────────────────────── */
+
+  // Заметка по-прежнему хранит сам текст простой строкой в поле note.
+  // Оформление лежит отдельно, в noteDoc: произвольного HTML нет ни в
+  // хранилище, ни в файле обмена. Даже испорченный или подменённый файл
+  // может передать сюда только известные числа, названия и безопасные URL.
+  const NOTE_DOC_VERSION = 1;
+  const NOTE_KINDS = ['p', 'heading', 'bullet', 'number', 'check'];
+  const NOTE_ALIGN_DEFAULT = 'left';
+  const NOTE_RUN_LIMIT = 1600;
+
+  // Палитра заметки подобрана для белого листа. Белого здесь намеренно
+  // нет: на белом фоне он сделал бы текст невидимым.
+  const NOTE_INKS = [
+    '#1C1B19', '#6B6862', '#8C2F1E', '#B0451B',
+    '#1F6B4A', '#1C5C86', '#5B3E8E',
+  ];
+  const NOTE_HIGHLIGHTS = [
+    '#FFF0A8', '#FFD9B8', '#D8F0DD', '#D9E9FF', '#E9DDFF', '#F5D6E4',
+  ];
+
+  function sanitizeNoteKind(v) {
+    return NOTE_KINDS.indexOf(v) >= 0 ? v : 'p';
+  }
+
+  function sanitizeNoteAlign(v) {
+    return ALIGNS.indexOf(v) >= 0 ? v : NOTE_ALIGN_DEFAULT;
+  }
+
+  function sanitizeNoteInk(v) {
+    const c = String(v || '').toUpperCase();
+    return NOTE_INKS.indexOf(c) >= 0 ? c : '';
+  }
+
+  function sanitizeNoteHighlight(v) {
+    const c = String(v || '').toUpperCase();
+    return NOTE_HIGHLIGHTS.indexOf(c) >= 0 ? c : '';
+  }
+
+  /** Одна безопасная комбинация оформления на отрезке текста. */
+  function sanitizeNoteRuns(list, len) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const raw of list) {
+      if (!raw || typeof raw !== 'object') continue;
+      let s = Math.floor(Number(raw.s)), e = Math.floor(Number(raw.e));
+      if (!isFinite(s) || !isFinite(e)) continue;
+      s = Math.max(0, Math.min(s, len));
+      e = Math.max(0, Math.min(e, len));
+      if (e <= s) continue;
+      const m = String(raw.m || '').split('')
+        .filter((c, k, all) => MARKS.indexOf(c) >= 0 && all.indexOf(c) === k)
+        .sort().join('');
+      const ink = sanitizeNoteInk(raw.ink);
+      const hi = sanitizeNoteHighlight(raw.hi);
+      const link = sanitizeLink(raw.link);
+      if (!m && !ink && !hi && !link) continue;
+      const run = { s: s, e: e };
+      if (m) run.m = m;
+      if (ink) run.ink = ink;
+      if (hi) run.hi = hi;
+      if (link) run.link = link;
+      out.push(run);
+      if (out.length >= NOTE_RUN_LIMIT) break;
+    }
+    return out;
+  }
+
+  /**
+   * Проверить документ оформления заметки.
+   *
+   * blocks содержит только отклонения от обычного абзаца слева, а runs —
+   * оформление диапазонов в общей строке note. Поэтому сам текст в JSON
+   * не дублируется и не отнимает вдвое больше места в Safari.
+   */
+  function sanitizeNoteDoc(raw, text) {
+    text = clampStr(text, LIMITS.note);
+    if (!raw || typeof raw !== 'object') return null;
+    const lineCount = text.split('\n').length;
+    const blocks = [];
+    const seen = new Set();
+    const sourceBlocks = Array.isArray(raw.blocks) ? raw.blocks : [];
+    for (const item of sourceBlocks) {
+      if (!item || typeof item !== 'object') continue;
+      const line = Math.floor(Number(item.line));
+      if (!isFinite(line) || line < 0 || line >= lineCount || seen.has(line)) continue;
+      const kind = sanitizeNoteKind(item.kind);
+      const align = sanitizeNoteAlign(item.align);
+      const checked = kind === 'check' && item.checked === true;
+      if (kind === 'p' && align === NOTE_ALIGN_DEFAULT && !checked) continue;
+      const block = { line: line };
+      if (kind !== 'p') block.kind = kind;
+      if (align !== NOTE_ALIGN_DEFAULT) block.align = align;
+      if (checked) block.checked = true;
+      blocks.push(block);
+      seen.add(line);
+      if (blocks.length >= lineCount) break;
+    }
+    blocks.sort((a, b) => a.line - b.line);
+    const runs = sanitizeNoteRuns(raw.runs, text.length);
+    if (!blocks.length && !runs.length) return null;
+    const out = { v: NOTE_DOC_VERSION };
+    if (blocks.length) out.blocks = blocks;
+    if (runs.length) out.runs = runs;
+    return out;
+  }
+
+  function noteCell(raw) {
+    const m = String((raw && raw.m) || '').split('')
+      .filter((c, k, all) => MARKS.indexOf(c) >= 0 && all.indexOf(c) === k)
+      .sort().join('');
+    return {
+      m: m,
+      ink: sanitizeNoteInk(raw && raw.ink),
+      hi: sanitizeNoteHighlight(raw && raw.hi),
+      link: sanitizeLink(raw && raw.link),
+    };
+  }
+
+  function noteCellKey(c) {
+    c = noteCell(c);
+    return c.m + '\u0001' + c.ink + '\u0001' + c.hi + '\u0001' + c.link;
+  }
+
+  function noteRunsToCells(runs, len) {
+    const cells = new Array(len);
+    for (let i = 0; i < len; i++) cells[i] = noteCell();
+    sanitizeNoteRuns(runs, len).forEach((run) => {
+      for (let i = run.s; i < run.e; i++) {
+        const c = cells[i];
+        if (run.m) c.m = run.m;
+        if (run.ink) c.ink = run.ink;
+        if (run.hi) c.hi = run.hi;
+        if (run.link) c.link = run.link;
+      }
+    });
+    return cells;
+  }
+
+  function noteCellsToRuns(cells) {
+    const out = [];
+    let at = 0;
+    while (at < cells.length) {
+      const c = noteCell(cells[at]);
+      const key = noteCellKey(c);
+      let to = at + 1;
+      while (to < cells.length && noteCellKey(cells[to]) === key) to++;
+      if (c.m || c.ink || c.hi || c.link) {
+        const run = { s: at, e: to };
+        if (c.m) run.m = c.m;
+        if (c.ink) run.ink = c.ink;
+        if (c.hi) run.hi = c.hi;
+        if (c.link) run.link = c.link;
+        out.push(run);
+      }
+      at = to;
+    }
+    return out.slice(0, NOTE_RUN_LIMIT);
+  }
+
+  /** Строка note + noteDoc → удобные для редактора отдельные абзацы. */
+  function noteDocToBlocks(text, rawDoc) {
+    text = clampStr(text, LIMITS.note);
+    const doc = sanitizeNoteDoc(rawDoc, text);
+    const lines = text.split('\n');
+    const meta = new Map();
+    ((doc && doc.blocks) || []).forEach((b) => { meta.set(b.line, b); });
+    const allCells = noteRunsToCells((doc && doc.runs) || [], text.length);
+    const out = [];
+    let at = 0;
+    lines.forEach((line, k) => {
+      const b = meta.get(k) || {};
+      out.push({
+        text: line,
+        kind: sanitizeNoteKind(b.kind),
+        align: sanitizeNoteAlign(b.align),
+        checked: b.checked === true,
+        cells: allCells.slice(at, at + line.length).map(noteCell),
+      });
+      at += line.length + (k < lines.length - 1 ? 1 : 0);
+    });
+    return out.length ? out : [{ text: '', kind: 'p', align: NOTE_ALIGN_DEFAULT,
+                                  checked: false, cells: [] }];
+  }
+
+  /** Абзацы редактора → совместимая строка note и безопасный noteDoc. */
+  function noteBlocksToState(source) {
+    const blocks = (Array.isArray(source) && source.length ? source : [
+      { text: '', kind: 'p', align: NOTE_ALIGN_DEFAULT, checked: false, cells: [] },
+    ]).map((b) => ({
+      text: String((b && b.text) || ''),
+      kind: sanitizeNoteKind(b && b.kind),
+      align: sanitizeNoteAlign(b && b.align),
+      checked: !!(b && b.checked),
+      cells: Array.isArray(b && b.cells) ? b.cells.map(noteCell) : [],
+    }));
+
+    const cleanBlocks = [];
+    let remaining = LIMITS.note;
+    blocks.forEach((b) => {
+      if (cleanBlocks.length) {
+        if (remaining <= 0) return;
+        remaining--;                 // перевод строки перед этим абзацем
+      }
+      const value = b.text.slice(0, Math.max(0, remaining));
+      const cells = b.cells.slice(0, value.length);
+      while (cells.length < value.length) cells.push(noteCell());
+      const clean = { text: value, kind: b.kind, align: b.align,
+                      checked: b.kind === 'check' && b.checked, cells: cells };
+      cleanBlocks.push(clean);
+      remaining -= value.length;
+    });
+    if (!cleanBlocks.length) cleanBlocks.push({ text: '', kind: 'p',
+      align: NOTE_ALIGN_DEFAULT, checked: false, cells: [] });
+
+    const text = cleanBlocks.map((b) => b.text).join('\n');
+    const globalCells = [];
+    cleanBlocks.forEach((b, k) => {
+      if (k) globalCells.push(noteCell());
+      b.cells.forEach((c) => { globalCells.push(noteCell(c)); });
+    });
+    const blockMeta = [];
+    cleanBlocks.forEach((b, line) => {
+      if (b.kind === 'p' && b.align === NOTE_ALIGN_DEFAULT && !b.checked) return;
+      const x = { line: line };
+      if (b.kind !== 'p') x.kind = b.kind;
+      if (b.align !== NOTE_ALIGN_DEFAULT) x.align = b.align;
+      if (b.kind === 'check' && b.checked) x.checked = true;
+      blockMeta.push(x);
+    });
+    const raw = { v: NOTE_DOC_VERSION, blocks: blockMeta,
+                  runs: noteCellsToRuns(globalCells) };
+    return { text: text, doc: sanitizeNoteDoc(raw, text), blocks: cleanBlocks };
+  }
+
+  /** Сигнатура нужна предупреждению «заметка будет переписана». */
+  function noteSignature(side) {
+    const text = noteOf(side);
+    return text + '\u0000' + JSON.stringify(sanitizeNoteDoc(side && side.noteDoc, text));
+  }
+
+  /** Перенести заметку вместе с оформлением, не оставляя старого хвоста. */
+  function copyNote(inSide, mySide) {
+    const text = clampStr(inSide && inSide.note, LIMITS.note);
+    mySide.note = text;
+    const doc = sanitizeNoteDoc(inSide && inSide.noteDoc, text);
+    if (doc) mySide.noteDoc = doc;
+    else delete mySide.noteDoc;
+  }
 /* ─── 06-sides.js ──────────────────────────────────────────────────────
  * Две стороны карточки: лицо и оборот
  *
@@ -3398,7 +3876,7 @@ body {
     if (!raw || typeof raw !== 'object') return null;
     const text = clampStr(raw.text, LIMITS.cardText);
     const head = clampStr(raw.head, LIMITS.cardHead);
-    return {
+    const back = {
       id: clampStr(raw.id, 40) || uid(),
       text: text,
       marks: sanitizeMarks(raw.marks, text.length),
@@ -3422,6 +3900,9 @@ body {
       listAt: sanitizeListAt(raw.listAt),
       shots: sanitizeShots(raw.shots),
     };
+    const noteDoc = sanitizeNoteDoc(raw.noteDoc, back.note);
+    if (noteDoc) back.noteDoc = noteDoc;
+    return back;
   }
 
   /**
@@ -3626,6 +4107,11 @@ body {
       // оставил, так в следующий раз и откроется.
       side: sanitizeSideNo(c.side),
     };
+    // Оформление заметки хранится отдельно от её простого текста. В
+    // карточку оно попадает только после полной проверки диапазонов,
+    // цветов, видов абзацев и ссылок.
+    const noteDoc = sanitizeNoteDoc(c.noteDoc, card.note);
+    if (noteDoc) card.noteDoc = noteDoc;
     // Оборот кладём, только если он и правда есть: у того, кто
     // оборотами не пользуется, в хранилище не заводится ни одного
     // лишнего поля.
@@ -3764,7 +4250,6 @@ body {
       ],
     };
   }
-
 /* ─── 06b-bin.js ───────────────────────────────────────────────────────
  * Корзинка: карточка убрана из колоды, но не удалена
  *
@@ -5012,7 +5497,7 @@ body {
       // и с таким запретом жест не начинался бы почти нигде. Вместо этого
       // ниже гасим нажатие, если палец поехал вбок.
       const t = ev.target;
-      if (t && t.closest && t.closest('input, textarea')) return;
+      if (t && t.closest && t.closest('input, textarea, [contenteditable="true"]')) return;
       id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
       dx = 0; axis = null; swiped = false; speed = 0;
       tPrev = now(); xPrev = ev.clientX;
@@ -5231,7 +5716,6 @@ body {
   // обработчики на корне смотрят только на эти две переменные.
   let padWheelNow = null;
   let noZoomNow = false;
-
 
 /* ─── 11-text-marks.js ─────────────────────────────────────────────────
  * Оформление текста: отметки, отрисовка, ссылка, заголовок
@@ -7838,10 +8322,11 @@ body {
   // открывается отдельным экраном во всю его высоту. Получается два
   // уровня: карточка — чтобы вспоминать, заметка — чтобы разбираться.
   //
-  // Хранится простой строкой в поле note рядом с текстом стороны. Значит,
-  // она сама собой уезжает в файл обмена, сама возвращается оттуда и сама
-  // исчезает вместе с удалённой карточкой — как и всё остальное, что
-  // лежит на стороне.
+  // Сам текст хранится простой строкой в поле note рядом с текстом
+  // стороны, а безопасное оформление — в noteDoc (05b-note-data.js).
+  // Значит, оба поля сами собой уезжают в файл обмена, возвращаются и
+  // исчезают вместе с удалённой карточкой — как и всё, что лежит на
+  // стороне. Старый файл без noteDoc остаётся обычным текстом.
   // ------------------------------------------------------------------
 
   /** Текст заметки этой стороны. Пусто — заметки нет. */
@@ -7907,14 +8392,19 @@ body {
     if (!notePending) return;
     const it = notePending;
     notePending = null;
-    if (noteOf(it.side) === it.text) return;
+    const oldDoc = sanitizeNoteDoc(it.side && it.side.noteDoc, noteOf(it.side));
+    const newDoc = sanitizeNoteDoc(it.doc, it.text);
+    if (noteOf(it.side) === it.text
+        && JSON.stringify(oldDoc) === JSON.stringify(newDoc)) return;
     it.side.note = it.text;
+    if (newDoc) it.side.noteDoc = newDoc;
+    else delete it.side.noteDoc;
     save();
   }
 
   /** Отложить запись: человек ещё печатает. */
-  function noteLater(side, text) {
-    notePending = { side: side, text: text };
+  function noteLater(side, text, doc) {
+    notePending = { side: side, text: text, doc: doc };
     if (noteTimer) clearTimeout(noteTimer);
     noteTimer = setTimeout(noteFlush, NOTE_SAVE_MS);
   }
@@ -7974,25 +8464,19 @@ body {
            index: i });
     };
 
-    const area = el('textarea', {
-      class: 'note-area',
-      attrs: {
-        maxlength: String(LIMITS.note),
-        placeholder: 'Подробности, примеры, разбор — всё, чему не место '
-          + 'на самой карточке.',
-        'aria-label': 'Текст заметки',
-        spellcheck: 'false',
-      },
-    });
     // Текст берём не только из карточки, но и из отложенной записи, если
     // она ещё не легла. Экран может пересобраться прямо под руками —
     // например, обработчик офлайна докачал новую версию и попросил
     // показать полоску, — и тогда последний абзац исчезал бы с глаз,
     // хотя таймер записал бы его секундой позже. Теперь на экране всегда
     // самое свежее, что человек набрал.
-    area.value = (notePending && notePending.side === side)
-      ? notePending.text : noteOf(side);
-    area.addEventListener('input', () => { noteLater(side, area.value); });
+    const pending = notePending && notePending.side === side ? notePending : null;
+    const editor = makeNoteEditor(side,
+      pending ? pending.text : noteOf(side),
+      pending ? pending.doc : side.noteDoc,
+      (text, doc) => { noteLater(side, text, doc); },
+      (spot) => { noteSpots[noteSpotKey(card)] = spot; });
+    const area = editor.area;
     // Ушли с экрана мимо наших кнопок — например, нажали что-то в
     // полоске проигрывателя. Записываем немедленно.
     area.addEventListener('blur', noteFlush);
@@ -8000,13 +8484,7 @@ body {
     // Место в тексте — каретка и прокрутка — запоминается на ходу и
     // возвращается при следующем открытии этой же стороны.
     const spotK = noteSpotKey(card);
-    const keepSpot = () => {
-      noteSpots[spotK] = { at: area.selectionStart || 0,
-                           top: area.scrollTop || 0 };
-    };
-    area.addEventListener('keyup', keepSpot);
-    area.addEventListener('click', keepSpot);
-    area.addEventListener('scroll', keepSpot);
+    const keepSpot = () => { noteSpots[spotK] = editor.keepSpot(); };
     area.addEventListener('blur', keepSpot);
 
     // Чья это заметка — видно в шапке: начало текста стороны и её буква.
@@ -8026,7 +8504,7 @@ body {
                      text: SIDE_LETTERS[card.side === 1 ? 1 : 0] }),
       ]),
       el('p', { class: 'note-whose', text: whose }),
-      area,
+      editor.node,
     ]);
 
     // Клавиатура: Esc закрывает, как и в читалке. Внутри поля ввода — тоже:
@@ -8044,22 +8522,979 @@ body {
     // Возвращаем человека туда, где он бросил чтение. Не сразу: до
     // первого кадра поле ещё не разложено, и прокрутка в нём никуда не
     // встанет.
-    const spot = noteSpots[spotK];
-    if (spot && typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => {
-        if (view.name !== 'note') return;
-        const at = Math.min(spot.at, area.value.length);
-        try {
-          area.setSelectionRange(at, at);
-        } catch (e) {
-          // Поле ещё не готово принять каретку — ставим напрямую
-          area.selectionStart = at;
-          area.selectionEnd = at;
+    editor.restoreSpot(noteSpots[spotK]);
+    return page;
+  }
+/* ─── 15c-note-editor.js ───────────────────────────────────────────────
+ * Редактор заметки: оформление, абзацы, списки, ссылки и поиск
+ *
+ * Часть общего кода приложения. Собирается: python3 build.py
+ * Карта всех частей: КАРТА-ПРОЕКТА.md
+ * ────────────────────────────────────────────────────────────── */
+
+  function noteCloneBlocks(blocks) {
+    return (blocks || []).map((b) => ({
+      text: String((b && b.text) || ''),
+      kind: sanitizeNoteKind(b && b.kind),
+      align: sanitizeNoteAlign(b && b.align),
+      checked: !!(b && b.checked),
+      cells: Array.isArray(b && b.cells) ? b.cells.map(noteCell) : [],
+    }));
+  }
+
+  /**
+   * Полноэкранный безопасный редактор заметки.
+   *
+   * В DOM оформление видно сразу, но наружу редактор отдаёт только строку
+   * и проверенный noteDoc. Вставленный с сайта HTML не сохраняется:
+   * вставка берёт лишь text/plain, а отрисовка всегда идёт через
+   * createElement и текстовые узлы.
+   */
+  function makeNoteEditor(side, initialText, initialDoc, changed, spotted) {
+    let blocks = noteDocToBlocks(initialText, initialDoc);
+    let lastRange = { s: 0, e: 0 };
+    let typing = noteCell();
+    let pendingLinkRange = null;
+    let undoStack = [];
+    let redoStack = [];
+    let lastInputAt = 0;
+    let beforeInput = null;
+    let searchAt = -1;
+
+    const shell = el('section', { class: 'note-editor-shell' });
+    const toolbar = el('div', {
+      class: 'note-toolbar', attrs: { role: 'toolbar',
+        'aria-label': 'Оформление заметки' },
+    });
+    const rowMain = el('div', { class: 'note-tools-row note-tools-main' });
+    const rowBlock = el('div', { class: 'note-tools-row note-tools-block' });
+    const rowColor = el('div', { class: 'note-tools-row note-tools-color' });
+    const status = el('div', { class: 'note-editor-status',
+      attrs: { role: 'status', 'aria-live': 'polite' } });
+    const box = el('div', {
+      class: 'note-area',
+      attrs: {
+        contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true',
+        'aria-label': 'Текст заметки', spellcheck: 'true',
+        'data-placeholder': 'Подробности, примеры, разбор — всё, чему не место на самой карточке.',
+      },
+    });
+
+    const hasClass = (node, name) => !!node &&
+      String(node.className || '').split(/\s+/).indexOf(name) >= 0;
+    const attr = (node, name) => node && node.getAttribute
+      ? (node.getAttribute(name) || '') : '';
+    const childrenOf = (node) => Array.from((node && node.childNodes) || []);
+    const isUi = (node) => attr(node, 'data-note-ui') === 'true';
+
+    function say(text) {
+      status.textContent = String(text || '');
+    }
+
+    function flatState() { return noteBlocksToState(blocks); }
+    function flatText() { return flatState().text; }
+
+    function snapshot() {
+      const stateNow = flatState();
+      return JSON.stringify({ text: stateNow.text, doc: stateNow.doc });
+    }
+
+    function restoreSnapshot(raw) {
+      let snap = null;
+      try { snap = JSON.parse(raw); } catch (e) { snap = null; }
+      if (!snap || typeof snap !== 'object') return false;
+      blocks = noteDocToBlocks(snap.text, snap.doc);
+      return true;
+    }
+
+    function pushUndo() {
+      const snap = snapshot();
+      if (undoStack[undoStack.length - 1] !== snap) undoStack.push(snap);
+      if (undoStack.length > 100) undoStack.shift();
+      redoStack = [];
+      lastInputAt = 0;
+    }
+
+    function commit() {
+      const stateNow = flatState();
+      blocks = stateNow.blocks;
+      changed(stateNow.text, stateNow.doc);
+    }
+
+    function blockStarts() {
+      const out = [];
+      let at = 0;
+      blocks.forEach((b, k) => {
+        out.push(at);
+        at += b.text.length + (k < blocks.length - 1 ? 1 : 0);
+      });
+      return out;
+    }
+
+    function globalToLocal(pos) {
+      pos = Math.max(0, Math.min(Number(pos) || 0, flatText().length));
+      const starts = blockStarts();
+      for (let k = 0; k < blocks.length; k++) {
+        const end = starts[k] + blocks[k].text.length;
+        if (pos <= end || k === blocks.length - 1) {
+          return { block: k, at: Math.max(0, Math.min(pos - starts[k], blocks[k].text.length)) };
         }
-        area.scrollTop = spot.top;
+      }
+      return { block: blocks.length - 1, at: blocks[blocks.length - 1].text.length };
+    }
+
+    function localToGlobal(k, at) {
+      const starts = blockStarts();
+      k = Math.max(0, Math.min(k, blocks.length - 1));
+      return starts[k] + Math.max(0, Math.min(at, blocks[k].text.length));
+    }
+
+    function noteBlockNode(node) {
+      for (let n = node; n && n !== box; n = n.parentNode) {
+        if (hasClass(n, 'note-block')) return n;
+      }
+      return null;
+    }
+
+    function nodeOffset(root, target, off) {
+      let total = 0, done = false;
+      const walk = (node) => {
+        if (!node || done || isUi(node)) return;
+        if (node === target) {
+          if (node.nodeType === 3) {
+            total += Math.max(0, Math.min(Number(off) || 0,
+              String(node.nodeValue || '').length));
+          } else {
+            const kids = childrenOf(node);
+            for (let i = 0; i < Math.min(Number(off) || 0, kids.length); i++) walk(kids[i]);
+          }
+          done = true;
+          return;
+        }
+        if (node.nodeType === 3) {
+          total += String(node.nodeValue || '').length;
+          return;
+        }
+        childrenOf(node).forEach(walk);
+      };
+      walk(root);
+      return total;
+    }
+
+    function positionFromNode(node, off) {
+      if (!node) return null;
+      if (node === box) {
+        const edge = Number(off) || 0;
+        if (edge <= 0) return { block: 0, at: 0 };
+        if (edge >= blocks.length) {
+          const last = blocks.length - 1;
+          return { block: last, at: blocks[last].text.length };
+        }
+        return { block: edge, at: 0 };
+      }
+      const blockNode = noteBlockNode(node);
+      if (!blockNode) return null;
+      const k = Math.floor(Number(attr(blockNode, 'data-note-index')));
+      if (!isFinite(k) || !blocks[k]) return null;
+      const body = blockNode.querySelector ? blockNode.querySelector('.note-block-text') : blockNode;
+      return { block: k, at: Math.min(nodeOffset(body, node, off), blocks[k].text.length) };
+    }
+
+    function selectionRange() {
+      const sel = (typeof window !== 'undefined' && window.getSelection)
+        ? window.getSelection() : null;
+      if (sel && sel.rangeCount && sel.anchorNode && sel.focusNode) {
+        const a = positionFromNode(sel.anchorNode, sel.anchorOffset);
+        const b = positionFromNode(sel.focusNode, sel.focusOffset);
+        if (a && b) {
+          const x = localToGlobal(a.block, a.at);
+          const y = localToGlobal(b.block, b.at);
+          lastRange = { s: Math.min(x, y), e: Math.max(x, y) };
+        }
+      }
+      const len = flatText().length;
+      lastRange.s = Math.max(0, Math.min(lastRange.s, len));
+      lastRange.e = Math.max(lastRange.s, Math.min(lastRange.e, len));
+      return { s: lastRange.s, e: lastRange.e };
+    }
+
+    function textNodes(root) {
+      const out = [];
+      const walk = (node) => {
+        if (!node || isUi(node)) return;
+        if (node.nodeType === 3) { out.push(node); return; }
+        childrenOf(node).forEach(walk);
+      };
+      walk(root);
+      return out;
+    }
+
+    function pointInBlock(k, at) {
+      const node = box.querySelector
+        ? box.querySelector('.note-block[data-note-index="' + k + '"]') : null;
+      // Заглушка тестов знает только простой .class, поэтому запасной путь
+      // ищет нужный абзац среди прямых детей.
+      const blockNode = node || Array.from(box.children || []).find((n) =>
+        attr(n, 'data-note-index') === String(k));
+      if (!blockNode) return { node: box, off: 0 };
+      const body = blockNode.querySelector ? blockNode.querySelector('.note-block-text') : blockNode;
+      const nodes = textNodes(body);
+      let left = Math.max(0, at);
+      for (const n of nodes) {
+        const len = String(n.nodeValue || '').length;
+        if (left <= len) return { node: n, off: left };
+        left -= len;
+      }
+      const last = nodes[nodes.length - 1];
+      return last ? { node: last, off: String(last.nodeValue || '').length }
+        : { node: body, off: 0 };
+    }
+
+    function selectGlobal(from, to, focusBox) {
+      const a = globalToLocal(from), b = globalToLocal(to);
+      lastRange = { s: Math.min(from, to), e: Math.max(from, to) };
+      const sel = (typeof window !== 'undefined' && window.getSelection)
+        ? window.getSelection() : null;
+      if (!sel || !document.createRange) return;
+      const p = pointInBlock(a.block, a.at);
+      const q = pointInBlock(b.block, b.at);
+      try {
+        const r = document.createRange();
+        r.setStart(p.node, p.off); r.setEnd(q.node, q.off);
+        sel.removeAllRanges(); sel.addRange(r);
+        if (focusBox && box.focus) box.focus();
+      } catch (e) { /* Safari ещё раскладывает новый абзац */ }
+    }
+
+    function rangeBlocks(range) {
+      const a = globalToLocal(range.s);
+      const endPos = range.e > range.s ? range.e - 1 : range.e;
+      const b = globalToLocal(endPos);
+      const out = [];
+      for (let k = a.block; k <= b.block; k++) out.push(k);
+      return out;
+    }
+
+    function eachSelectedCell(range, fn) {
+      const starts = blockStarts();
+      let count = 0;
+      blocks.forEach((block, k) => {
+        const s = Math.max(0, range.s - starts[k]);
+        const e = Math.min(block.text.length, range.e - starts[k]);
+        for (let i = s; i < e; i++) { fn(block.cells[i], block, i); count++; }
+      });
+      return count;
+    }
+
+    function paintBlockText(body, block) {
+      clear(body);
+      const runs = noteCellsToRuns(block.cells);
+      if (!runs.length) {
+        body.appendChild(document.createTextNode(block.text));
+        return;
+      }
+      let at = 0;
+      runs.forEach((run) => {
+        if (run.s > at) body.appendChild(document.createTextNode(block.text.slice(at, run.s)));
+        const classes = ['note-run'];
+        if (run.m && run.m.indexOf('b') >= 0) classes.push('note-run-b');
+        if (run.m && run.m.indexOf('i') >= 0) classes.push('note-run-i');
+        if (run.link) classes.push('note-run-link');
+        const span = el('span', { class: classes.join(' ') });
+        if (run.m) span.setAttribute('data-note-m', run.m);
+        if (run.ink) {
+          span.setAttribute('data-note-ink', run.ink);
+          span.style.setProperty('color', run.ink);
+        }
+        if (run.hi) {
+          span.setAttribute('data-note-hi', run.hi);
+          span.style.setProperty('background-color', run.hi);
+        }
+        if (run.link) {
+          span.setAttribute('data-note-link', run.link);
+          span.setAttribute('title', run.link);
+        }
+        const line = (run.m && run.m.indexOf('u') >= 0 ? 'underline ' : '')
+          + (run.m && run.m.indexOf('s') >= 0 ? 'line-through' : '');
+        if (line.trim()) span.style.setProperty('text-decoration', line.trim());
+        span.appendChild(document.createTextNode(block.text.slice(run.s, run.e)));
+        body.appendChild(span);
+        at = run.e;
+      });
+      if (at < block.text.length) body.appendChild(document.createTextNode(block.text.slice(at)));
+      if (!block.text) body.appendChild(document.createTextNode(''));
+    }
+
+    function renderEditor(range, focusBox) {
+      const top = box.scrollTop || 0;
+      clear(box);
+      box.className = 'note-area' + (blocks.every((b) => !b.text) ? ' empty' : '');
+      let number = 0;
+      blocks.forEach((block, k) => {
+        number = block.kind === 'number' ? number + 1 : 0;
+        const classes = ['note-block', 'note-kind-' + block.kind];
+        if (block.align === 'justify') classes.push('just');
+        if (block.checked) classes.push('checked');
+        const line = el('div', { class: classes.join(' '), attrs: {
+          'data-note-index': String(k), 'data-note-kind': block.kind,
+          'data-note-align': block.align,
+        }, style: { 'text-align': block.align } });
+        if (block.kind === 'bullet') line.setAttribute('data-note-marker', '•');
+        if (block.kind === 'number') line.setAttribute('data-note-marker', String(number) + '.');
+        if (block.kind === 'check') {
+          const check = el('button', { class: 'note-check', attrs: {
+            type: 'button', 'data-note-ui': 'true',
+            'aria-label': block.checked ? 'Снять отметку' : 'Отметить пункт',
+            'aria-pressed': String(block.checked),
+          }, text: block.checked ? '✓' : '' });
+          check.addEventListener('pointerdown', (ev) => { if (ev.preventDefault) ev.preventDefault(); });
+          check.addEventListener('mousedown', (ev) => { if (ev.preventDefault) ev.preventDefault(); });
+          check.addEventListener('click', () => {
+            syncFromDom(); pushUndo();
+            blocks[k].checked = !blocks[k].checked;
+            renderEditor(range || selectionRange(), false); commit();
+          });
+          line.appendChild(check);
+        }
+        const body = el('span', { class: 'note-block-text' });
+        paintBlockText(body, block);
+        line.appendChild(body);
+        markLang(line, block.text);
+        box.appendChild(line);
+        if (block.align === 'justify') justifyLater(line);
+      });
+      box.scrollTop = top;
+      if (range) selectGlobal(range.s, range.e, !!focusBox);
+      refreshToolbar();
+    }
+
+    function extractStyled(root) {
+      let text = '';
+      const cells = [];
+      const walk = (node, inherited) => {
+        if (!node || isUi(node)) return;
+        const style = noteCell(inherited);
+        const ownM = attr(node, 'data-note-m');
+        const ownInk = attr(node, 'data-note-ink');
+        const ownHi = attr(node, 'data-note-hi');
+        const ownLink = attr(node, 'data-note-link');
+        if (ownM) style.m = noteCell({ m: ownM }).m;
+        if (ownInk) style.ink = sanitizeNoteInk(ownInk);
+        if (ownHi) style.hi = sanitizeNoteHighlight(ownHi);
+        if (ownLink) style.link = sanitizeLink(ownLink);
+        if (node.nodeType === 3) {
+          const value = String(node.nodeValue || '');
+          text += value;
+          for (let i = 0; i < value.length; i++) cells.push(noteCell(style));
+          return;
+        }
+        if (String(node.tagName || '').toUpperCase() === 'BR') {
+          text += '\n'; cells.push(noteCell()); return;
+        }
+        childrenOf(node).forEach((child) => { walk(child, style); });
+      };
+      walk(root, noteCell());
+      return { text: text, cells: cells };
+    }
+
+    function syncFromDom() {
+      const next = [];
+      const lineNodes = Array.from(box.children || []).filter((n) => hasClass(n, 'note-block'));
+      lineNodes.forEach((line) => {
+        const body = line.querySelector ? line.querySelector('.note-block-text') : line;
+        const got = extractStyled(body);
+        const pieces = got.text.split('\n');
+        let at = 0;
+        pieces.forEach((piece, p) => {
+          const baseKind = sanitizeNoteKind(attr(line, 'data-note-kind'));
+          next.push({
+            text: piece,
+            kind: p === 0 ? baseKind
+              : (['bullet', 'number', 'check'].indexOf(baseKind) >= 0 ? baseKind : 'p'),
+            align: sanitizeNoteAlign(attr(line, 'data-note-align')),
+            checked: p === 0 && hasClass(line, 'checked'),
+            cells: got.cells.slice(at, at + piece.length).map(noteCell),
+          });
+          at += piece.length + (p < pieces.length - 1 ? 1 : 0);
+        });
+      });
+      if (!next.length) {
+        const got = extractStyled(box);
+        next.push({ text: got.text, kind: 'p', align: NOTE_ALIGN_DEFAULT,
+                    checked: false, cells: got.cells });
+      }
+      blocks = noteBlocksToState(next).blocks;
+    }
+
+    function currentStyle(range) {
+      if (range.e <= range.s) return noteCell(typing);
+      let first = null, same = true;
+      eachSelectedCell(range, (cell) => {
+        if (!first) first = noteCell(cell);
+        else if (noteCellKey(first) !== noteCellKey(cell)) same = false;
+      });
+      return same && first ? first : noteCell();
+    }
+
+    const markButtons = [];
+    const blockButtons = [];
+    const alignButtons = [];
+    const inkButtons = [];
+    const hiButtons = [];
+
+    function refreshToolbar() {
+      if (!markButtons.length) return;
+      const range = selectionRange();
+      const style = currentStyle(range);
+      markButtons.forEach((x) => {
+        const on = style.m.indexOf(x.m) >= 0;
+        x.node.className = 'note-tool' + (on ? ' on' : '');
+        x.node.setAttribute('aria-pressed', String(on));
+      });
+      const indexes = rangeBlocks(range);
+      blockButtons.forEach((x) => {
+        const on = indexes.length && indexes.every((k) => blocks[k].kind === x.kind);
+        x.node.className = 'note-tool' + (on ? ' on' : '');
+        x.node.setAttribute('aria-pressed', String(!!on));
+      });
+      alignButtons.forEach((x) => {
+        const on = indexes.length && indexes.every((k) => blocks[k].align === x.align);
+        x.node.className = 'note-tool note-align align-' + x.align + (on ? ' on' : '');
+        x.node.setAttribute('aria-pressed', String(!!on));
+      });
+      inkButtons.forEach((x) => {
+        const on = style.ink === x.color;
+        x.node.className = 'note-color' + (on ? ' on' : '');
+        x.node.setAttribute('aria-pressed', String(on));
+      });
+      hiButtons.forEach((x) => {
+        const on = style.hi === x.color;
+        x.node.className = 'note-highlight' + (on ? ' on' : '');
+        x.node.setAttribute('aria-pressed', String(on));
       });
     }
-    return page;
+
+    function protectSelection(node) {
+      node.addEventListener('pointerdown', (ev) => { if (ev.preventDefault) ev.preventDefault(); });
+      node.addEventListener('mousedown', (ev) => { if (ev.preventDefault) ev.preventDefault(); });
+      return node;
+    }
+
+    function tool(label, title, action, extraClass) {
+      const node = protectSelection(el('button', {
+        class: 'note-tool' + (extraClass ? ' ' + extraClass : ''),
+        attrs: { type: 'button', title: title, 'aria-label': title,
+                 'aria-pressed': 'false' }, text: label,
+      }));
+      node.addEventListener('click', action);
+      return node;
+    }
+
+    function applyMark(letter) {
+      syncFromDom();
+      const range = selectionRange();
+      if (range.e <= range.s) {
+        typing.m = typing.m.indexOf(letter) >= 0
+          ? typing.m.split('').filter((x) => x !== letter).join('')
+          : (typing.m + letter).split('').sort().join('');
+        say('Оформление будет применяться к новому тексту');
+        refreshToolbar();
+        return;
+      }
+      let all = true;
+      eachSelectedCell(range, (cell) => { if (cell.m.indexOf(letter) < 0) all = false; });
+      pushUndo();
+      eachSelectedCell(range, (cell) => {
+        cell.m = all ? cell.m.split('').filter((x) => x !== letter).join('')
+          : (cell.m.indexOf(letter) >= 0 ? cell.m
+            : (cell.m + letter).split('').sort().join(''));
+      });
+      renderEditor(range, true); commit(); say('Оформление применено');
+    }
+
+    function applyInline(prop, value) {
+      syncFromDom();
+      const range = selectionRange();
+      if (range.e <= range.s) {
+        typing[prop] = typing[prop] === value ? '' : value;
+        say('Цвет будет применяться к новому тексту');
+        refreshToolbar();
+        return;
+      }
+      const cur = currentStyle(range);
+      const set = cur[prop] === value ? '' : value;
+      pushUndo();
+      eachSelectedCell(range, (cell) => { cell[prop] = set; });
+      renderEditor(range, true); commit(); say(set ? 'Цвет применён' : 'Цвет снят');
+    }
+
+    function applyKind(kind) {
+      syncFromDom(); const range = selectionRange(); pushUndo();
+      const ids = rangeBlocks(range);
+      const all = ids.every((k) => blocks[k].kind === kind);
+      ids.forEach((k) => {
+        blocks[k].kind = all ? 'p' : kind;
+        if (blocks[k].kind !== 'check') blocks[k].checked = false;
+      });
+      renderEditor(range, true); commit();
+    }
+
+    function applyAlign(align) {
+      syncFromDom(); const range = selectionRange(); pushUndo();
+      rangeBlocks(range).forEach((k) => { blocks[k].align = sanitizeNoteAlign(align); });
+      renderEditor(range, true); commit();
+    }
+
+    function clearFormatting() {
+      syncFromDom(); let range = selectionRange(); pushUndo();
+      typing = noteCell();
+      if (range.e <= range.s) {
+        const here = globalToLocal(range.s);
+        blocks[here.block].cells = blocks[here.block].text.split('').map(() => noteCell());
+        blocks[here.block].kind = 'p'; blocks[here.block].align = NOTE_ALIGN_DEFAULT;
+        blocks[here.block].checked = false;
+      } else {
+        eachSelectedCell(range, (cell) => {
+          cell.m = ''; cell.ink = ''; cell.hi = ''; cell.link = '';
+        });
+        rangeBlocks(range).forEach((k) => {
+          blocks[k].kind = 'p'; blocks[k].align = NOTE_ALIGN_DEFAULT;
+          blocks[k].checked = false;
+        });
+      }
+      renderEditor(range, true); commit(); say('Оформление очищено');
+    }
+
+    function undo() {
+      syncFromDom();
+      const prev = undoStack.pop();
+      if (!prev) { say('Больше нечего отменять'); return; }
+      redoStack.push(snapshot());
+      const at = selectionRange();
+      if (restoreSnapshot(prev)) { renderEditor(at, true); commit(); say('Действие отменено'); }
+    }
+
+    function redo() {
+      syncFromDom();
+      const next = redoStack.pop();
+      if (!next) { say('Больше нечего повторять'); return; }
+      undoStack.push(snapshot());
+      const at = selectionRange();
+      if (restoreSnapshot(next)) { renderEditor(at, true); commit(); say('Действие повторено'); }
+    }
+
+    function deleteRange(range) {
+      const a = globalToLocal(range.s), b = globalToLocal(range.e);
+      if (a.block === b.block) {
+        const block = blocks[a.block];
+        block.text = block.text.slice(0, a.at) + block.text.slice(b.at);
+        block.cells = block.cells.slice(0, a.at).concat(block.cells.slice(b.at));
+        return { block: a.block, at: a.at };
+      }
+      const first = blocks[a.block], last = blocks[b.block];
+      first.text = first.text.slice(0, a.at) + last.text.slice(b.at);
+      first.cells = first.cells.slice(0, a.at).concat(last.cells.slice(b.at));
+      blocks.splice(a.block + 1, b.block - a.block);
+      return { block: a.block, at: a.at };
+    }
+
+    function insertAt(pos, value, style) {
+      value = String(value || '').replace(/\r\n?/g, '\n');
+      const currentLength = flatText().length;
+      value = value.slice(0, Math.max(0, LIMITS.note - currentLength));
+      const block = blocks[pos.block];
+      const before = block.text.slice(0, pos.at), after = block.text.slice(pos.at);
+      const beforeCells = block.cells.slice(0, pos.at), afterCells = block.cells.slice(pos.at);
+      const pieces = value.split('\n');
+      const made = [];
+      const continuationKind = ['bullet', 'number', 'check'].indexOf(block.kind) >= 0
+        ? block.kind : 'p';
+      pieces.forEach((piece, k) => {
+        const cells = piece.split('').map(() => noteCell(style));
+        const item = {
+          text: piece,
+          kind: k === 0 ? block.kind : continuationKind,
+          align: block.align,
+          checked: false,
+          cells: cells,
+        };
+        if (k === 0) { item.text = before + item.text; item.cells = beforeCells.concat(item.cells); }
+        if (k === pieces.length - 1) {
+          item.text += after; item.cells = item.cells.concat(afterCells);
+        }
+        made.push(item);
+      });
+      blocks.splice(pos.block, 1, ...made);
+      return { block: pos.block + made.length - 1,
+               at: pieces[pieces.length - 1].length };
+    }
+
+    function insertPlain(value, style) {
+      syncFromDom(); const range = selectionRange(); pushUndo();
+      const pos = deleteRange(range);
+      const end = insertAt(pos, value, style || typing);
+      const at = localToGlobal(end.block, end.at);
+      renderEditor({ s: at, e: at }, true); commit();
+    }
+
+    function enter() {
+      syncFromDom(); const range = selectionRange();
+      const here = globalToLocal(range.s);
+      const block = blocks[here.block];
+      if (range.s === range.e && !block.text && block.kind !== 'p') {
+        pushUndo(); block.kind = 'p'; block.checked = false;
+        renderEditor(range, true); commit(); return;
+      }
+      insertPlain('\n', noteCell(typing));
+    }
+
+    function mergeAtBoundary(backward) {
+      syncFromDom(); const range = selectionRange();
+      if (range.e > range.s) return false;
+      const here = globalToLocal(range.s), block = blocks[here.block];
+      if (backward && here.at === 0) {
+        if (block.kind !== 'p') {
+          pushUndo(); block.kind = 'p'; block.checked = false;
+          renderEditor(range, true); commit(); return true;
+        }
+        if (here.block === 0) return false;
+        pushUndo();
+        const prev = blocks[here.block - 1], at = prev.text.length;
+        prev.text += block.text; prev.cells = prev.cells.concat(block.cells);
+        blocks.splice(here.block, 1);
+        const globalAt = localToGlobal(here.block - 1, at);
+        renderEditor({ s: globalAt, e: globalAt }, true); commit(); return true;
+      }
+      if (!backward && here.at === block.text.length && here.block < blocks.length - 1) {
+        pushUndo();
+        const at = block.text.length, next = blocks[here.block + 1];
+        block.text += next.text; block.cells = block.cells.concat(next.cells);
+        blocks.splice(here.block + 1, 1);
+        const globalAt = localToGlobal(here.block, at);
+        renderEditor({ s: globalAt, e: globalAt }, true); commit(); return true;
+      }
+      return false;
+    }
+
+    // ----- Ссылка ----------------------------------------------------
+    const linkRow = el('div', { class: 'note-link-row' });
+    const linkInput = el('input', { class: 'note-link-input', attrs: {
+      type: 'url', inputmode: 'url', placeholder: 'https://…',
+      'aria-label': 'Адрес ссылки', maxlength: String(LINK_MAX),
+      spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off',
+    } });
+    const linkApply = el('button', { class: 'note-link-action', attrs: {
+      type: 'button', 'aria-label': 'Применить ссылку' }, text: 'ОК' });
+    const linkOpen = el('button', { class: 'note-link-action', attrs: {
+      type: 'button', 'aria-label': 'Открыть ссылку' }, text: '↗' });
+    const linkDrop = el('button', { class: 'note-link-action', attrs: {
+      type: 'button', 'aria-label': 'Удалить ссылку' }, text: '✕' });
+    [linkApply, linkOpen, linkDrop].forEach(protectSelection);
+    linkRow.appendChild(linkInput); linkRow.appendChild(linkApply);
+    linkRow.appendChild(linkOpen); linkRow.appendChild(linkDrop);
+
+    function linkPanel() {
+      syncFromDom(); const range = selectionRange();
+      if (range.e <= range.s) { say('Сначала выделите текст для ссылки'); return; }
+      pendingLinkRange = range;
+      const cur = currentStyle(range);
+      linkInput.value = cur.link || '';
+      linkRow.className = 'note-link-row on';
+      if (linkInput.focus) linkInput.focus();
+    }
+
+    function applyLinkValue(value) {
+      if (!pendingLinkRange) return;
+      const safe = value ? sanitizeLink(value) : '';
+      if (value && !safe) { say('Похоже, это не адрес сайта'); return; }
+      pushUndo();
+      eachSelectedCell(pendingLinkRange, (cell) => { cell.link = safe; });
+      const range = pendingLinkRange;
+      linkRow.className = 'note-link-row';
+      pendingLinkRange = null;
+      renderEditor(range, true); commit(); say(safe ? 'Ссылка добавлена' : 'Ссылка удалена');
+    }
+    linkApply.addEventListener('click', () => { applyLinkValue(String(linkInput.value || '').trim()); });
+    linkDrop.addEventListener('click', () => { applyLinkValue(''); });
+    linkOpen.addEventListener('click', () => {
+      const safe = sanitizeLink(linkInput.value);
+      if (!safe) say('Сначала укажите правильный адрес'); else openLink(safe);
+    });
+    linkInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { if (ev.preventDefault) ev.preventDefault(); applyLinkValue(linkInput.value); }
+      if (ev.key === 'Escape') { linkRow.className = 'note-link-row'; pendingLinkRange = null; }
+    });
+
+    // ----- Поиск -----------------------------------------------------
+    const searchRow = el('div', { class: 'note-search-row' });
+    const searchInput = el('input', { class: 'note-search-input', attrs: {
+      type: 'search', placeholder: 'Найти в заметке', 'aria-label': 'Найти в заметке',
+    } });
+    const searchCount = el('span', { class: 'note-search-count', attrs: {
+      'aria-live': 'polite' } });
+    const searchPrev = el('button', { class: 'note-search-action', attrs: {
+      type: 'button', 'aria-label': 'Предыдущее совпадение' }, text: '‹' });
+    const searchNext = el('button', { class: 'note-search-action', attrs: {
+      type: 'button', 'aria-label': 'Следующее совпадение' }, text: '›' });
+    const searchClose = el('button', { class: 'note-search-action', attrs: {
+      type: 'button', 'aria-label': 'Закрыть поиск' }, text: '✕' });
+    searchRow.appendChild(searchInput); searchRow.appendChild(searchCount);
+    searchRow.appendChild(searchPrev); searchRow.appendChild(searchNext); searchRow.appendChild(searchClose);
+
+    function matches() {
+      const q = String(searchInput.value || '').toLocaleLowerCase();
+      if (!q) return [];
+      const hay = flatText().toLocaleLowerCase();
+      const out = [];
+      let at = 0;
+      while ((at = hay.indexOf(q, at)) >= 0 && out.length < 1000) {
+        out.push({ s: at, e: at + q.length }); at += Math.max(1, q.length);
+      }
+      return out;
+    }
+
+    function searchMove(delta) {
+      syncFromDom(); const found = matches();
+      if (!found.length) { searchAt = -1; searchCount.textContent = searchInput.value ? '0' : ''; return; }
+      searchAt = (searchAt + delta + found.length) % found.length;
+      const hit = found[searchAt];
+      selectGlobal(hit.s, hit.e, true);
+      const loc = globalToLocal(hit.s);
+      const line = Array.from(box.children || []).find((n) =>
+        attr(n, 'data-note-index') === String(loc.block));
+      if (line && line.scrollIntoView) line.scrollIntoView({ block: 'center' });
+      searchCount.textContent = String(searchAt + 1) + '/' + String(found.length);
+    }
+    searchInput.addEventListener('input', () => { searchAt = -1; searchMove(1); });
+    searchInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        if (ev.preventDefault) ev.preventDefault(); searchMove(ev.shiftKey ? -1 : 1);
+      }
+      if (ev.key === 'Escape') searchRow.className = 'note-search-row';
+    });
+    searchPrev.addEventListener('click', () => { searchMove(-1); });
+    searchNext.addEventListener('click', () => { searchMove(1); });
+    searchClose.addEventListener('click', () => { searchRow.className = 'note-search-row'; });
+
+    async function copyAll() {
+      syncFromDom(); const text = flatText();
+      let ok = false;
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard
+            && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text); ok = true;
+        }
+      } catch (e) { ok = false; }
+      if (!ok && document.execCommand) {
+        const helper = el('textarea', { attrs: { 'aria-hidden': 'true' } });
+        helper.value = text; helper.style.setProperty('position', 'fixed');
+        helper.style.setProperty('opacity', '0'); document.body.appendChild(helper);
+        if (helper.select) helper.select();
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        if (helper.parentNode) helper.parentNode.removeChild(helper);
+      }
+      say(ok ? 'Заметка скопирована' : 'Не удалось скопировать автоматически');
+    }
+
+    // ----- Панель ----------------------------------------------------
+    [
+      { m: 'b', label: 'Ж', title: 'Жирный' },
+      { m: 'i', label: 'К', title: 'Курсив' },
+      { m: 'u', label: 'Ч', title: 'Подчёркнутый' },
+      { m: 's', label: 'З', title: 'Зачёркнутый' },
+    ].forEach((x) => {
+      x.node = tool(x.label, x.title, () => { applyMark(x.m); });
+      markButtons.push(x); rowMain.appendChild(x.node);
+    });
+    const head = { kind: 'heading', node: tool('H', 'Подзаголовок', () => applyKind('heading')) };
+    const bullet = { kind: 'bullet', node: tool('•', 'Маркированный список', () => applyKind('bullet')) };
+    const number = { kind: 'number', node: tool('1.', 'Нумерованный список', () => applyKind('number')) };
+    const check = { kind: 'check', node: tool('☐', 'Список с галочками', () => applyKind('check')) };
+    [head, bullet, number, check].forEach((x) => { blockButtons.push(x); rowMain.appendChild(x.node); });
+    rowMain.appendChild(tool('⌁', 'Добавить ссылку', linkPanel));
+    rowMain.appendChild(tool('Tx', 'Очистить форматирование', clearFormatting));
+    rowMain.appendChild(tool('↶', 'Отменить', undo));
+    rowMain.appendChild(tool('↷', 'Повторить', redo));
+    rowMain.appendChild(tool('⧉', 'Копировать всю заметку', () => { copyAll(); }));
+    rowMain.appendChild(tool('⌕', 'Найти в заметке', () => {
+      searchRow.className = hasClass(searchRow, 'on') ? 'note-search-row' : 'note-search-row on';
+      if (hasClass(searchRow, 'on') && searchInput.focus) searchInput.focus();
+    }));
+
+    [
+      { align: 'left', title: 'По левому краю' },
+      { align: 'center', title: 'По центру' },
+      { align: 'right', title: 'По правому краю' },
+      { align: 'justify', title: 'По ширине' },
+    ].forEach((x) => {
+      x.node = tool('', x.title, () => applyAlign(x.align),
+        'note-align align-' + x.align);
+      x.node.appendChild(el('span', { class: 'align-mark', attrs: { 'aria-hidden': 'true' } }));
+      alignButtons.push(x); rowBlock.appendChild(x.node);
+    });
+
+    rowBlock.appendChild(el('span', { class: 'note-tools-label', text: 'Текст' }));
+    NOTE_INKS.forEach((color) => {
+      const node = protectSelection(el('button', { class: 'note-color', style: {
+        background: color }, attrs: { type: 'button', title: 'Цвет текста',
+        'aria-label': 'Цвет текста ' + color, 'aria-pressed': 'false' } }));
+      node.addEventListener('click', () => applyInline('ink', color));
+      const x = { color: color, node: node }; inkButtons.push(x); rowBlock.appendChild(node);
+    });
+    rowColor.appendChild(el('span', { class: 'note-tools-label', text: 'Маркер' }));
+    NOTE_HIGHLIGHTS.forEach((color) => {
+      const node = protectSelection(el('button', { class: 'note-highlight', style: {
+        background: color }, attrs: { type: 'button', title: 'Цветной маркер',
+        'aria-label': 'Цветной маркер ' + color, 'aria-pressed': 'false' } }));
+      node.addEventListener('click', () => applyInline('hi', color));
+      const x = { color: color, node: node }; hiButtons.push(x); rowColor.appendChild(node);
+    });
+
+    toolbar.appendChild(rowMain); toolbar.appendChild(rowBlock); toolbar.appendChild(rowColor);
+    shell.appendChild(toolbar); shell.appendChild(linkRow); shell.appendChild(searchRow);
+    shell.appendChild(status); shell.appendChild(box);
+
+    // ----- Набор с клавиатуры и вставка ------------------------------
+    box.addEventListener('beforeinput', (ev) => {
+      const format = {
+        formatBold: 'b', formatItalic: 'i', formatUnderline: 'u',
+        formatStrikeThrough: 's',
+      }[ev.inputType];
+      if (format) { if (ev.preventDefault) ev.preventDefault(); applyMark(format); return; }
+      if (ev.inputType === 'insertParagraph' || ev.inputType === 'insertLineBreak') {
+        if (ev.preventDefault) ev.preventDefault(); enter(); return;
+      }
+      if (ev.inputType === 'historyUndo') {
+        if (ev.preventDefault) ev.preventDefault(); undo(); return;
+      }
+      if (ev.inputType === 'historyRedo') {
+        if (ev.preventDefault) ev.preventDefault(); redo(); return;
+      }
+      const now = Date.now();
+      if (!lastInputAt || now - lastInputAt > 900
+          || String(ev.inputType || '').indexOf('insertText') !== 0) pushUndo();
+      lastInputAt = now;
+      beforeInput = { text: flatText(), style: noteCell(typing), range: selectionRange() };
+    });
+
+    box.addEventListener('input', () => {
+      const old = beforeInput;
+      syncFromDom();
+      let range = selectionRange();
+      if (old && noteCellKey(old.style) !== noteCellKey(noteCell())) {
+        const after = flatText();
+        let p = 0, q = 0;
+        const max = Math.min(old.text.length, after.length);
+        while (p < max && old.text[p] === after[p]) p++;
+        while (q < max - p && old.text[old.text.length - 1 - q] === after[after.length - 1 - q]) q++;
+        const inserted = Math.max(0, after.length - p - q);
+        if (inserted) {
+          eachSelectedCell({ s: p, e: p + inserted }, (cell) => {
+            cell.m = old.style.m; cell.ink = old.style.ink;
+            cell.hi = old.style.hi; cell.link = old.style.link;
+          });
+          range = { s: p + inserted, e: p + inserted };
+          renderEditor(range, true);
+        }
+      }
+      box.className = 'note-area' + (blocks.every((b) => !b.text) ? ' empty' : '');
+      beforeInput = null; commit(); refreshToolbar();
+    });
+
+    box.addEventListener('keydown', (ev) => {
+      const command = ev.metaKey || ev.ctrlKey;
+      const key = String(ev.key || '').toLowerCase();
+      if (command && !ev.altKey) {
+        if (key === 'z') {
+          if (ev.preventDefault) ev.preventDefault(); ev.shiftKey ? redo() : undo(); return;
+        }
+        if ({ b: 1, i: 1, u: 1 }[key]) {
+          if (ev.preventDefault) ev.preventDefault(); applyMark(key); return;
+        }
+        if (key === 'k') { if (ev.preventDefault) ev.preventDefault(); linkPanel(); return; }
+      }
+      if (ev.key === 'Enter') { if (ev.preventDefault) ev.preventDefault(); enter(); return; }
+      if (ev.key === 'Backspace' && mergeAtBoundary(true)) {
+        if (ev.preventDefault) ev.preventDefault(); return;
+      }
+      if (ev.key === 'Delete' && mergeAtBoundary(false)) {
+        if (ev.preventDefault) ev.preventDefault();
+      }
+    });
+
+    box.addEventListener('paste', (ev) => {
+      const data = ev.clipboardData || (typeof window !== 'undefined' && window.clipboardData);
+      if (!data || typeof data.getData !== 'function') return;
+      const text = data.getData('text/plain');
+      if (ev.preventDefault) ev.preventDefault();
+      insertPlain(text, typing);
+    });
+
+    // Нажатие по пустому месту листа означает «писать в конце». Safari и
+    // Chromium иногда оставляют прежнее выделение (например, после
+    // Cmd+A), если щёлкнуть ниже последнего короткого абзаца. Следующий
+    // Enter тогда заменил бы всё выделенное. Явно ставим каретку в конец,
+    // но только когда целью был сам лист, а не слово внутри него.
+    box.addEventListener('click', (ev) => {
+      if (ev.target !== box) return;
+      const at = flatText().length;
+      selectGlobal(at, at, true);
+    });
+
+    ['keyup', 'pointerup', 'mouseup', 'click', 'focus'].forEach((kind) => {
+      box.addEventListener(kind, () => { selectionRange(); refreshToolbar();
+        spotted({ at: lastRange.s, end: lastRange.e, top: box.scrollTop || 0 }); });
+    });
+    box.addEventListener('scroll', () => {
+      spotted({ at: selectionRange().s, end: selectionRange().e, top: box.scrollTop || 0 });
+    });
+
+    // Совместимый интерфейс value/selectionStart нужен не для браузера, а
+    // для старых тестов и вспомогательных сценариев. В настоящем UI это
+    // по-прежнему contenteditable, а не скрытое поле.
+    try {
+      Object.defineProperty(box, 'value', {
+        configurable: true,
+        get: () => flatText(),
+        set: (value) => {
+          blocks = noteDocToBlocks(clampStr(value, LIMITS.note), null);
+          const at = flatText().length; renderEditor({ s: at, e: at }, false);
+        },
+      });
+      Object.defineProperty(box, 'selectionStart', {
+        configurable: true, get: () => selectionRange().s,
+        set: (value) => {
+          const at = Number(value) || 0;
+          lastRange = { s: at, e: at };
+          selectGlobal(at, at, false);
+        },
+      });
+      Object.defineProperty(box, 'selectionEnd', {
+        configurable: true, get: () => selectionRange().e,
+        set: (value) => { lastRange.e = Number(value) || 0; },
+      });
+      box.setSelectionRange = (from, to) => { selectGlobal(from, to, false); };
+    } catch (e) { /* старый браузер: основной интерфейс от этого не зависит */ }
+
+    renderEditor({ s: 0, e: 0 }, false);
+
+    return {
+      node: shell,
+      area: box,
+      flushFromDom: () => { syncFromDom(); return flatState(); },
+      restoreSpot: (spot) => {
+        if (!spot) return;
+        const restore = () => {
+          selectGlobal(Number(spot.at) || 0,
+            spot.end == null ? (Number(spot.at) || 0) : (Number(spot.end) || 0), false);
+          box.scrollTop = Number(spot.top) || 0;
+        };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restore);
+        else restore();
+      },
+      keepSpot: () => ({ at: selectionRange().s, end: selectionRange().e,
+                         top: box.scrollTop || 0 }),
+    };
   }
 /* ─── 16-record.js ─────────────────────────────────────────────────────
  * Запись голоса: кнопки, уровень, выбор файла, старт и стоп
@@ -13732,7 +15167,7 @@ body {
       for (const [a, b] of [[mine, inCard],
                             [mine && mine.back, inCard && inCard.back]]) {
         const was = noteOf(a);
-        if (was.trim() && was !== noteOf(b)) notes++;
+        if (was.trim() && noteSignature(a) !== noteSignature(b)) notes++;
       }
     };
     for (const sec of state.sections) {
@@ -13784,7 +15219,7 @@ body {
     if (!inSide || !mySide) return;
     if (noteOf(mySide).trim()) return;
     const text = clampStr(inSide.note, LIMITS.note);
-    if (text.trim()) mySide.note = text;
+    if (text.trim()) copyNote(inSide, mySide);
   }
 
   /**
@@ -13800,7 +15235,7 @@ body {
     const nb = backFromFile(inCard.back);
     if (!nb) return;
     const was = noteOf(mine.back);
-    if (was.trim() && !noteOf(nb).trim()) nb.note = was;
+    if (was.trim() && !noteOf(nb).trim()) copyNote(mine.back, nb);
     mine.back = nb;
     mine.side = sanitizeSideNo(inCard.side);
   }
@@ -13892,7 +15327,7 @@ body {
             // Заметка — тоже «как в файле». Она часть стороны наравне с
             // текстом, и оставить свою значило бы получить карточку с
             // чужим текстом и старым разбором.
-            keep.note = clampStr(inCard.note, LIMITS.note);
+            copyNote(inCard, keep);
             keep.remind = inCard.remind === true;
             keep.head = clampStr(inCard.head, LIMITS.cardHead);
             keep.headMarks = sanitizeMarks(inCard.headMarks, keep.head.length);
@@ -13942,6 +15377,8 @@ body {
                               inList: inCard.inList === true,
                               listAt: sanitizeListAt(inCard.listAt),
                               peaks: sanitizePeaks(inCard.peaks) };
+            const bornNoteDoc = sanitizeNoteDoc(inCard.noteDoc, born.note);
+            if (bornNoteDoc) born.noteDoc = bornNoteDoc;
             // Оборот и то, какой стороной карточка лежала, — из файла.
             // Звук и снимки оборота приедут следом, своими кусками.
             const bornBack = backFromFile(inCard.back);
@@ -14053,7 +15490,7 @@ body {
   // отметка о собственной записи и её куски сюда НЕ входят: они держат
   // связь со звуком, уже лежащим в хранилище этого устройства.
   const BIN_MIRRORED = ['color', 'fav', 'remind', 'head', 'headMarks',
-    'headAlign', 'headInk', 'marks', 'align', 'ink', 'link', 'note', 'peaks',
+    'headAlign', 'headInk', 'marks', 'align', 'ink', 'link', 'note', 'noteDoc', 'peaks',
     'at', 'inList', 'listAt', 'side'];
 
   /**
@@ -14243,6 +15680,8 @@ body {
                           inList: inCard.inList === true,
                           listAt: sanitizeListAt(inCard.listAt),
                           peaks: sanitizePeaks(inCard.peaks) };
+          const freshNoteDoc = sanitizeNoteDoc(inCard.noteDoc, fresh.note);
+          if (freshNoteDoc) fresh.noteDoc = freshNoteDoc;
           // Оборот новой карточки — из файла, вместе с тем, какой
           // стороной её оставили на том устройстве
           const freshBack = backFromFile(inCard.back);
@@ -14431,7 +15870,6 @@ body {
     };
     step(0);
   }
-
 
 /* ─── 27-boot.js ───────────────────────────────────────────────────────
  * Полоска новой версии, render(), запуск и общие жесты
