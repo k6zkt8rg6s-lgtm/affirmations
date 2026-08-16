@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-AFl+dpbEg9IEQITpP00URKSNzrEyhgmfyGKLOWko3U0=';
-               style-src 'sha256-FAqvBYTWg5uUJSRD89fRBJVz8O5dYQC00uTMDQOKD00=';
+               script-src 'sha256-Y/YfV3dqYJlgFPlurGWy+pwdSlwMZeKApWsi7C6G7uw=';
+               style-src 'sha256-PhmcemVWZgZb9hemMvGe4yiX5WXybvxURYIxc9A4X5k=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -420,8 +420,8 @@ body {
   background: var(--heart);
 }
 
-/* Экран заметки. Панель остаётся на месте, а прокручивается только сам
-   лист: на длинном разборе кнопки оформления всегда под рукой. */
+/* Экран заметки. В обычном состоянии весь остаток экрана принадлежит
+   тексту; панель появляется только по кнопке рядом с крестиком. */
 .note-page {
   display: flex;
   flex-direction: column;
@@ -429,23 +429,81 @@ body {
   min-height: 0;
   overflow: hidden;
 }
+.note-topbar {
+  position: relative;
+  flex: none;
+}
+.note-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+/* Заголовок не участвует в распределении свободного места: его середина
+   всегда совпадает с серединой экрана, даже когда слева две кнопки, а
+   справа одна буква стороны. */
+.note-topbar .note-title {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: auto;
+  max-width: 34%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+}
 .note-side {
   flex: none;
   min-width: var(--tap);
+  margin-left: auto;
   text-align: center;
   color: var(--ink-soft);
   font: 700 20px/1 -apple-system, BlinkMacSystemFont, sans-serif;
   opacity: .5;
 }
-/* Чья это заметка: начало текста стороны. Открыв заметку с оборота,
-   легко забыть, к чему она. */
-.note-whose {
-  margin: 0 2px 8px;
-  color: var(--ink-soft);
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Три ползунка — инструменты. Значок нарисован рамками, поэтому не
+   меняет вид от шрифта к шрифту и наследует цвет кнопки. */
+.note-tools-toggle.on { background: var(--ink); color: var(--sheet); }
+.tools-mark {
+  display: block;
+  position: relative;
+  width: 20px;
+  height: 18px;
+  pointer-events: none;
+}
+.tools-line {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  height: 1.7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.tools-line::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  border: 1.7px solid currentColor;
+  border-radius: 50%;
+  background: var(--paper);
+  transform: translate(-50%, -50%);
+}
+.note-tools-toggle.on .tools-line::after { background: var(--ink); }
+.tools-line-1 { top: 2px; }
+.tools-line-1::after { left: 32%; }
+.tools-line-2 { top: 8px; }
+.tools-line-2::after { left: 70%; }
+.tools-line-3 { top: 14px; }
+.tools-line-3::after { left: 45%; }
+.note-controls {
+  display: none;
+  flex: none;
+}
+.note-controls.on {
+  display: flex;
+  flex-direction: column;
 }
 .note-editor-shell {
   flex: 1 1 0;
@@ -595,14 +653,6 @@ body {
      16 пикселей. У нас 17 — не увеличит. */
 }
 .note-area:focus { outline: 2px solid var(--hair); outline-offset: -2px; }
-.note-area.empty::before {
-  content: attr(data-placeholder);
-  display: block;
-  color: var(--ink-soft);
-  opacity: .7;
-  pointer-events: none;
-}
-
 /* Один абзац заметки. Переводы строк хранятся в простом note, а свойства
    абзаца — отдельно, поэтому выравнивание одного не двигает соседей. */
 .note-block {
@@ -680,7 +730,6 @@ body {
   .note-tools-row { gap: 5px; }
   .note-tool { flex-basis: 36px; width: 36px; min-width: 36px; height: 34px; }
   .note-area { padding: 12px 12px 15px; font-size: 16px; }
-  .note-whose { margin-bottom: 5px; }
 }
 
 /* Корзинка — «убрать карточку из колоды, но не удалять».
@@ -2542,6 +2591,177 @@ body {
   border-radius: 50%;
   transform: rotate(-18deg);
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Ручной OLED-чёрный фон.
+
+   Это не prefers-color-scheme: режим выбирается внутри приложения и
+   остаётся таким, пока человек сам его не поменяет. Основной фон и
+   нейтральные поверхности — настоящий #000000. Цветные карточки и
+   колоды остаются цветными: их цвет несёт смысл и выбирается отдельно.
+   ────────────────────────────────────────────────────────────── */
+.theme-hint { margin: -4px 2px 12px; }
+.theme-choice { position: relative; }
+.theme-choice.on { border-color: var(--ink-soft); }
+.theme-sign { font-size: 20px; }
+.theme-check {
+  flex: none;
+  width: 24px;
+  color: var(--ink);
+  font-weight: 700;
+  text-align: center;
+}
+
+html[data-theme="oled"] {
+  color-scheme: dark;
+  --paper: #000000;
+  --dot: transparent;
+  --ink: #F5F5F7;
+  --ink-soft: #A9A9B2;
+  --sheet: #000000;
+  --hair: rgba(255, 255, 255, .18);
+  --danger: #FF6257;
+  --heart: #FF5A5F;
+  --star: #FFB52E;
+}
+html[data-theme="oled"],
+html[data-theme="oled"] body {
+  background-color: #000000;
+}
+html[data-theme="oled"] body,
+html[data-theme="oled"] .reader {
+  background-image: none;
+}
+
+/* Нейтральные кружки и состояния нажатия: на чёрном прежняя чёрная
+   прозрачная заливка была бы невидима. Прозрачные смысловые значки
+   (ссылка, сердце, заметка и т. п.) остаются прозрачными. */
+html[data-theme="oled"] .fresh-strip,
+html[data-theme="oled"] .iconbtn { background: rgba(255, 255, 255, .09); }
+html[data-theme="oled"] .iconbtn:active { background: rgba(255, 255, 255, .18); }
+html[data-theme="oled"] .iconbtn.ghost,
+html[data-theme="oled"] .iconbtn.link,
+html[data-theme="oled"] .iconbtn.heart,
+html[data-theme="oled"] .iconbtn.star,
+html[data-theme="oled"] .iconbtn.note,
+html[data-theme="oled"] .iconbtn.bin,
+html[data-theme="oled"] .iconbtn.liststar,
+html[data-theme="oled"] .iconbtn.rec,
+html[data-theme="oled"] .iconbtn.rec-ctl { background: transparent; }
+html[data-theme="oled"] .note-tools-toggle.on {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+html[data-theme="oled"] .note-toolbar {
+  background: #000000;
+  box-shadow: none;
+}
+html[data-theme="oled"] .note-tools-row + .note-tools-row {
+  border-top-color: rgba(255, 255, 255, .14);
+}
+html[data-theme="oled"] .note-tool:active,
+html[data-theme="oled"] .rich-btn:active,
+html[data-theme="oled"] .mini-play-close:active,
+html[data-theme="oled"] .mini-play-list:active,
+html[data-theme="oled"] .iconbtn.rec-ctl:active {
+  background: rgba(255, 255, 255, .12);
+}
+html[data-theme="oled"] .note-color,
+html[data-theme="oled"] .note-highlight {
+  border-color: rgba(255, 255, 255, .38);
+}
+html[data-theme="oled"] .note-run-link { color: #72C7FF; }
+html[data-theme="oled"] .note-area { background: #000000; }
+
+/* Цвета оформления заметки хранятся одинаково в обоих режимах. Здесь
+   меняется только их экранное представление: прежние тёмные чернила и
+   светлые маркеры иначе потерялись бы на чёрном фоне. */
+html[data-theme="oled"] .note-run[data-note-ink="#1C1B19"] { color: #F5F5F7 !important; }
+html[data-theme="oled"] .note-run[data-note-ink="#6B6862"] { color: #B7B7BF !important; }
+html[data-theme="oled"] .note-run[data-note-ink="#8C2F1E"] { color: #FF8774 !important; }
+html[data-theme="oled"] .note-run[data-note-ink="#B0451B"] { color: #FF9B62 !important; }
+html[data-theme="oled"] .note-run[data-note-ink="#1F6B4A"] { color: #6BD39B !important; }
+html[data-theme="oled"] .note-run[data-note-ink="#1C5C86"] { color: #66B9EE !important; }
+html[data-theme="oled"] .note-run[data-note-ink="#5B3E8E"] { color: #BDA0FF !important; }
+html[data-theme="oled"] .note-color[aria-label$="#1C1B19"] { background: #F5F5F7 !important; }
+html[data-theme="oled"] .note-color[aria-label$="#6B6862"] { background: #B7B7BF !important; }
+html[data-theme="oled"] .note-color[aria-label$="#8C2F1E"] { background: #FF8774 !important; }
+html[data-theme="oled"] .note-color[aria-label$="#B0451B"] { background: #FF9B62 !important; }
+html[data-theme="oled"] .note-color[aria-label$="#1F6B4A"] { background: #6BD39B !important; }
+html[data-theme="oled"] .note-color[aria-label$="#1C5C86"] { background: #66B9EE !important; }
+html[data-theme="oled"] .note-color[aria-label$="#5B3E8E"] { background: #BDA0FF !important; }
+
+html[data-theme="oled"] .note-run[data-note-hi="#FFF0A8"] { background: #5E4D00 !important; }
+html[data-theme="oled"] .note-run[data-note-hi="#FFD9B8"] { background: #683A15 !important; }
+html[data-theme="oled"] .note-run[data-note-hi="#D8F0DD"] { background: #174B2C !important; }
+html[data-theme="oled"] .note-run[data-note-hi="#D9E9FF"] { background: #173F62 !important; }
+html[data-theme="oled"] .note-run[data-note-hi="#E9DDFF"] { background: #3A2A63 !important; }
+html[data-theme="oled"] .note-run[data-note-hi="#F5D6E4"] { background: #5A2140 !important; }
+html[data-theme="oled"] .note-highlight[aria-label$="#FFF0A8"] { background: #5E4D00 !important; }
+html[data-theme="oled"] .note-highlight[aria-label$="#FFD9B8"] { background: #683A15 !important; }
+html[data-theme="oled"] .note-highlight[aria-label$="#D8F0DD"] { background: #174B2C !important; }
+html[data-theme="oled"] .note-highlight[aria-label$="#D9E9FF"] { background: #173F62 !important; }
+html[data-theme="oled"] .note-highlight[aria-label$="#E9DDFF"] { background: #3A2A63 !important; }
+html[data-theme="oled"] .note-highlight[aria-label$="#F5D6E4"] { background: #5A2140 !important; }
+
+/* Поля, списки и окна. Фон остаётся #000000; форму показывают светлая
+   рамка и иерархия текста, а не большая серая плашка. */
+html[data-theme="oled"] .mini:active,
+html[data-theme="oled"] .menu-item:active,
+html[data-theme="oled"] .add-tile:active { background: #151517; }
+html[data-theme="oled"] .field input,
+html[data-theme="oled"] .field textarea { background: #000000; }
+html[data-theme="oled"] .sheet {
+  border: 1px solid var(--hair);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, .8);
+}
+html[data-theme="oled"] .modal { background: rgba(0, 0, 0, .76); }
+html[data-theme="oled"] .btn { background: var(--ink); color: #000000; }
+html[data-theme="oled"] .btn.sec {
+  background: rgba(255, 255, 255, .10);
+  color: var(--ink);
+}
+html[data-theme="oled"] .btn.danger { background: var(--danger); color: #000000; }
+html[data-theme="oled"] .add-tile,
+html[data-theme="oled"] .drop-slot { border-color: rgba(255, 255, 255, .30); }
+html[data-theme="oled"] .drop-slot { background: rgba(255, 255, 255, .06); }
+html[data-theme="oled"] .card-row.lifted > .mini {
+  border-color: rgba(255, 255, 255, .32);
+}
+html[data-theme="oled"] .sync-status.ok {
+  background: #071B10;
+  border-color: #205A37;
+}
+html[data-theme="oled"] .sync-status.bad {
+  background: #240B0A;
+  border-color: #71332E;
+  color: #FF9C94;
+}
+html[data-theme="oled"] .shot-cell { background: rgba(255, 255, 255, .10); }
+
+/* Нижний проигрыватель лежит вне цветной карточки, поэтому его прежние
+   чёрные органы управления на OLED-фоне отдельно переводятся в свет. */
+html[data-theme="oled"] .mini-play {
+  background: rgba(0, 0, 0, .97);
+  border-top-color: rgba(255, 255, 255, .18);
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, .75);
+}
+html[data-theme="oled"] .mini-play .audio-btn,
+html[data-theme="oled"] .mini-play .wave,
+html[data-theme="oled"] .mini-play .mini-play-step {
+  background: rgba(255, 255, 255, .15);
+  color: var(--ink);
+}
+html[data-theme="oled"] .mini-play .audio-btn:active,
+html[data-theme="oled"] .mini-play .mini-play-step:active {
+  background: rgba(255, 255, 255, .25);
+}
+html[data-theme="oled"] .mini-play .wave-fill { background: rgba(255, 255, 255, .13); }
+html[data-theme="oled"] .mini-play .wave-bars i { background: rgba(255, 255, 255, .42); }
+html[data-theme="oled"] .mini-play .wave-bars i.played { background: rgba(255, 255, 255, .68); }
+html[data-theme="oled"] .mini-play .wave-head { background: rgba(255, 255, 255, .72); }
+html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
 </style>
 </head>
 <body>
@@ -2589,7 +2809,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '16.08.2026, 17:15';
+  const BUILD = '16.08.2026, 17:56';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -3821,6 +4041,67 @@ body {
     if (doc) mySide.noteDoc = doc;
     else delete mySide.noteDoc;
   }
+/* ─── 05c-theme.js ────────────────────────────────────────────────────
+ * Ручное оформление приложения: бумага или настоящий OLED-чёрный
+ *
+ * Часть общего кода приложения. Собирается: python3 build.py
+ * Карта всех частей: КАРТА-ПРОЕКТА.md
+ * ────────────────────────────────────────────────────────────── */
+
+  // Оформление — настройка конкретного устройства, а не содержимое
+  // карточек. Поэтому оно лежит отдельным коротким значением и не
+  // попадает в резервную копию: на iPhone можно оставить OLED-чёрный,
+  // а на MacBook — бумагу, и обмен карточками выбор не перезапишет.
+  const THEME_KEY = 'affirmations.theme.v1';
+  const THEME_PAPER = 'paper';
+  const THEME_OLED = 'oled';
+
+  function sanitizeTheme(value) {
+    return value === THEME_OLED ? THEME_OLED : THEME_PAPER;
+  }
+
+  function readTheme() {
+    try { return sanitizeTheme(localStorage.getItem(THEME_KEY)); }
+    catch (e) { return THEME_PAPER; }
+  }
+
+  let appTheme = readTheme();
+
+  /** Применить оформление сразу, без перерисовки карточек. */
+  function applyTheme() {
+    const oled = appTheme === THEME_OLED;
+    const host = (typeof document !== 'undefined')
+      ? (document.documentElement || document.body) : null;
+    if (host && host.setAttribute) host.setAttribute('data-theme', appTheme);
+
+    // Цвет области вокруг PWA и системных элементов Safari. Сам выбор
+    // остаётся ручным: prefers-color-scheme здесь намеренно не читается.
+    if (typeof document !== 'undefined' && document.querySelector) {
+      const themeMeta = document.querySelector('meta[name="theme-color"]');
+      const schemeMeta = document.querySelector('meta[name="color-scheme"]');
+      const statusMeta = document.querySelector(
+        'meta[name="apple-mobile-web-app-status-bar-style"]');
+      if (themeMeta) themeMeta.setAttribute('content', oled ? '#000000' : '#F4F3EF');
+      if (schemeMeta) schemeMeta.setAttribute('content', oled ? 'dark' : 'light');
+      if (statusMeta) statusMeta.setAttribute('content', oled ? 'black' : 'default');
+    }
+  }
+
+  function setTheme(value) {
+    appTheme = sanitizeTheme(value);
+    try { localStorage.setItem(THEME_KEY, appTheme); } catch (e) { /* вид всё равно меняется */ }
+    applyTheme();
+    return appTheme;
+  }
+
+  function themeName() {
+    return appTheme === THEME_OLED ? 'OLED-чёрный' : 'Светлая бумага';
+  }
+
+  // Применяем до первой отрисовки приложения. Это не даёт главному
+  // экрану сначала появиться светлым и только затем перекраситься.
+  applyTheme();
+
 /* ─── 06-sides.js ──────────────────────────────────────────────────────
  * Две стороны карточки: лицо и оборот
  *
@@ -8487,23 +8768,48 @@ body {
     const keepSpot = () => { noteSpots[spotK] = editor.keepSpot(); };
     area.addEventListener('blur', keepSpot);
 
-    // Чья это заметка — видно в шапке: начало текста стороны и её буква.
-    // Без этого, открыв заметку с оборота, легко забыть, к чему она.
-    const whose = shortText(side.text) || shortText(card.text) || 'Карточка';
+    // Инструменты скрыты, пока не понадобятся. Кнопка стоит рядом с
+    // крестиком и не забирает у текста постоянную половину экрана.
+    const toolsButton = el('button', {
+      class: 'iconbtn note-tools-toggle', attrs: {
+        'aria-label': 'Инструменты заметки', title: 'Инструменты',
+        type: 'button', 'aria-expanded': 'false',
+      },
+    }, [el('span', { class: 'tools-mark', attrs: { 'aria-hidden': 'true' } }, [
+      el('span', { class: 'tools-line tools-line-1' }),
+      el('span', { class: 'tools-line tools-line-2' }),
+      el('span', { class: 'tools-line tools-line-3' }),
+    ])]);
+    // Не отдаём фокус кнопке при открытии панели: выделенное в заметке
+    // слово остаётся выделенным и его можно сразу оформить.
+    toolsButton.addEventListener('pointerdown', (ev) => {
+      if (ev.preventDefault) ev.preventDefault();
+    });
+    toolsButton.addEventListener('mousedown', (ev) => {
+      if (ev.preventDefault) ev.preventDefault();
+    });
+    toolsButton.addEventListener('click', () => {
+      const open = editor.setTools();
+      toolsButton.className = 'iconbtn note-tools-toggle' + (open ? ' on' : '');
+      toolsButton.setAttribute('aria-expanded', String(open));
+      toolsButton.setAttribute('title', open ? 'Скрыть инструменты' : 'Инструменты');
+    });
 
     const page = el('div', { class: 'page note-page no-zoom' }, [
-      el('div', { class: 'topbar' }, [
-        el('button', {
-          class: 'iconbtn', attrs: { 'aria-label': 'Закрыть заметку',
-                                     title: 'Закрыть', type: 'button' },
-          text: '✕', on: { click: back },
-        }),
-        el('h1', { class: 'small', text: 'Заметка' }),
+      el('div', { class: 'topbar note-topbar' }, [
+        el('div', { class: 'note-top-actions' }, [
+          el('button', {
+            class: 'iconbtn', attrs: { 'aria-label': 'Закрыть заметку',
+                                       title: 'Закрыть', type: 'button' },
+            text: '✕', on: { click: back },
+          }),
+          toolsButton,
+        ]),
+        el('h1', { class: 'small note-title', text: 'Заметка' }),
         el('span', { class: 'note-side',
                      attrs: { title: 'Сторона карточки' },
                      text: SIDE_LETTERS[card.side === 1 ? 1 : 0] }),
       ]),
-      el('p', { class: 'note-whose', text: whose }),
       editor.node,
     ]);
 
@@ -8562,6 +8868,12 @@ body {
     let searchAt = -1;
 
     const shell = el('section', { class: 'note-editor-shell' });
+    // Панель занимает заметную часть экрана, особенно на iPhone. Она
+    // нужна только во время оформления, поэтому в обычном чтении и
+    // наборе скрыта целиком. Кнопка в шапке вызывает setTools().
+    const controls = el('div', {
+      class: 'note-controls', attrs: { 'aria-hidden': 'true' },
+    });
     const toolbar = el('div', {
       class: 'note-toolbar', attrs: { role: 'toolbar',
         'aria-label': 'Оформление заметки' },
@@ -8576,7 +8888,6 @@ body {
       attrs: {
         contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true',
         'aria-label': 'Текст заметки', spellcheck: 'true',
-        'data-placeholder': 'Подробности, примеры, разбор — всё, чему не место на самой карточке.',
       },
     });
 
@@ -8828,7 +9139,7 @@ body {
     function renderEditor(range, focusBox) {
       const top = box.scrollTop || 0;
       clear(box);
-      box.className = 'note-area' + (blocks.every((b) => !b.text) ? ' empty' : '');
+      box.className = 'note-area';
       let number = 0;
       blocks.forEach((block, k) => {
         number = block.kind === 'number' ? number + 1 : 0;
@@ -9351,8 +9662,26 @@ body {
     });
 
     toolbar.appendChild(rowMain); toolbar.appendChild(rowBlock); toolbar.appendChild(rowColor);
-    shell.appendChild(toolbar); shell.appendChild(linkRow); shell.appendChild(searchRow);
-    shell.appendChild(status); shell.appendChild(box);
+    controls.appendChild(toolbar); controls.appendChild(linkRow); controls.appendChild(searchRow);
+    controls.appendChild(status); shell.appendChild(controls); shell.appendChild(box);
+
+    /**
+     * Показать или спрятать инструменты. При закрытии убираем и вложенные
+     * строки ссылки/поиска: следующее открытие начинается с чистой панели,
+     * а всё свободное место немедленно возвращается тексту.
+     */
+    function setTools(open) {
+      const yes = open == null ? !hasClass(controls, 'on') : !!open;
+      controls.className = 'note-controls' + (yes ? ' on' : '');
+      controls.setAttribute('aria-hidden', String(!yes));
+      if (!yes) {
+        linkRow.className = 'note-link-row';
+        searchRow.className = 'note-search-row';
+        pendingLinkRange = null;
+        say('');
+      }
+      return yes;
+    }
 
     // ----- Набор с клавиатуры и вставка ------------------------------
     box.addEventListener('beforeinput', (ev) => {
@@ -9397,7 +9726,7 @@ body {
           renderEditor(range, true);
         }
       }
-      box.className = 'note-area' + (blocks.every((b) => !b.text) ? ' empty' : '');
+      box.className = 'note-area';
       beforeInput = null; commit(); refreshToolbar();
     });
 
@@ -9481,6 +9810,8 @@ body {
     return {
       node: shell,
       area: box,
+      setTools: setTools,
+      toolsOpen: () => hasClass(controls, 'on'),
       flushFromDom: () => { syncFromDom(); return flatState(); },
       restoreSpot: (spot) => {
         if (!spot) return;
@@ -12898,6 +13229,48 @@ body {
     render();
   }
 
+  /** Ручной выбор фона: не зависит от тёмного режима iPhone или Mac. */
+  function openTheme() {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const choice = (mode, sign, name, hint) => {
+      const active = appTheme === mode;
+      return el('button', {
+        class: 'menu-item theme-choice' + (active ? ' on' : ''),
+        attrs: { type: 'button', 'aria-label': name,
+          'aria-pressed': String(active) },
+        on: { click: () => { setTheme(mode); close(); } },
+      }, [
+        el('span', { class: 'menu-sign theme-sign', text: sign }),
+        el('span', { class: 'menu-body' }, [
+          el('span', { class: 'menu-name', text: name }),
+          el('span', { class: 'menu-hint', text: hint }),
+        ]),
+        el('span', { class: 'theme-check', attrs: { 'aria-hidden': 'true' },
+          text: active ? '✓' : '' }),
+      ]);
+    };
+
+    const sheet = el('div', { class: 'sheet theme-sheet' }, [
+      el('h3', { text: 'Фон приложения' }),
+      el('p', { class: 'hint theme-hint',
+        text: 'Выбор действует только на этом устройстве и не зависит от настроек системы.' }),
+      el('div', { class: 'menu-list' }, [
+        choice(THEME_PAPER, '☀', 'Светлая бумага',
+          'Нынешний светлый фон с точками'),
+        choice(THEME_OLED, '●', 'OLED-чёрный',
+          'Чистый #000000: чёрные пиксели экрана выключены'),
+      ]),
+      el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' },
+          text: 'Закрыть', on: { click: close } }),
+      ]),
+    ]);
+    wrap.appendChild(sheet);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+  }
+
   /**
    * Окно кнопки «⋯»: три редких действия, убранных с глаз.
    *
@@ -12937,6 +13310,8 @@ body {
           'Забрать данные с другого устройства', () => openSync('load')),
         item('★', 'Напоминания',
           'Показывать отмеченные звёздочкой на экране устройства', openRemind),
+        item('◐', 'Фон',
+          themeName() + ' · изменить вручную', openTheme),
         // Корзинка. Единственный вход в неё — отсюда: среди колод на
         // главном экране её нет и быть не может, она лежит вне разделов.
         // Подпись сразу говорит, пусто там или нет, — иначе пришлось бы
@@ -12959,7 +13334,6 @@ body {
     wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
     document.body.appendChild(wrap);
   }
-
 /* ─── 22-reminders.js ──────────────────────────────────────────────────
  * Напоминания: сборка календаря и выдача файла
  *
