@@ -27,7 +27,7 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-9a5hQfsqr0AymknvQsaFsAGyoayjf70FBwaWf0g6hXI=';
+               script-src 'sha256-p0gnpTZp4NMdTxlkiZ7qFBeht8QYM10V7NFWfUR3Ge0=';
                style-src 'sha256-KbaWRv0cPTbdCXlDFi578gJ9FnTDNREJhO6mNAnMLmk=';
                img-src 'self' data: blob:;
                media-src blob:;
@@ -2365,7 +2365,7 @@ body {
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '16.08.2026, 08:56';
+  const BUILD = '16.08.2026, 09:24';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -5745,139 +5745,170 @@ body {
   }
 
   /**
-   * Померить растяжку и, если она чрезмерна, отказаться от выравнивания
-   * по ширине для этого текста.
+   * Померить растяжку — на невидимой копии, а не на самом тексте.
    *
-   * Как считаем. Сначала меряем строки как есть — растянутыми. Потом
-   * ставим текст по левому краю и меряем ещё раз: разбивка на строки от
-   * этого не меняется (её решают шрифт, ширина и переносы, а не
-   * выравнивание), зато видно настоящую длину каждой строки. Разница и
-   * есть то, что браузер раздал пробелам.
+   * Копия, а не сам текст, по двум причинам, и обе выяснились на живом
+   * приложении.
    *
-   * Последняя строка абзаца в счёт не идёт сама собой: её никто не тянет,
-   * и обе меры у неё совпадают. Отдельно её искать не нужно.
+   * Первая — мигание. Чтобы узнать настоящую длину строк, текст надо
+   * ненадолго поставить по левому краю. Делая это с тем текстом, который
+   * человек видит, мы обязаны успеть вернуть всё назад до ближайшего
+   * кадра. Стоит мере хоть немного опоздать — и при переходе на другую
+   * карточку текст на миг показывается растянутым, а потом прыгает.
+   * Именно это и было видно при листании.
    *
-   * Переносы (hyphens) при этом остаются включёнными: они полезны и по
-   * левому краю — длинное слово переносится по слогам, а не свисает за
-   * край.
+   * Вторая — движение. Карточка при перевороте поворачивается вокруг
+   * вертикальной оси: в середине хода она стоит к нам ребром, шириной в
+   * ноль, а под конец скошена. Мерить в этот миг нечего. Копия же лежит
+   * неподвижно и всегда одной и той же ширины — той, что в вёрстке
+   * (clientWidth), а не той, что осталась на экране от поворота.
+   *
+   * Ширину и всё, от чего зависит разбивка на строки, переносим на копию
+   * прямо: часть правил могла прийти от предков, а предки у копии другие.
    */
-  function easeJustify(node, tries, was) {
-    if (!node || !node.parentNode || !node.getBoundingClientRect) return;
+  function measureOn(node) {
+    if (!document.body || !node.cloneNode) return null;
+    const cs = getComputedStyle(node);
+    const w = (node.clientWidth || 0)
+      - (parseFloat(cs.paddingLeft) || 0)
+      - (parseFloat(cs.paddingRight) || 0);
+    if (!(w > 20)) return null;          // текст ещё не разложен
+
+    const shell = document.createElement('div');
+    shell.style.cssText = 'position:fixed;top:0;left:-10000px;'
+      + 'visibility:hidden;pointer-events:none;';
+    shell.style.setProperty('width', w + 'px');
+
+    const copy = node.cloneNode(true);
+    copy.style.setProperty('width', '100%');
+    copy.style.setProperty('max-height', 'none');
+    copy.style.setProperty('overflow', 'visible');
+    COPIED_STYLE.forEach((k) => {
+      const v = cs.getPropertyValue(k);
+      if (v) copy.style.setProperty(k, v);
+    });
+    shell.appendChild(copy);
+    document.body.appendChild(shell);
+
+    const space = spaceWidth(copy);
+    copy.style.setProperty('text-align', 'justify');
+    const wide = lineBoxes(copy);
+    copy.style.setProperty('text-align', 'left');
+    const tight = lineBoxes(copy);
+    document.body.removeChild(shell);
+
+    // Разбивка обязана совпасть: её решают шрифт, ширина и переносы, а
+    // выравнивание — нет. Не совпала — значит, мы чего-то не понимаем, и
+    // решать вслепую не будем.
+    if (!wide || !tight || wide.length !== tight.length) return null;
+    return { wide: wide, tight: tight, space: space };
+  }
+
+  // Всё, от чего зависит, где встанут переносы строк.
+  const COPIED_STYLE = ['font-family', 'font-size', 'font-weight',
+    'font-style', 'line-height', 'letter-spacing', 'word-spacing',
+    'white-space', 'overflow-wrap', 'word-break', 'text-indent',
+    'direction', 'text-transform', '-webkit-hyphens', 'hyphens'];
+
+  /**
+   * Решить, годится ли этому тексту выравнивание по ширине.
+   *
+   * Считаем так. Строки меряются дважды — растянутыми и по левому краю.
+   * Разбивка на строки от выравнивания не зависит, поэтому строки
+   * сравниваются попарно, и разница длин — это ровно то, что браузер
+   * раздал пробелам. Делим на число просветов в строке и на ширину
+   * обычного пробела: получается, во сколько раз просвет шире обычного.
+   *
+   * Последняя строка абзаца в счёт не идёт сама собой: её никто не
+   * тянет, и обе меры у неё совпадают. Искать её отдельно не нужно.
+   *
+   * Переносы по слогам при этом остаются включёнными: они полезны и по
+   * левому краю — длинное слово переносится, а не свисает за край.
+   */
+  function easeJustify(node, tries) {
+    if (!node || !node.parentNode) return;
     if (String(node.className || '').indexOf('just') < 0) return;
     if (typeof getComputedStyle !== 'function') return;
 
-    // Карточку сейчас поворачивают — мерить нельзя.
-    //
-    // Переворот на оборот идёт поворотом вокруг вертикальной оси, и
-    // ровно в середине этого движения карточка стоит к нам ребром: на
-    // экране она шириной в ноль. Слова в этот миг меряются нулевыми, и
-    // разбивки не видно вовсе. Оборот из-за этого оставался с дырами:
-    // мера приходилась как раз на середину поворота. Ждём, пока карточка
-    // снова станет собой, — но не бесконечно.
-    const seen = node.getBoundingClientRect().width;
-
-    /** Отложить измерение до следующего кадра. Вернёт false, если ждать
-     *  больше нечего: кадры кончились. */
-    const wait = () => {
-      const n = (tries || 0) + 1;
-      if (n > 40 || typeof requestAnimationFrame !== 'function') return false;
-      requestAnimationFrame(() => {
-        try { easeJustify(node, n, seen); } catch (e) { /* пусть как есть */ }
-      });
-      return true;
-    };
-
-    // Мерить можно только неподвижное.
-    //
-    // Переворот на оборот идёт поворотом вокруг вертикальной оси: в
-    // середине этого движения карточка стоит к нам ребром и на экране
-    // шириной в ноль, а под конец — уже почти плоская, но всё ещё
-    // скошена. Слова одной строки в этот миг стоят на разной высоте,
-    // строки рассыпаются, и мера выходит бессмысленной. Оборот из-за
-    // этого так и оставался с дырами.
-    //
-    // Признак покоя ищем не в сравнении с вёрсткой — там целые точки
-    // против дробных, и на телефоне разница есть всегда, — а в самом
-    // движении: ширина, не изменившаяся за кадр, значит, что всё встало.
-    // Один лишний кадр на неподвижном тексте глазу незаметен.
-    //
-    // Но одного покоя мало. Вторая половина поворота начинается с того,
-    // что карточку ставят ребром и держат так до следующего кадра: два
-    // кадра подряд ширина — ровно ноль, и это выглядит как покой. Мера в
-    // этот миг видит пустоту и разводит руками, а оборот остаётся с
-    // дырами — ровно то, с чего всё и началось. Поэтому нулевая ширина
-    // покоем не считается.
-    const alive = seen > 1 || !node.clientWidth;
-    const still = was !== undefined && Math.abs(seen - was) <= 0.05;
-    if ((!still || !alive) && wait()) return;
-
-    /** Оставить выравнивание по ширине: мерить было не по чему или незачем. */
+    /** Оставить выравнивание по ширине. */
     const keep = () => {
       node.style.setProperty('text-align', 'justify');
       node.className = String(node.className || '')
         .replace(/\s*\bjust-eased\b/g, '');
     };
 
-    const space = spaceWidth(node);
-    // Мерить начинаем всегда от растянутого вида, а не от того, каким
-    // текст застали. Иначе выходили качели: измерили уже отпущенный
-    // текст, растяжки не увидели, вернули «по ширине» — и на следующем
-    // заходе отпустили снова. В поле правки, где мера идёт на каждую
-    // букву, это было бы видно глазом.
-    node.style.setProperty('text-align', 'justify');
-    const wide = lineBoxes(node);
-    if (!wide || wide.length < 2) { keep(); return; }  // одну строку не тянут
-
-    node.style.setProperty('text-align', 'left');
-    const tight = lineBoxes(node);
-    // Разбивка вдруг оказалась другой. Обычно это значит, что мерили
-    // посреди движения, — пробуем ещё раз следующим кадром. Если и
-    // дальше не сходится, оставляем как было: лучше дыры, чем
-    // самодеятельность вслепую.
-    if (!tight || tight.length !== wide.length) {
-      if (!wait()) keep();
-      else node.style.setProperty('text-align', 'justify');
+    const got = measureOn(node);
+    if (!got) {
+      // Мерить пока не по чему: текст ещё не разложен или разбивка не
+      // сошлась. Пробуем следующим кадром, но не бесконечно.
+      const n = (tries || 0) + 1;
+      if (n <= 20 && typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => {
+          try { easeJustify(node, n); } catch (e) { /* пусть как есть */ }
+        });
+      }
       return;
     }
+    if (got.wide.length < 2) { keep(); return; }   // одну строку не тянут
 
     let worst = 0;
-    for (let i = 0; i < wide.length; i++) {
-      const gaps = tight[i].words - 1;
+    for (let i = 0; i < got.wide.length; i++) {
+      const gaps = got.tight[i].words - 1;
       if (gaps < 1) continue;               // одно слово во всю строку
-      const extra = (wide[i].right - wide[i].left)
-        - (tight[i].right - tight[i].left);
+      const extra = (got.wide[i].right - got.wide[i].left)
+        - (got.tight[i].right - got.tight[i].left);
       if (extra <= 0.5) continue;           // эту строку не тянули
-      const k = 1 + extra / gaps / space;
+      const k = 1 + extra / gaps / got.space;
       if (k > worst) worst = k;
     }
     if (worst <= JUST_GAP_MAX) { keep(); return; }
-    // Оставляем по левому краю и помечаем узел: по этой пометке видно,
-    // что так и задумано, а не забыто
+    // Показываем по левому краю.
+    //
+    // Выравнивание ставим прямо на узел, а не одним лишь классом:
+    // «по ширине» пришло сюда тоже своим свойством — его ставит
+    // dressText, — и правило из стилей его не перебьёт. На этом уже
+    // споткнулись: класс стоял, а текст оставался растянутым.
+    //
+    // Класс при этом всё равно нужен: по нему видно, что левый край
+    // здесь выбранный, а не забытый, и от него же остаются включёнными
+    // переносы по слогам.
+    node.style.setProperty('text-align', 'left');
     if (String(node.className || '').indexOf('just-eased') < 0) {
       node.className = String(node.className || '') + ' just-eased';
     }
   }
 
-  // Мерить можно только то, что уже на экране, — поэтому не сразу, а
-  // следующим кадром. Все тексты одного экрана меряются в этом кадре
-  // разом: у карточки их три (своя и две соседние), и три отдельных
-  // кадра ради этого не нужны.
+  // Очередь текстов, которые надо померить.
+  //
+  // Мера идёт не сразу при сборке экрана, а в самом его конце: пока
+  // текст не вставлен в страницу, у него нет ни ширины, ни строк. Зато
+  // сразу после вставки и ДО того, как экран покажется, — самое время:
+  // решение успевает примениться в том же кадре, и человек не видит ни
+  // растянутого вида, ни прыжка. Этим и занимается justifyFlush(),
+  // который зовёт render(). Кадр про запас остаётся на случай, если
+  // текст появился мимо render() — например, в окне правки.
   let justQueue = [];
   let justFrame = 0;
 
+  /** Померить всё накопившееся прямо сейчас, не дожидаясь кадра. */
+  function justifyFlush() {
+    if (justFrame && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(justFrame);
+    }
+    justFrame = 0;
+    if (!justQueue.length) return;
+    const list = justQueue;
+    justQueue = [];
+    list.forEach((n) => {
+      try { easeJustify(n); } catch (e) { /* не вышло — пусть как есть */ }
+    });
+  }
+
   function justifyLater(node) {
     if (!node) return;
-    if (typeof requestAnimationFrame !== 'function') return;
     justQueue.push(node);
-    if (justFrame) return;
-    justFrame = requestAnimationFrame(() => {
-      justFrame = 0;
-      const list = justQueue;
-      justQueue = [];
-      list.forEach((n) => {
-        try { easeJustify(n); } catch (e) { /* не вышло — пусть как есть */ }
-      });
-    });
+    if (justFrame || typeof requestAnimationFrame !== 'function') return;
+    justFrame = requestAnimationFrame(() => { justFrame = 0; justifyFlush(); });
   }
 
   /**
@@ -11149,6 +11180,10 @@ body {
     wrap.appendChild(sheet);
     wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
     document.body.appendChild(wrap);
+    // Окно уже в странице, но показано ещё не было — самое время померить
+    // «по ширине» в поле правки. Кадром позже это было бы видно
+    // морганием, как было на карточке.
+    justifyFlush();
     const first = sheet.querySelector('input, textarea');
     if (first) first.focus();
   }
@@ -14490,6 +14525,16 @@ body {
     else if (view.name === 'list') content = renderPlaylist();
     else content = renderHome();
     root.appendChild(content);
+    // Мера «по ширине» — здесь и сейчас, а не следующим кадром.
+    //
+    // Экран уже вставлен в страницу, значит, у текста есть ширина и
+    // строки; но показан он ещё не был — браузер рисует по окончании
+    // всей этой работы. Значит, решение «растягивать или нет» успевает
+    // примениться в том же кадре, и человек его не видит.
+    //
+    // Кадром позже было заметно: при переходе на другую карточку текст
+    // мигал — успевал показаться растянутым и тут же прыгал.
+    justifyFlush();
     // Звучащая запись либо вернулась в свою карточку, либо ей нужна
     // полоска внизу: играет-то она в любом случае
     liveSettle();
