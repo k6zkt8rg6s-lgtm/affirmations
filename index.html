@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-i//x3+DfH70hPtMN2YK9Ozykj8S9lBbHeNEjufOdrBM=';
-               style-src 'sha256-MIFcnyd7qwOYDBYXEdAABKN1B/EIfMJ6DjCWW5zwKfY=';
+               script-src 'sha256-eC5+Nz7JUyJDSWIYa9P5yxBD5ogvesci9EM5XuuV51A=';
+               style-src 'sha256-XHA/ekrEyOJGFygW/D3fhdV+E9WvWslJ5y+W2tZf1R4=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1242,20 +1242,9 @@ body {
   border-radius: var(--radius-m);
 }
 .loose-zone.top {
-  min-height: 48px;
-  margin: 8px 0 2px;
+  min-height: 0;
+  margin: 0;
 }
-.add-loose {
-  grid-column: 1 / -1;
-  min-height: 46px;
-  border: 1.5px dashed rgba(0, 0, 0, .20);
-  border-radius: var(--radius-m);
-  background: transparent;
-  color: var(--ink-soft);
-  font: inherit;
-  cursor: pointer;
-}
-.add-loose:active { background: rgba(0, 0, 0, .04); }
 .loose-zone.drop-into { padding: 4px 0; }
 .loose-zone > .drop-slot.as-deck { min-height: 104px; }
 @media (max-width: 380px) {
@@ -2092,6 +2081,45 @@ body {
 .btn.sec { background: rgba(0, 0, 0, .06); color: var(--ink); }
 .btn.danger { background: var(--danger); }
 .btn:active { opacity: .85; }
+
+/* Две постоянные кнопки главного экрана. Они не стоят после последнего
+   раздела в потоке, а всегда остаются у нижней границы окна. Сам список
+   получает место под них через .home-page, поэтому последняя колода не
+   оказывается под панелью. */
+.after-sections {
+  height: 0;
+  min-height: 0;
+  margin: 0;
+}
+.home-page { padding-bottom: 104px; }
+.home-create-bar {
+  position: fixed;
+  z-index: 30;
+  left: 50%;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(calc(100vw - 32px), 688px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 6px;
+  border-radius: var(--radius-m);
+  background: var(--paper);
+  box-shadow: 0 -5px 18px rgba(0, 0, 0, .08);
+}
+.home-create-btn {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 10px 8px;
+  border: 1px solid var(--hair);
+  white-space: nowrap;
+}
+/* Если внизу играет запись, панель создания поднимается над плеером,
+   а не прячется за ним. */
+.app.with-mini .home-create-bar {
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
 /* Две главные кнопки обмена. Крупные и во всю ширину: между ними и
    выбирают, а стрелка сразу показывает направление. */
 .btn.big {
@@ -2782,8 +2810,7 @@ html[data-theme="oled"] .note-highlight[aria-label$="#F5D6E4"] { background: #5A
    рамка и иерархия текста, а не большая серая плашка. */
 html[data-theme="oled"] .mini:active,
 html[data-theme="oled"] .menu-item:active,
-html[data-theme="oled"] .add-tile:active,
-html[data-theme="oled"] .add-loose:active { background: #151517; }
+html[data-theme="oled"] .add-tile:active { background: #151517; }
 html[data-theme="oled"] .field input,
 html[data-theme="oled"] .field textarea { background: #000000; }
 html[data-theme="oled"] .sheet {
@@ -2798,7 +2825,6 @@ html[data-theme="oled"] .btn.sec {
 }
 html[data-theme="oled"] .btn.danger { background: var(--danger); color: #000000; }
 html[data-theme="oled"] .add-tile,
-html[data-theme="oled"] .add-loose,
 html[data-theme="oled"] .drop-slot { border-color: rgba(255, 255, 255, .30); }
 html[data-theme="oled"] .drop-slot { background: rgba(255, 255, 255, .06); }
 html[data-theme="oled"] .card-row.lifted > .mini {
@@ -2884,7 +2910,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '16.08.2026, 22:04';
+  const BUILD = '16.08.2026, 23:06';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -5418,7 +5444,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
 
     if (state.sections.length === 0) {
       frag.appendChild(el('p', { class: 'empty',
-        text: 'Пока пусто. Создайте раздел или колоду вне раздела.' }));
+        text: 'Пока пусто. Добавьте новый раздел или колоду.' }));
     }
 
     // Избранное — не отдельная колода, а ссылки на настоящие карточки.
@@ -5497,15 +5523,21 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       return tile;
     };
 
-    /** Сетка колод; у служебной группы нет шапки, но размеры те же. */
+    /**
+     * Сетка колод; у служебной группы нет ни шапки, ни пунктирной
+     * кнопки создания. Свободные колоды добавляются только нижней
+     * постоянной кнопкой — так рядом с ними не остаётся лишнего поля.
+     */
     const deckGrid = (section) => {
       const grid = el('div', { class: 'deck-grid' });
       section.decks.forEach((deck) => grid.appendChild(deckTile(section, deck)));
-      grid.appendChild(el('button', {
-        class: 'add-tile', attrs: { type: 'button' },
-        text: '+ Колода',
-        on: { click: () => editDeck(section, null) },
-      }));
+      if (!section.loose) {
+        grid.appendChild(el('button', {
+          class: 'add-tile', attrs: { type: 'button' },
+          text: '+ Колода',
+          on: { click: () => editDeck(section, null) },
+        }));
+      }
       return grid;
     };
 
@@ -5514,18 +5546,14 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
      *
      * В покое промежуточные места почти не занимают высоты. Когда туда
      * попадает палец с поднятой колодой, в них встаёт полноценная
-     * пунктирная ячейка. Самый верхний промежуток заодно содержит явную
-     * кнопку создания — так колоду вне раздела можно не только вынести,
-     * но и создать с нуля.
+     * пунктирная ячейка. Самый верхний промежуток имеет нулевую высоту:
+     * он принимает перенос над первым разделом, но не отталкивает этот
+     * раздел вниз и ничего не рисует на экране.
      */
     const looseZone = (at, top) => el('div', {
       class: 'loose-zone' + (top ? ' top' : ''),
       attrs: { 'data-loose-at': String(at) },
-    }, top ? [el('button', {
-      class: 'add-loose', attrs: { type: 'button' },
-      text: '+ Колода вне раздела',
-      on: { click: () => editLooseDeckAt(at) },
-    })] : []);
+    });
 
     // Нулевой промежуток — над первым разделом.
     frag.appendChild(looseZone(0, true));
@@ -5590,17 +5618,26 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     });
 
     // after-sections — метка конца списка. Когда раздел несут в самый
-    // низ, ячейка встаёт перед ней, а не после кнопки создания.
+    // низ, ячейка встаёт перед ней. Сама метка высоты не занимает:
+    // кнопки закреплены у нижней границы окна и не ездят со списком.
     frag.appendChild(el('div', { class: 'section after-sections' }, [
-      el('button', {
-        class: 'btn sec', attrs: { type: 'button' }, text: '+ Новый раздел',
-        on: { click: () => editSection(null) },
-      }),
+      el('div', { class: 'home-create-bar' }, [
+        el('button', {
+          class: 'btn sec home-create-btn',
+          attrs: { type: 'button' }, text: '+ Новый раздел',
+          on: { click: () => editSection(null) },
+        }),
+        el('button', {
+          class: 'btn sec home-create-btn',
+          attrs: { type: 'button' }, text: '+ Колода',
+          on: { click: editLooseDeckAtEnd },
+        }),
+      ]),
     ]));
 
     // Экран заворачиваем в один узел: анимация возврата двигает его
     // целиком. Без обёртки уехала бы только первая строка.
-    const page = el('div', { class: 'page' });
+    const page = el('div', { class: 'page home-page' });
     page.appendChild(frag);
     return page;
   }
@@ -7282,7 +7319,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     */
   const shiftable = () => list('movable')
     .concat(list('loose-zone')).concat(list('deck')).concat(list('add-tile'))
-    .concat(list('add-loose')).concat(list('card-row'))
+    .concat(list('card-row'))
     .filter((n) => !/\blifted\b/.test(n.className || ''));
 
   /**
@@ -7552,7 +7589,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         at = t.index;
         flipMove(shiftable(), () => {
           // Ниже последнего раздела ячейка встаёт перед меткой конца
-          // списка: иначе она оказалась бы под кнопкой «+ Новый раздел»
+          // списка: нижние кнопки закреплены отдельно и в поток не входят
           const after = t.others[at]
             || (root.querySelector ? root.querySelector('.after-sections') : null);
           const parent = st.slot.parentNode;
@@ -7934,7 +7971,22 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
        * колод верхнего уровня или тонкий промежуток между разделами.
        */
       const hostUnder = (cy) => {
-        const nodes = list('movable').concat(list('loose-zone'));
+        const movables = list('movable');
+        const zones = list('loose-zone');
+        const nodes = movables.concat(zones);
+
+        // Верхняя зона намеренно имеет нулевую высоту, чтобы не
+        // отталкивать первый раздел вниз. Поэтому одной геометрии
+        // «кто ближе» мало: шапка первого обычного раздела сама служит
+        // удобной областью для команды «положить над ним». Ниже шапки,
+        // в сетке колод, первым снова становится сам раздел.
+        const topZone = zones.find((n) => /\btop\b/.test(n.className || ''));
+        const first = movables[0];
+        if (topZone && first && !/\bloose-section\b/.test(first.className || '')) {
+          const r = rectOf(first);
+          if (cy <= r.top + Math.min(28, r.height / 3)) return topZone;
+        }
+
         let best = null, bestGap = Infinity;
         nodes.forEach((n) => {
           const r = rectOf(n);
@@ -7977,10 +8029,10 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         flipMove(shiftable(), () => {
           const parent = st.slot.parentNode;
           if (parent) parent.removeChild(st.slot);
-          // В верхнем промежутке кнопка создания остаётся после будущей
-          // колоды; в обычной сетке ориентируемся на соседнюю плитку.
+          // Промежуток не содержит видимых кнопок; в обычной сетке
+          // ориентируемся на соседнюю плитку.
           const after = isZone
-            ? (host.querySelector ? host.querySelector('.add-loose') : null)
+            ? null
             : (spot.tiles[atIndex] || null);
           if (grid && after && grid.insertBefore) grid.insertBefore(st.slot, after);
           else if (grid) grid.appendChild(st.slot);
@@ -13230,7 +13282,12 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           if (state.sections.filter((s) => !s.loose).length >= LIMITS.sections) {
             alert('Достигнут предел разделов.'); return false;
           }
-          state.sections.push({ id: uid(), name: name, decks: [] });
+          // Свободные колоды в конце экрана должны и после создания
+          // нового раздела оставаться ниже последнего раздела. Поэтому
+          // новый настоящий раздел ставим перед хвостом свободных групп.
+          let at = state.sections.length;
+          while (at > 0 && state.sections[at - 1].loose) at--;
+          state.sections.splice(at, 0, { id: uid(), name: name, decks: [] });
         }
       },
       section ? () => {
@@ -13252,6 +13309,17 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     editDeck(makeLooseSection(at), null);
   }
 
+  /**
+   * Нижняя кнопка создаёт свободную колоду после последнего раздела.
+   * Если там уже стоит свободный ряд, новая плитка добавляется в ту же
+   * сетку — справа от предыдущей, затем на следующую строку.
+   */
+  function editLooseDeckAtEnd() {
+    const last = state.sections[state.sections.length - 1];
+    if (last && last.loose) editDeck(last, null);
+    else editLooseDeckAt(state.sections.length);
+  }
+
   function editDeck(section, deck) {
     modal(deck ? 'Колода' : 'Новая колода', [
       { key: 'name', label: 'Название', value: deck ? deck.name : '', max: LIMITS.deckName },
@@ -13265,9 +13333,9 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           alert('Достигнут предел колод в разделе.'); return false;
         }
         section.decks.push({ id: uid(), name: name, color: v.color, cards: [] });
-        // Группа для кнопки «Колода вне раздела» была временной. В
-        // данные она попадает только после успешного сохранения формы —
-        // «Отмена» не оставляет на экране пустой невидимый раздел.
+        // Группа для нижней кнопки «+ Колода» была временной. В данные
+        // она попадает только после успешного сохранения формы —
+        // «Отмена» не оставляет на экране пустую невидимую группу.
         if (section.loose && state.sections.indexOf(section) < 0) {
           const at = Math.max(0, Math.min(section.looseAt || 0, state.sections.length));
           delete section.looseAt;
