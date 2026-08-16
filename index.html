@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-1DZonC1cWn9z7AwhXCyn/NyyHKXgRAFWHd+jxt00LGE=';
-               style-src 'sha256-EyCMpDDllZ3BZ81qx6EnNf+2QjRWLWLfMd8+6zWA+4w=';
+               script-src 'sha256-NGD+c83fyJ4S+bZTtmSFHTt0wS8m/wpNL3fn6SR3cWE=';
+               style-src 'sha256-36yhVWyChwC7is/UJgTrUuEYT9Gyg4VXbHvAuZ8HjbM=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1910,17 +1910,20 @@ body {
     repeating-linear-gradient(90deg, rgba(0,0,0,.018) 0 1px, transparent 1px 3px),
     repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px 4px);
 }
-/* Заполненный оборот: под лицом чуть-чуть видна вторая бумажка. Элемент
-   существует только на стороне А и только при реальном содержимом Б.
-   Смещение небольшое, чтобы не спорить с цветом и текстом карточки. */
+/* Вторая сторона: под текущей чуть-чуть видна ещё одна бумажка. На А она
+   появляется при содержимом Б; на Б обозначает лежащую сзади сторону А.
+   Соседние карточки получают такой слой заранее и привозят его вместе с
+   собой при свайпе — без появления через кадр после остановки. */
 .bigcard-backhint {
+  --backhint-seat: 0px;
   position: absolute;
   left: 50%;
   top: 50%;
   width: 80%;
   max-width: 520px;
   height: 80%;
-  transform: translate(calc(-50% + 6px), calc(-50% + 7px));
+  transform: translate(calc(-50% + 6px + var(--backhint-seat)),
+                       calc(-50% + 7px));
   border-radius: 10px;
   border: 1px solid var(--card-yellow-edge);
   background-color: var(--card-yellow);
@@ -2845,7 +2848,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '16.08.2026, 19:36';
+  const BUILD = '16.08.2026, 20:17';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -7985,20 +7988,27 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       class: 'bigcard-side', attrs: { 'aria-hidden': 'true' },
       text: SIDE_LETTERS[card.side === 1 ? 1 : 0],
     });
-    // На лице аккуратно выглядывает второй слой, только когда на обороте
-    // действительно есть данные: текст, название, ссылка, заметка, звук
-    // или фотография. Это вычисляемый признак — в карточку и файл обмена
-    // не добавляется ни одного нового поля.
-    const showBackHint = card.side !== 1 && backFilled(card);
+    // Бумажка всегда имеет две стороны. На лице второй слой нужен, только
+    // когда на обороте действительно есть данные. На обороте он нужен
+    // всегда: там он обозначает лежащую сзади сторону А. Это вычисляемый
+    // признак — в карточку и файл обмена не добавляется ни одного поля.
+    const showsSecondLayer = (c) => c.side === 1 || backFilled(c);
+    const makeSecondLayer = (c, side) => {
+      if (!showsSecondLayer(c)) return null;
+      const layer = el('div', {
+        class: 'bigcard-backhint' + (side ? ' side' : ''),
+        attrs: { 'aria-hidden': 'true' },
+      });
+      paint(layer, c.color);
+      return layer;
+    };
+    const showBackHint = showsSecondLayer(card);
     const big = el('div', {
       class: 'bigcard' + (showBackHint ? ' has-backhint' : ''),
     }, [sideMark].concat(
       bigHead ? [bigHead, bigMid, audioBar] : [bigMid, audioBar]));
     paint(big, card.color);
-    const backHint = showBackHint ? el('div', {
-      class: 'bigcard-backhint', attrs: { 'aria-hidden': 'true' },
-    }) : null;
-    if (backHint) paint(backHint, card.color);
+    const backHint = makeSecondLayer(card, false);
 
     /**
      * Соседняя карточка: цвет, текст и дорожка звука, если запись есть.
@@ -8008,12 +8018,15 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     const dress = [];        // чьи дорожки дорисовать следующим кадром
     const neighbour = (c) => {
       // Соседка показывается той стороной, какой её оставили: она
-      // приедет ровно такой, какой станет текущей
+      // приедет ровно такой, какой станет текущей. Второй слой создаём
+      // здесь же, а не после окончания свайпа: тогда он въезжает вместе
+      // с карточкой и уже виден в первом кадре на новом месте.
       const f = faceOf(c);
+      const hint = makeSecondLayer(c, true);
       const bar = el('div', { class: 'audio-bar' });
       const sideHead = headLine(f);
       const g = el('div', {
-        class: 'bigcard side',
+        class: 'bigcard side' + (hint ? ' has-backhint' : ''),
         attrs: { 'aria-hidden': 'true' },
       }, [el('span', { class: 'bigcard-side',
                        text: SIDE_LETTERS[c.side === 1 ? 1 : 0] })]
@@ -8025,7 +8038,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         ]));
       paint(g, c.color);
       if (audioSlots(f).length) dress.push({ bar: bar, card: f });
-      return g;
+      return { card: g, hint: hint };
     };
 
     // Дорожка — это почти двести столбиков громкости на каждую карточку.
@@ -8064,8 +8077,14 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       deck.cards[(i + 1) % total]].some((c) => c && cardShots(faceOf(c)).length);
     const shotDeck = el('div', { class: 'shot-deck' + (anyShots ? ' open' : '') },
       [shotLine]);
-    if (before) track.appendChild(before);
-    if (after) track.appendChild(after);
+    if (before) {
+      if (before.hint) track.appendChild(before.hint);
+      track.appendChild(before.card);
+    }
+    if (after) {
+      if (after.hint) track.appendChild(after.hint);
+      track.appendChild(after.card);
+    }
     if (backHint) track.appendChild(backHint);
     track.appendChild(big);
     stage.appendChild(track);
@@ -8101,12 +8120,18 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     const seat = () => {
       measure();
       if (before) {
-        before.style.setProperty('transform',
+        before.card.style.setProperty('transform',
           'translate(-50%, -50%) translate3d(' + (-gap) + 'px, 0, 0)');
+        if (before.hint) {
+          before.hint.style.setProperty('--backhint-seat', (-gap) + 'px');
+        }
       }
       if (after) {
-        after.style.setProperty('transform',
+        after.card.style.setProperty('transform',
           'translate(-50%, -50%) translate3d(' + gap + 'px, 0, 0)');
+        if (after.hint) {
+          after.hint.style.setProperty('--backhint-seat', gap + 'px');
+        }
       }
       // Полосы миниатюр стоят на том же расстоянии, что и карточки:
       // тогда снимки приезжают ровно вместе со своей карточкой, а не
@@ -8183,7 +8208,11 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       // человек смотрит уже на следующую
       if (flipping || sliding) return;
       flipping = true;
-      if (backHint) backHint.classList.add('leaving');
+      // Если после переворота слой всё равно нужен, он остаётся на месте:
+      // бумажка поворачивается над ним. Исчезает он только при возврате с
+      // совершенно пустой стороны Б на А.
+      const nextShowsLayer = card.side !== 1 || backFilled(card);
+      if (backHint && !nextShowsLayer) backHint.classList.add('leaving');
       // Двойное нажатие по тексту заодно выделяет слово: текст карточки
       // выделять разрешено намеренно, его копируют. Выделение снимаем —
       // карточка сейчас перевернётся, и подсвеченное слово осталось бы
