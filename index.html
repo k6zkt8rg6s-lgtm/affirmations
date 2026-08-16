@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-NGD+c83fyJ4S+bZTtmSFHTt0wS8m/wpNL3fn6SR3cWE=';
-               style-src 'sha256-36yhVWyChwC7is/UJgTrUuEYT9Gyg4VXbHvAuZ8HjbM=';
+               script-src 'sha256-OjtusDZWWsm8Pq3XuP2rb/we9J2+0I4gsxO9//TogwU=';
+               style-src 'sha256-AKGS3RNWmlVlGc9wOyOX9NGX60RmTJhwWt+cc00ljK0=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1856,6 +1856,20 @@ body {
   touch-action: pan-y;
 }
 
+/* Во время перелистывания видимая соседняя карточка не принимает
+   события. Эта прозрачная поверхность лежит над сценой только на время
+   хода и ловит следующие быстрые свайпы. В покое она не существует для
+   указателя и никак не влияет на кнопки, выделение текста или прокрутку. */
+.swipe-catcher {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  touch-action: pan-y;
+  background: transparent;
+}
+.swipe-catcher.on { pointer-events: auto; }
+
 /* Каретка: единственное, что двигается при перелистывании. Все три
    карточки лежат внутри и едут вместе с ней.
    will-change и translate3d просят браузер подготовить один слой заранее
@@ -1910,42 +1924,6 @@ body {
     repeating-linear-gradient(90deg, rgba(0,0,0,.018) 0 1px, transparent 1px 3px),
     repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px 4px);
 }
-/* Вторая сторона: под текущей чуть-чуть видна ещё одна бумажка. На А она
-   появляется при содержимом Б; на Б обозначает лежащую сзади сторону А.
-   Соседние карточки получают такой слой заранее и привозят его вместе с
-   собой при свайпе — без появления через кадр после остановки. */
-.bigcard-backhint {
-  --backhint-seat: 0px;
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 80%;
-  max-width: 520px;
-  height: 80%;
-  transform: translate(calc(-50% + 6px + var(--backhint-seat)),
-                       calc(-50% + 7px));
-  border-radius: 10px;
-  border: 1px solid var(--card-yellow-edge);
-  background-color: var(--card-yellow);
-  background-image:
-    linear-gradient(rgba(43, 36, 8, .09), rgba(43, 36, 8, .09)),
-    repeating-linear-gradient(90deg, rgba(0,0,0,.018) 0 1px, transparent 1px 3px),
-    repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 4px);
-  box-shadow: 0 11px 25px rgba(0, 0, 0, .15), 0 3px 6px rgba(0, 0, 0, .11);
-  pointer-events: none;
-  user-select: none;
-  -webkit-user-select: none;
-  opacity: 1;
-  z-index: 0;
-  transition: opacity 110ms ease;
-}
-.bigcard-backhint.leaving { opacity: 0; }
-/* Основная глубина теперь принадлежит всей стопке. У передней карточки
-   оставляем более короткую тень, чтобы край оборота читался чисто. */
-.bigcard.has-backhint {
-  z-index: 1;
-  box-shadow: 0 5px 11px rgba(0, 0, 0, .14), 0 2px 3px rgba(0, 0, 0, .10);
-}
 /* Название карточки — на самом верху, отдельной строкой.
  *
  * Крупное и того же цвета, что текст, без черты снизу: разделяет их
@@ -1992,6 +1970,9 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+/* Непрозрачная А означает: на стороне Б есть данные. Начертание и цвет
+   те же, меняется только прозрачность. Б этот класс никогда не получает. */
+.bigcard-side.has-back { opacity: 1; }
 
 .bigcard-mid {
   flex: 1 1 auto;
@@ -2848,7 +2829,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '16.08.2026, 20:17';
+  const BUILD = '16.08.2026, 20:58';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -7981,34 +7962,19 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     // аффирмации от этого не двигается: он остаётся в середине того, что
     // осталось. Пустого названия нет вовсе — и места оно не занимает.
     const bigHead = headLine(face);
-    // Буква стороны в левом верхнем углу. Полупрозрачная и не жирная:
-    // она отвечает на один вопрос — «где я сейчас» — и не должна спорить
-    // с текстом. Без неё пустой оборот не отличить от пустого лица.
+    // Буква стороны в левом верхнем углу. Б остаётся бледной всегда. А
+    // становится непрозрачной, когда на Б есть хоть какая-нибудь
+    // информация; бледная А означает совершенно пустой оборот. Это
+    // вычисляется при отрисовке и не добавляет поля в данные карточки.
+    const frontHasBack = card.side !== 1 && backFilled(card);
     const sideMark = el('span', {
-      class: 'bigcard-side', attrs: { 'aria-hidden': 'true' },
+      class: 'bigcard-side' + (frontHasBack ? ' has-back' : ''),
+      attrs: { 'aria-hidden': 'true' },
       text: SIDE_LETTERS[card.side === 1 ? 1 : 0],
     });
-    // Бумажка всегда имеет две стороны. На лице второй слой нужен, только
-    // когда на обороте действительно есть данные. На обороте он нужен
-    // всегда: там он обозначает лежащую сзади сторону А. Это вычисляемый
-    // признак — в карточку и файл обмена не добавляется ни одного поля.
-    const showsSecondLayer = (c) => c.side === 1 || backFilled(c);
-    const makeSecondLayer = (c, side) => {
-      if (!showsSecondLayer(c)) return null;
-      const layer = el('div', {
-        class: 'bigcard-backhint' + (side ? ' side' : ''),
-        attrs: { 'aria-hidden': 'true' },
-      });
-      paint(layer, c.color);
-      return layer;
-    };
-    const showBackHint = showsSecondLayer(card);
-    const big = el('div', {
-      class: 'bigcard' + (showBackHint ? ' has-backhint' : ''),
-    }, [sideMark].concat(
+    const big = el('div', { class: 'bigcard' }, [sideMark].concat(
       bigHead ? [bigHead, bigMid, audioBar] : [bigMid, audioBar]));
     paint(big, card.color);
-    const backHint = makeSecondLayer(card, false);
 
     /**
      * Соседняя карточка: цвет, текст и дорожка звука, если запись есть.
@@ -8018,17 +7984,16 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     const dress = [];        // чьи дорожки дорисовать следующим кадром
     const neighbour = (c) => {
       // Соседка показывается той стороной, какой её оставили: она
-      // приедет ровно такой, какой станет текущей. Второй слой создаём
-      // здесь же, а не после окончания свайпа: тогда он въезжает вместе
-      // с карточкой и уже виден в первом кадре на новом месте.
+      // приедет ровно такой, какой станет текущей. Буква-индикатор тоже
+      // готова заранее, поэтому её прозрачность не меняется после въезда.
       const f = faceOf(c);
-      const hint = makeSecondLayer(c, true);
+      const hasBack = c.side !== 1 && backFilled(c);
       const bar = el('div', { class: 'audio-bar' });
       const sideHead = headLine(f);
       const g = el('div', {
-        class: 'bigcard side' + (hint ? ' has-backhint' : ''),
+        class: 'bigcard side',
         attrs: { 'aria-hidden': 'true' },
-      }, [el('span', { class: 'bigcard-side',
+      }, [el('span', { class: 'bigcard-side' + (hasBack ? ' has-back' : ''),
                        text: SIDE_LETTERS[c.side === 1 ? 1 : 0] })]
         .concat(sideHead ? [sideHead] : []).concat([
           el('div', { class: 'bigcard-mid' }, [
@@ -8038,7 +8003,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         ]));
       paint(g, c.color);
       if (audioSlots(f).length) dress.push({ bar: bar, card: f });
-      return { card: g, hint: hint };
+      return g;
     };
 
     // Дорожка — это почти двести столбиков громкости на каждую карточку.
@@ -8063,6 +8028,13 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     // упора у краёв больше нет, листать можно в любую сторону без конца.
     // Круга нет только у колоды из одной карточки: ходить некуда.
     const track = el('div', { class: 'track' });
+    // Пока карточка доезжает, старая уже ушла из-под пальца, а соседняя
+    // намеренно не принимает события. Прозрачная поверхность включается
+    // только на эти доли секунды и ловит следующие быстрые свайпы, чтобы
+    // поставить их в очередь. В покое она полностью неактивна.
+    const swipeCatcher = el('div', {
+      class: 'swipe-catcher', attrs: { 'aria-hidden': 'true' },
+    });
     const loop = total > 1;
     const before = loop ? neighbour(deck.cards[(i - 1 + total) % total]) : null;
     const after = loop ? neighbour(deck.cards[(i + 1) % total]) : null;
@@ -8077,17 +8049,11 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       deck.cards[(i + 1) % total]].some((c) => c && cardShots(faceOf(c)).length);
     const shotDeck = el('div', { class: 'shot-deck' + (anyShots ? ' open' : '') },
       [shotLine]);
-    if (before) {
-      if (before.hint) track.appendChild(before.hint);
-      track.appendChild(before.card);
-    }
-    if (after) {
-      if (after.hint) track.appendChild(after.hint);
-      track.appendChild(after.card);
-    }
-    if (backHint) track.appendChild(backHint);
+    if (before) track.appendChild(before);
+    if (after) track.appendChild(after);
     track.appendChild(big);
     stage.appendChild(track);
+    stage.appendChild(swipeCatcher);
     paintTracks(audioBar, face);
 
     /**
@@ -8120,18 +8086,12 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     const seat = () => {
       measure();
       if (before) {
-        before.card.style.setProperty('transform',
+        before.style.setProperty('transform',
           'translate(-50%, -50%) translate3d(' + (-gap) + 'px, 0, 0)');
-        if (before.hint) {
-          before.hint.style.setProperty('--backhint-seat', (-gap) + 'px');
-        }
       }
       if (after) {
-        after.card.style.setProperty('transform',
+        after.style.setProperty('transform',
           'translate(-50%, -50%) translate3d(' + gap + 'px, 0, 0)');
-        if (after.hint) {
-          after.hint.style.setProperty('--backhint-seat', gap + 'px');
-        }
       }
       // Полосы миниатюр стоят на том же расстоянии, что и карточки:
       // тогда снимки приезжают ровно вместе со своей карточкой, а не
@@ -8208,11 +8168,6 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       // человек смотрит уже на следующую
       if (flipping || sliding) return;
       flipping = true;
-      // Если после переворота слой всё равно нужен, он остаётся на месте:
-      // бумажка поворачивается над ним. Исчезает он только при возврате с
-      // совершенно пустой стороны Б на А.
-      const nextShowsLayer = card.side !== 1 || backFilled(card);
-      if (backHint && !nextShowsLayer) backHint.classList.add('leaving');
       // Двойное нажатие по тексту заодно выделяет слово: текст карточки
       // выделять разрешено намеренно, его копируют. Выделение снимаем —
       // карточка сейчас перевернётся, и подсвеченное слово осталось бы
@@ -8297,6 +8252,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       // По кругу: с последней уходим на первую, с первой — на последнюю
       const next = (i + delta + total) % total;
       sliding = true;
+      swipeCatcher.classList.add('on');
       dressSides();            // кнопками и клавишами тоже листают
       place(-delta * measure(), fast ? SLIDE_FAST : SLIDE_MS);
 
@@ -8312,6 +8268,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         // оторвётся, — экран за это время всё равно стоит на месте.
         if (dragId !== null) { pendingGo = next; return; }
         sliding = false;
+        swipeCatcher.classList.remove('on');
         go({ name: 'read', sectionId: view.sectionId, deckId: view.deckId, index: next });
       };
       if (track.addEventListener) {
@@ -8340,7 +8297,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     // и в колоде срабатывало по-разному.
     let tPrev = 0, xPrev = 0, speed = 0, raw = 0;
 
-    big.addEventListener('pointerdown', (ev) => {
+    const startDrag = (ev) => {
       if (!ev.isPrimary) return;
       dragId = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY;
       dx = 0; raw = 0; locked = null; speed = 0;
@@ -8358,9 +8315,9 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       // на первом же pointermove, палец успевает уйти, а карточка секунду
       // догоняет его по прежней кривой — отсюда ощущение рывка в начале
       place(0, 0);
-    });
+    };
 
-    big.addEventListener('pointermove', (ev) => {
+    const moveDrag = (ev) => {
       if (ev.pointerId !== dragId) return;
       const mx = ev.clientX - x0, my = ev.clientY - y0;
       // Пока не решили, жест горизонтальный или вертикальный, ничего не
@@ -8368,8 +8325,9 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       if (locked === null) {
         if (Math.abs(mx) < SWIPE_START && Math.abs(my) < SWIPE_START) return;
         locked = Math.abs(mx) >= Math.abs(my) ? 'x' : 'y';
-        if (locked === 'x' && big.setPointerCapture) {
-          try { big.setPointerCapture(dragId); } catch (e) { /* не поддержано */ }
+        const holder = ev.currentTarget || big;
+        if (locked === 'x' && holder.setPointerCapture) {
+          try { holder.setPointerCapture(dragId); } catch (e) { /* не поддержано */ }
         }
       }
       if (locked !== 'x') return;
@@ -8387,7 +8345,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       dx = loop ? mx : mx * 0.25;
       // Пока идёт ход, каретка занята: движение только запоминаем
       if (!sliding) place(dx, 0);
-    });
+    };
 
     const endDrag = (ev) => {
       if (ev.pointerId !== dragId) return;
@@ -8403,6 +8361,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           if (Math.abs(queuedStep + d) <= QUEUE_MAX) queuedStep += d;
         }
         sliding = false;
+        swipeCatcher.classList.remove('on');
         go({ name: 'read', sectionId: view.sectionId, deckId: view.deckId, index: to });
         return;
       }
@@ -8436,8 +8395,14 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       // и подъехавшая соседка уходит обратно за край
       place(0, Math.round(SLIDE_MS * 0.7));
     };
-    big.addEventListener('pointerup', endDrag);
-    big.addEventListener('pointercancel', endDrag);
+    const bindSwipe = (node) => {
+      node.addEventListener('pointerdown', startDrag);
+      node.addEventListener('pointermove', moveDrag);
+      node.addEventListener('pointerup', endDrag);
+      node.addEventListener('pointercancel', endDrag);
+    };
+    bindSwipe(big);
+    bindSwipe(swipeCatcher);
 
     // Свайп двумя пальцами по трекпаду MacBook. Это НЕ перетаскивание:
     // система шлёт события колеса с горизонтальной составляющей, а
@@ -8601,11 +8566,11 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // Ход внутри быстрой серии. Когда человек листает подряд, каждый
   // следующий шаг короче: пальцу не приходится ждать, а движение всё
   // равно видно.
-  const SLIDE_FAST = 210;
-  // Сколько свайпов подряд помним, пока идёт ход. Больше трёх за раз
-  // человек не делает, а без предела быстрая серия унесла бы через всю
-  // колоду.
-  const QUEUE_MAX = 3;
+  const SLIDE_FAST = 140;
+  // Быстрыми отдельными движениями можно пройти сразу большую колоду.
+  // Предел оставлен только как защита от неисправного сенсора или потока
+  // синтетических событий; двенадцати хватает от первой до двенадцатой.
+  const QUEUE_MAX = 12;
   // Куда листать сразу после перерисовки: свайп, сделанный во время
   // хода, не теряется, а доигрывается следом. Живёт снаружи читалки —
   // между двумя её перерисовками.
@@ -8613,7 +8578,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // Отдельного «въезда» новой карточки больше нет: соседняя приезжает в
   // середину сама, вместе с кареткой, и подмена происходит уже на месте
   let pageEnter = 0;      // с какой стороны въезжает экран при жесте «назад»
-  let sliding = false;    // идёт анимация — новые жесты игнорируем
+  let sliding = false;    // идёт анимация — новые жесты принимает catcher
 
   // Переворот карточки.
   //
