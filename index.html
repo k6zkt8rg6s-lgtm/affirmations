@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-Y/YfV3dqYJlgFPlurGWy+pwdSlwMZeKApWsi7C6G7uw=';
-               style-src 'sha256-PhmcemVWZgZb9hemMvGe4yiX5WXybvxURYIxc9A4X5k=';
+               script-src 'sha256-1DZonC1cWn9z7AwhXCyn/NyyHKXgRAFWHd+jxt00LGE=';
+               style-src 'sha256-EyCMpDDllZ3BZ81qx6EnNf+2QjRWLWLfMd8+6zWA+4w=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -709,6 +709,9 @@ body {
   text-decoration: line-through;
 }
 .note-block-text { min-width: 1px; }
+/* Настоящая, но несохраняемая точка каретки в пустом абзаце. Нужна
+   WebKit на iPhone после Enter; data-note-ui исключает её из данных. */
+.note-caret-anchor { pointer-events: none; }
 .note-run {
   display: inline;
   font-size: inherit;
@@ -1907,6 +1910,39 @@ body {
     repeating-linear-gradient(90deg, rgba(0,0,0,.018) 0 1px, transparent 1px 3px),
     repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px 4px);
 }
+/* Заполненный оборот: под лицом чуть-чуть видна вторая бумажка. Элемент
+   существует только на стороне А и только при реальном содержимом Б.
+   Смещение небольшое, чтобы не спорить с цветом и текстом карточки. */
+.bigcard-backhint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 80%;
+  max-width: 520px;
+  height: 80%;
+  transform: translate(calc(-50% + 6px), calc(-50% + 7px));
+  border-radius: 10px;
+  border: 1px solid var(--card-yellow-edge);
+  background-color: var(--card-yellow);
+  background-image:
+    linear-gradient(rgba(43, 36, 8, .09), rgba(43, 36, 8, .09)),
+    repeating-linear-gradient(90deg, rgba(0,0,0,.018) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 4px);
+  box-shadow: 0 11px 25px rgba(0, 0, 0, .15), 0 3px 6px rgba(0, 0, 0, .11);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  opacity: 1;
+  z-index: 0;
+  transition: opacity 110ms ease;
+}
+.bigcard-backhint.leaving { opacity: 0; }
+/* Основная глубина теперь принадлежит всей стопке. У передней карточки
+   оставляем более короткую тень, чтобы край оборота читался чисто. */
+.bigcard.has-backhint {
+  z-index: 1;
+  box-shadow: 0 5px 11px rgba(0, 0, 0, .14), 0 2px 3px rgba(0, 0, 0, .10);
+}
 /* Название карточки — на самом верху, отдельной строкой.
  *
  * Крупное и того же цвета, что текст, без черты снизу: разделяет их
@@ -2809,7 +2845,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '16.08.2026, 17:56';
+  const BUILD = '16.08.2026, 19:36';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -7949,9 +7985,20 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       class: 'bigcard-side', attrs: { 'aria-hidden': 'true' },
       text: SIDE_LETTERS[card.side === 1 ? 1 : 0],
     });
-    const big = el('div', { class: 'bigcard' }, [sideMark].concat(
+    // На лице аккуратно выглядывает второй слой, только когда на обороте
+    // действительно есть данные: текст, название, ссылка, заметка, звук
+    // или фотография. Это вычисляемый признак — в карточку и файл обмена
+    // не добавляется ни одного нового поля.
+    const showBackHint = card.side !== 1 && backFilled(card);
+    const big = el('div', {
+      class: 'bigcard' + (showBackHint ? ' has-backhint' : ''),
+    }, [sideMark].concat(
       bigHead ? [bigHead, bigMid, audioBar] : [bigMid, audioBar]));
     paint(big, card.color);
+    const backHint = showBackHint ? el('div', {
+      class: 'bigcard-backhint', attrs: { 'aria-hidden': 'true' },
+    }) : null;
+    if (backHint) paint(backHint, card.color);
 
     /**
      * Соседняя карточка: цвет, текст и дорожка звука, если запись есть.
@@ -8019,6 +8066,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       [shotLine]);
     if (before) track.appendChild(before);
     if (after) track.appendChild(after);
+    if (backHint) track.appendChild(backHint);
     track.appendChild(big);
     stage.appendChild(track);
     paintTracks(audioBar, face);
@@ -8135,6 +8183,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       // человек смотрит уже на следующую
       if (flipping || sliding) return;
       flipping = true;
+      if (backHint) backHint.classList.add('leaving');
       // Двойное нажатие по тексту заодно выделяет слово: текст карточки
       // выделять разрешено намеренно, его копируют. Выделение снимаем —
       // карточка сейчас перевернётся, и подсвеченное слово осталось бы
@@ -8581,7 +8630,6 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     if (dist >= SWIPE_NEED) return true;
     return dist >= SWIPE_FLICK && speed >= SWIPE_SPEED;
   }
-
 /* ─── 15b-note.js ──────────────────────────────────────────────────────
  * Заметка стороны: подробный текст, который на карточке не показывается
  *
@@ -8866,6 +8914,12 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     let lastInputAt = 0;
     let beforeInput = null;
     let searchAt = -1;
+    // На аппаратной клавиатуре Enter приходит как keydown. Экранная
+    // клавиатура iPhone обычно посылает beforeinput/insertParagraph, а на
+    // некоторых версиях WebKit приходят оба события подряд. Счётчик не
+    // даёт одному нажатию создать две строки, но не мешает двум настоящим
+    // нажатиям Enter.
+    let enteredByKeydown = 0;
 
     const shell = el('section', { class: 'note-editor-shell' });
     // Панель занимает заметную часть экрана, особенно на iPhone. Она
@@ -9101,7 +9155,19 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       clear(body);
       const runs = noteCellsToRuns(block.cells);
       if (!runs.length) {
-        body.appendChild(document.createTextNode(block.text));
+        if (block.text) body.appendChild(document.createTextNode(block.text));
+        else {
+          // Пустой span не является надёжным местом для каретки в Safari
+          // на iPhone: после Enter WebKit может выбросить нулевой текстовый
+          // узел, вернуть каретку в прошлую строку и при следующем вводе
+          // заменить только что написанное слово. Невидимый служебный br
+          // оставляет новой строке настоящее место для каретки. Он помечен
+          // data-note-ui, поэтому никогда не попадает ни в note, ни в
+          // noteDoc, ни в файл обмена.
+          body.appendChild(el('br', { class: 'note-caret-anchor', attrs: {
+            'data-note-ui': 'true', 'aria-hidden': 'true',
+          } }));
+        }
         return;
       }
       let at = 0;
@@ -9133,7 +9199,11 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         at = run.e;
       });
       if (at < block.text.length) body.appendChild(document.createTextNode(block.text.slice(at)));
-      if (!block.text) body.appendChild(document.createTextNode(''));
+      if (!block.text) body.appendChild(el('br', {
+        class: 'note-caret-anchor', attrs: {
+          'data-note-ui': 'true', 'aria-hidden': 'true',
+        },
+      }));
     }
 
     function renderEditor(range, focusBox) {
@@ -9691,7 +9761,10 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       }[ev.inputType];
       if (format) { if (ev.preventDefault) ev.preventDefault(); applyMark(format); return; }
       if (ev.inputType === 'insertParagraph' || ev.inputType === 'insertLineBreak') {
-        if (ev.preventDefault) ev.preventDefault(); enter(); return;
+        if (ev.preventDefault) ev.preventDefault();
+        if (enteredByKeydown > 0) enteredByKeydown--;
+        else enter();
+        return;
       }
       if (ev.inputType === 'historyUndo') {
         if (ev.preventDefault) ev.preventDefault(); undo(); return;
@@ -9742,7 +9815,16 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         }
         if (key === 'k') { if (ev.preventDefault) ev.preventDefault(); linkPanel(); return; }
       }
-      if (ev.key === 'Enter') { if (ev.preventDefault) ev.preventDefault(); enter(); return; }
+      if (ev.key === 'Enter') {
+        if (ev.preventDefault) ev.preventDefault();
+        enteredByKeydown++;
+        // Если браузер после keydown не пришлёт beforeinput, защита больше
+        // не нужна. Нулевой таймер выполняется уже после текущей цепочки
+        // клавиатурных событий.
+        setTimeout(() => { enteredByKeydown = 0; }, 0);
+        enter();
+        return;
+      }
       if (ev.key === 'Backspace' && mergeAtBoundary(true)) {
         if (ev.preventDefault) ev.preventDefault(); return;
       }
