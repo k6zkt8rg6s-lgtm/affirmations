@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-uHa0T1ZTb1hYybFC3aO+CF/rhJGzZrWfnaDsOt/2hDY=';
-               style-src 'sha256-mmSYbQSPe/S7Jur5s7LfEkLwxyMg6AsdR7jtoEM90Pw=';
+               script-src 'sha256-uNtywf8L4ibLdIJeBSH+teRw++Wo79NM23YfTVlsdqE=';
+               style-src 'sha256-tqjo818Blp8HWoegsj6Y7aNpn0k9LomELyPrEtUzEa4=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1633,9 +1633,9 @@ body {
 .shot-cell.moving { z-index: 2; }
 .shot-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* Pages стоит в том же ряду и ровно того же размера, что фото. Цвет и
-   буква дают понять тип даже на маленьком экране, а короткое имя — какой
-   именно файл прикреплён. */
+/* Текстовые документы стоят в том же ряду и ровно того же размера, что
+   фото. Цвет и буква дают понять тип даже на маленьком экране, а короткое
+   имя — какой именно файл прикреплён. */
 .doc-cell {
   display: grid;
   grid-template-rows: 28px 1fr;
@@ -1659,6 +1659,19 @@ body {
   font-weight: 800;
   box-shadow: 0 1px 3px rgba(102, 43, 10, .22);
 }
+.doc-type-icon.doc-doc,
+.doc-type-icon.doc-docx {
+  background: linear-gradient(145deg, #4A91F2, #245AC7);
+  box-shadow: 0 1px 3px rgba(17, 61, 139, .25);
+}
+.doc-type-icon.doc-rtf {
+  background: linear-gradient(145deg, #9B78DE, #6640A8);
+  box-shadow: 0 1px 3px rgba(74, 42, 126, .24);
+}
+.doc-type-icon.doc-txt {
+  background: linear-gradient(145deg, #6F8894, #405964);
+  box-shadow: 0 1px 3px rgba(31, 54, 64, .24);
+}
 .doc-cell-name {
   width: 100%;
   overflow: hidden;
@@ -1670,6 +1683,16 @@ body {
   text-align: center;
 }
 .doc-cell.took .doc-pages-icon { transform: scale(1.08); }
+
+/* Объяснение перед открытием документа. Оно заменяет ложное обещание
+   «открыть в Pages»: iOS сам решает, какие приложения показать в общем
+   меню, а надёжный путь для Pages идёт через Загрузки. */
+.doc-open-help {
+  margin: 0 0 14px;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.42;
+}
 
 /* Снимок на весь экран. Чёрный фон и ничего лишнего: смотреть так
    смотреть. Закрывается крестиком, нажатием мимо снимка и клавишей. */
@@ -2960,7 +2983,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '20.08.2026, 18:56';
+  const BUILD = '20.08.2026, 19:31';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -4254,7 +4277,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   applyTheme();
 
 /* ─── 05d-docs-data.js ─────────────────────────────────────────────────
- * Документы Pages, прикреплённые к отдельной стороне карточки
+ * Редактируемые текстовые документы отдельной стороны карточки
  *
  * Часть общего кода приложения. Собирается: python3 build.py
  * Карта всех частей: КАРТА-ПРОЕКТА.md
@@ -4266,24 +4289,81 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   const DOCS_MAX = 20;
   const DOC_MAX_MB = 50;
   const PAGES_MIME = 'application/vnd.apple.pages';
+  const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const DOC_MIME = 'application/msword';
+  const RTF_MIME = 'application/rtf';
+  const TXT_MIME = 'text/plain';
+
+  // Только форматы, которые Pages официально умеет открывать и
+  // редактировать на iPhone: Pages, Word и обычные текстовые документы.
+  // PDF/EPUB сюда намеренно не входят: Pages умеет их экспортировать,
+  // но не использует как обычный редактируемый исходник.
+  const DOC_FORMATS = {
+    pages: { ext: 'pages', mime: PAGES_MIME, label: 'Pages', icon: 'P',
+      types: [PAGES_MIME, 'application/x-iwork-pages-sffpages'] },
+    docx: { ext: 'docx', mime: DOCX_MIME, label: 'DOCX', icon: 'W',
+      types: [DOCX_MIME] },
+    doc: { ext: 'doc', mime: DOC_MIME, label: 'DOC', icon: 'W',
+      types: [DOC_MIME, 'application/vnd.ms-word'] },
+    rtf: { ext: 'rtf', mime: RTF_MIME, label: 'RTF', icon: 'R',
+      types: [RTF_MIME, 'text/rtf', 'application/x-rtf'] },
+    txt: { ext: 'txt', mime: TXT_MIME, label: 'TXT', icon: 'T',
+      types: [TXT_MIME] },
+  };
+  const DOC_ACCEPT = '.pages,.doc,.docx,.rtf,.txt,'
+    + PAGES_MIME + ',' + DOC_MIME + ',' + DOCX_MIME + ',' + RTF_MIME + ',' + TXT_MIME;
 
   /** Отдельный вид ключа, чтобы не спутать со звуком и снимками. */
   const docKey = () => 'd-' + uid();
 
-  function pagesName(value) {
+  /** Вид документа по расширению (надёжнее) или MIME от системы. */
+  function docKind(value, typeHint) {
+    const name = String((value && value.name) || value || '').toLowerCase();
+    const type = String((value && value.type) || typeHint || '').toLowerCase();
+    const byExt = /\.([a-z0-9]+)$/.exec(name);
+    if (byExt && DOC_FORMATS[byExt[1]]) return byExt[1];
+    const kinds = Object.keys(DOC_FORMATS);
+    for (let i = 0; i < kinds.length; i++) {
+      const item = DOC_FORMATS[kinds[i]];
+      if (item.types.indexOf(type) >= 0) return kinds[i];
+    }
+    return '';
+  }
+
+  /** Безопасное имя с правильным расширением выбранного формата. */
+  function documentName(value, typeHint) {
+    const kind = docKind(value, typeHint) || (DOC_FORMATS[typeHint] ? typeHint : 'pages');
+    const format = DOC_FORMATS[kind];
     let name = String(value || '').replace(/[\u0000-\u001F\u007F]/g, '').trim();
-    if (!name) name = 'Документ.pages';
+    if (!name) name = 'Документ.' + format.ext;
     name = name.slice(0, 180);
-    if (!/\.pages$/i.test(name)) name += '.pages';
+    if (!new RegExp('\\.' + format.ext + '$', 'i').test(name)) name += '.' + format.ext;
     return name;
   }
 
+  // Старое имя оставлено как совместимый помощник для прежних файлов
+  // обмена и тестов. Новому коду нужен documentName.
+  function pagesName(value) { return documentName(value, 'pages'); }
+
+  function documentMime(value, typeHint) {
+    const kind = docKind(value, typeHint);
+    return kind ? DOC_FORMATS[kind].mime : '';
+  }
+
+  function documentLabel(value, typeHint) {
+    const kind = docKind(value, typeHint);
+    return kind ? DOC_FORMATS[kind].label : 'Документ';
+  }
+
+  function documentIcon(value, typeHint) {
+    const kind = docKind(value, typeHint);
+    return kind ? DOC_FORMATS[kind].icon : 'D';
+  }
+
+  function isDocumentFile(file) { return !!docKind(file); }
+
   function isPagesFile(file) {
-    if (!file) return false;
-    const name = String(file.name || '');
-    const type = String(file.type || '').toLowerCase();
-    return /\.pages$/i.test(name) || type === PAGES_MIME
-      || type === 'application/x-iwork-pages-sffpages';
+    return docKind(file) === 'pages';
   }
 
   function cardDocs(card) {
@@ -4298,15 +4378,16 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     for (const raw of value) {
       if (!raw || typeof raw !== 'object') continue;
       const id = String(raw.id || '').slice(0, 64);
-      if (!id) continue;
+      const kind = docKind(raw.name, raw.type);
+      if (!id || !kind) continue;
       const size = (typeof raw.size === 'number' && isFinite(raw.size) && raw.size > 0)
         ? Math.min(200 * 1024 * 1024, Math.round(raw.size)) : 0;
       const modified = (typeof raw.modified === 'number' && isFinite(raw.modified)
         && raw.modified > 0) ? Math.round(raw.modified) : 0;
       out.push({
         id: id,
-        name: pagesName(raw.name),
-        type: PAGES_MIME,
+        name: documentName(raw.name, kind),
+        type: DOC_FORMATS[kind].mime,
         size: size,
         modified: modified,
       });
@@ -4316,7 +4397,6 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   }
 
   function docKeys(card) { return cardDocs(card).map((d) => d.id); }
-
 /* ─── 05e-note-paste.js ────────────────────────────────────────────────────
  * Безопасная вставка оформленного текста в заметку
  *
@@ -4553,7 +4633,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       inList: raw.inList === true,
       listAt: sanitizeListAt(raw.listAt),
       shots: sanitizeShots(raw.shots),
-      // Документы Pages у лица и оборота тоже разные.
+      // Текстовые документы у лица и оборота тоже разные.
       docs: sanitizeDocs(raw.docs),
     };
     const noteDoc = sanitizeNoteDoc(raw.noteDoc, back.note);
@@ -4681,7 +4761,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     return out;
   }
 
-  /** Все ключи документов Pages карточки — с обеих сторон. */
+  /** Все ключи текстовых документов карточки — с обеих сторон. */
   function sidesDocKeys(card) {
     let out = [];
     cardSides(card).forEach((s) => { out = out.concat(docKeys(s)); });
@@ -4768,7 +4848,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       // Снимки: только номера и размеры. Сами картинки лежат
       // в хранилище устройства, как и голос.
       shots: sanitizeShots(c.shots),
-      // Так же хранятся файлы Pages; здесь только их описания.
+      // Так же хранятся текстовые документы; здесь только их описания.
       docs: sanitizeDocs(c.docs),
       // Какой стороной карточка лежит. Помнится вместе с ней: как
       // оставил, так в следующий раз и откроется.
@@ -8568,7 +8648,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     if (shotBefore) shotLine.appendChild(shotBefore);
     if (shotAfter) shotLine.appendChild(shotAfter);
     shotLine.appendChild(shotStrip);
-    // Место под ряд держим, если фотографии или Pages есть хоть у одной
+    // Место под ряд держим, если фотографии или документы есть хоть у одной
     // из трёх карточек: иначе на подъезде соседней экран подпрыгивал бы.
     const anyAttachments = [card, deck.cards[(i - 1 + total) % total],
       deck.cards[(i + 1) % total]].some((c) => {
@@ -10793,8 +10873,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     });
 
     const NOT_OURS = 'Этот файл здесь не открывается. Подойдёт фотография '
-      + '(jpeg, png, heic), документ Pages (.pages) или запись «Диктофона» '
-      + '(m4a), а также mp3, wav и aac.';
+      + '(jpeg, png, heic), текстовый документ (pages, doc, docx, rtf, txt) '
+      + 'или запись «Диктофона» (m4a), а также mp3, wav и aac.';
 
     /**
      * Разобрать один выбранный файл.
@@ -10820,9 +10900,11 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         const looksAudio = String(file.type || '').indexOf('audio/') === 0;
         const named = /\.(m4a|mp3|wav|aac|caf|aiff?)$/i.test(file.name || '');
 
-        /** Взять Pages как отдельное вложение этой стороны. */
+        /** Взять редактируемый документ как отдельное вложение стороны. */
         const asDoc = () => {
           if (cardDocs(card).length >= DOCS_MAX) { done('docs-full'); return; }
+          const kind = docKind(file);
+          if (!kind) { done('bad'); return; }
           const key = docKey();
           AudioStore.put(key, file)
             .then(() => AudioStore.get(key))
@@ -10831,8 +10913,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
               if (!Array.isArray(card.docs)) card.docs = [];
               card.docs.push({
                 id: key,
-                name: pagesName(file.name),
-                type: PAGES_MIME,
+                name: documentName(file.name, kind),
+                type: documentMime(file.name, file.type),
                 size: file.size,
                 modified: Number(file.lastModified) || Date.now(),
               });
@@ -10898,7 +10980,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           }).catch(() => done('bad'));
         };
 
-        if (isPagesFile(file)) { asDoc(); return; }
+        if (isDocumentFile(file)) { asDoc(); return; }
         if (looksImage) { asShot(() => done('bad-image')); return; }
         if (!looksAudio && !named) { asShot(asAudio); return; }
         asAudio();
@@ -10943,7 +11025,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
             : why === 'full' ? 'На карточке уже ' + SHOTS_MAX
                 + ' фотографий — больше не поместится.'
             : why === 'docs-full' ? 'На этой стороне уже ' + DOCS_MAX
-                + ' документов Pages — больше не поместится.'
+                + ' документов — больше не поместится.'
             : why === 'tracks' ? 'На карточке уже ' + TRACKS_MAX + ' записи — '
                 + 'больше не поместится. Удалите одну крестиком на её дорожке.'
             : why === 'store' ? 'Не удалось сохранить. Попробуйте ещё раз.'
@@ -10955,7 +11037,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         const lines = [];
         if (got.shot) lines.push('Добавлено фотографий: ' + got.shot + '.');
         if (got.audio) lines.push('Добавлено записей: ' + got.audio + '.');
-        if (got.doc) lines.push('Добавлено документов Pages: ' + got.doc + '.');
+        if (got.doc) lines.push('Добавлено документов: ' + got.doc + '.');
         lines.push('Не удалось взять: ' + lost.length + '.');
         if (lost.indexOf('big') >= 0) {
           lines.push('Часть файлов больше ' + PICK_MAX_MB + ' МБ.');
@@ -10964,7 +11046,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           lines.push('На карточке уже ' + SHOTS_MAX + ' фотографий.');
         }
         if (lost.indexOf('docs-full') >= 0) {
-          lines.push('На стороне уже ' + DOCS_MAX + ' документов Pages.');
+          lines.push('На стороне уже ' + DOCS_MAX + ' документов.');
         }
         if (lost.indexOf('bad') >= 0 || lost.indexOf('bad-image') >= 0) {
           lines.push('Часть файлов здесь не открывается.');
@@ -13812,7 +13894,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     sidesAudioKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
     // И снимки: они лежат там же и точно так же остались бы висеть
     sidesShotKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
-    // Прикреплённые Pages тоже двоичные файлы в том же хранилище.
+    // Прикреплённые документы тоже двоичные файлы в том же хранилище.
     sidesDocKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
     deck.cards = deck.cards.filter((c) => c.id !== card.id);
     if (view.name === 'read') {
@@ -14319,47 +14401,54 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     }).catch(() => { if (done) done(false); });
   }
 
-  /**
-   * Отдать прикреплённый Pages системе.
-   *
-   * На iPhone это окно «Поделиться»: в нём можно сразу выбрать Pages.
-   * На компьютере браузер, который не умеет отдавать файлы приложениям,
-   * скачивает его под исходным именем. Это единственный путь, который Safari
-   * разрешает веб-приложению.
-   */
-  function openCardDoc(doc) {
+  /** Скачать документ под настоящим именем, чтобы Pages увидел расширение. */
+  function downloadCardDoc(doc) {
     return AudioStore.get(doc.id).then((blob) => {
       if (!blob || !blob.size) { alert('Файл не найден в хранилище.'); return false; }
-      let file = null;
-      try { file = new File([blob], pagesName(doc.name), { type: PAGES_MIME }); }
-      catch (e) { file = null; }
-      if (file && typeof navigator !== 'undefined' && navigator.canShare
-          && navigator.share && navigator.canShare({ files: [file] })) {
-        return navigator.share({ files: [file] })
-          .then(() => true)
-          .catch(() => false);       // отмена не является ошибкой
-      }
       let url = '';
       try { url = URL.createObjectURL(blob); } catch (e) { url = ''; }
       if (!url) { alert('Не удалось открыть файл.'); return false; }
-      const a = el('a', { attrs: { href: url, download: pagesName(doc.name) } });
+      const a = el('a', { attrs: {
+        href: url, download: documentName(doc.name, doc.type),
+      } });
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) { /* уже */ } }, 1000);
       return true;
     }).catch(() => { alert('Не удалось прочитать файл.'); return false; });
   }
 
-  /** Вернуть отредактированную в Pages копию на то же место. */
+  /** Явно открыть системное «Поделиться» — для AirDrop, почты и мессенджеров. */
+  function shareCardDoc(doc) {
+    return AudioStore.get(doc.id).then((blob) => {
+      if (!blob || !blob.size) { alert('Файл не найден в хранилище.'); return false; }
+      let file = null;
+      try {
+        file = new File([blob], documentName(doc.name, doc.type), {
+          type: documentMime(doc.name, doc.type),
+        });
+      } catch (e) { file = null; }
+      if (file && typeof navigator !== 'undefined' && navigator.canShare
+          && navigator.share && navigator.canShare({ files: [file] })) {
+        return navigator.share({ files: [file] })
+          .then(() => true)
+          .catch(() => false);       // отмена не является ошибкой
+      }
+      alert('На этом устройстве системная передача файлов недоступна. Файл будет скачан.');
+      return downloadCardDoc(doc);
+    }).catch(() => { alert('Не удалось прочитать файл.'); return false; });
+  }
+
+  /** Вернуть отредактированную в Pages или Word копию на то же место. */
   function replaceCardDoc(doc, redraw) {
     const input = el('input', { attrs: {
-      type: 'file', accept: '.pages,' + PAGES_MIME,
+      type: 'file', accept: DOC_ACCEPT,
     }, style: { display: 'none' } });
     input.addEventListener('change', () => {
       const file = input.files && input.files[0];
       if (input.parentNode) input.parentNode.removeChild(input);
       if (!file) return;
-      if (!isPagesFile(file)) {
-        alert('Выберите документ Pages с окончанием .pages.'); return;
+      if (!isDocumentFile(file)) {
+        alert('Выберите документ Pages, DOC, DOCX, RTF или TXT.'); return;
       }
       if (file.size > DOC_MAX_MB * 1024 * 1024) {
         alert('Документ больше ' + DOC_MAX_MB + ' МБ. Такой файл не поместится в обмене между устройствами.');
@@ -14367,8 +14456,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       }
       AudioStore.put(doc.id, file).then(() => AudioStore.get(doc.id)).then((back) => {
         if (!back || !back.size) { alert('Не удалось заменить файл.'); return; }
-        doc.name = pagesName(file.name);
-        doc.type = PAGES_MIME;
+        doc.name = documentName(file.name, file.type);
+        doc.type = documentMime(file.name, file.type);
         doc.size = file.size;
         doc.modified = Number(file.lastModified) || Date.now();
         save();
@@ -14379,7 +14468,13 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     input.click();
   }
 
-  /** Меню Pages: открыть, вернуть обновлённую копию или удалить. */
+  /**
+   * Меню документа.
+   *
+   * iOS не разрешает сайту назначить Pages получателем системного меню.
+   * Поэтому не обещаем несуществующее «открыть автоматически»: скачиваем
+   * файл с правильным именем, а Pages берёт его из «Обзор → Загрузки».
+   */
   function docMenu(card, doc, redraw) {
     const wrap = el('div', { class: 'modal' });
     const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
@@ -14390,13 +14485,17 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       el('span', { class: 'menu-body' }, [el('span', { class: 'menu-name', text: name })]),
     ]);
     wrap.appendChild(el('div', { class: 'sheet' }, [
-      el('h3', { text: pagesName(doc.name) }),
+      el('h3', { text: documentName(doc.name, doc.type) }),
+      el('p', { class: 'doc-open-help', text:
+        'Для редактирования на iPhone: скачайте файл, затем откройте Pages → Обзор → Загрузки. '
+        + 'Список «Поделиться» формирует iOS, поэтому Pages может в нём не показываться.' }),
       el('div', { class: 'menu-list' }, [
-        item('↗', 'Открыть или передать в Pages', () => { close(); openCardDoc(doc); }),
+        item('↓', 'Скачать для открытия в Pages', () => { close(); downloadCardDoc(doc); }),
+        item('↗', 'Поделиться через AirDrop, почту…', () => { close(); shareCardDoc(doc); }),
         item('↻', 'Заменить обновлённым файлом', () => { close(); replaceCardDoc(doc, redraw); }),
         item('✕', 'Удалить файл', () => {
           close();
-          if (!confirm('Удалить этот документ Pages с карточки?')) return;
+          if (!confirm('Удалить этот документ с карточки?')) return;
           AudioStore.del(doc.id).catch(() => {});
           card.docs = cardDocs(card).filter((d) => d !== doc);
           save(); if (typeof redraw === 'function') redraw();
@@ -14412,15 +14511,20 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     return wrap;
   }
 
-  /** Квадрат Pages того же размера, что миниатюра фотографии. */
+  /** Квадрат документа того же размера, что миниатюра фотографии. */
   function pagesCell(card, doc, redraw, still) {
-    const icon = el('span', { class: 'doc-pages-icon', attrs: { 'aria-hidden': 'true' }, text: 'P' });
-    const name = el('span', { class: 'doc-cell-name', text: String(doc.name || '').replace(/\.pages$/i, '') });
+    const kind = docKind(doc.name, doc.type);
+    const icon = el('span', {
+      class: 'doc-pages-icon doc-type-icon doc-' + (kind || 'file'),
+      attrs: { 'aria-hidden': 'true' }, text: documentIcon(doc.name, doc.type),
+    });
+    const name = el('span', { class: 'doc-cell-name',
+      text: String(doc.name || '').replace(/\.(pages|docx?|rtf|txt)$/i, '') });
     const cell = el(still ? 'div' : 'button', {
       class: 'shot-cell doc-cell',
       attrs: still ? { 'aria-hidden': 'true' } : {
-        type: 'button', 'aria-label': 'Документ Pages ' + pagesName(doc.name)
-          + ': нажмите, чтобы открыть; удержите для меню',
+        type: 'button', 'aria-label': 'Документ ' + documentLabel(doc.name, doc.type)
+          + ' ' + documentName(doc.name, doc.type) + ': нажмите для действий',
       },
     }, [icon, name]);
     if (still) return cell;
@@ -14447,7 +14551,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       stop(); if (!live) return; live = false;
       cell.className = cell.className.replace(/ took\b/g, '');
       if (held) { docMenu(card, doc, redraw); return; }
-      if (!moved) openCardDoc(doc);
+      if (!moved) docMenu(card, doc, redraw);
     });
     cell.addEventListener('pointercancel', () => {
       stop(); live = false; cell.className = cell.className.replace(/ took\b/g, '');
@@ -14792,7 +14896,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       showShot(img, shot.id);
       strip.appendChild(cell);
     });
-    // Сначала фотографии, затем Pages — как и в живом ряду.
+    // Сначала фотографии, затем документы — как и в живом ряду.
     cardDocs(card).forEach((doc) => { strip.appendChild(pagesCell(card, doc, null, true)); });
   }
 
@@ -14955,7 +15059,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       strip.appendChild(cell);
     });
 
-    // Файлы Pages стоят справа от фотографий. Они не участвуют в
+    // Текстовые документы стоят справа от фотографий. Они не участвуют в
     // перестановке снимков: у них своё меню открытия/замены/удаления.
     cardDocs(card).forEach((doc) => {
       strip.appendChild(pagesCell(card, doc, again, false));
@@ -15889,13 +15993,13 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         return one(0);
       };
 
-      // Pages не уменьшаются, поэтому идут после фотографий отдельным этапом.
+      // Документы не уменьшаются, поэтому идут после фотографий отдельным этапом.
       // Ключи собираем с обеих сторон и из корзинки — точно как звук и снимки.
       const grabDocs = () => {
         const all = [];
         everyCard().forEach((c) => sidesDocKeys(c).forEach((k) => all.push(k)));
         if (!all.length) return Promise.resolve();
-        report('Собираю документы Pages: 0 из ' + all.length + '…', 'wait');
+        report('Собираю документы: 0 из ' + all.length + '…', 'wait');
         const one = (i) => {
           if (i >= all.length) return Promise.resolve();
           return AudioStore.get(all[i])
@@ -15903,7 +16007,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
             .then((text) => { if (text) docs[all[i]] = text; })
             .catch(() => { /* потерянный файл не мешает остальным */ })
             .then(() => {
-              report('Собираю документы Pages: ' + (i + 1) + ' из '
+              report('Собираю документы: ' + (i + 1) + ' из '
                 + all.length + '…', 'wait');
               return one(i + 1);
             });
@@ -16297,7 +16401,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         lines.push('Добавлено карточек: ' + cards);
         lines.push('Перенесено записей: ' + clipsDone);
         if (shotsDone) lines.push('Перенесено фотографий: ' + shotsDone);
-        if (docsDone) lines.push('Перенесено документов Pages: ' + docsDone);
+        if (docsDone) lines.push('Перенесено документов: ' + docsDone);
         const inFile = (info && info.inFile) || 0;
         const kept = (info && info.kept) || 0;
         // Раньше итог сводился к «нового не оказалось», и было
@@ -16924,7 +17028,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   }
 
   /**
-   * Связать Pages из файла с нашей стороной карточки.
+   * Связать текстовые документы из файла с нашей стороной карточки.
    *
    * Пустая связь тоже нужна: в режиме «как в файле» она говорит, что в
    * файле на этой стороне документов нет и свои нужно убрать.
@@ -16936,11 +17040,13 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       return;
     }
     docs.forEach((doc) => {
+      const kind = docKind(doc.name, doc.type);
+      if (!kind) return;
       out.push({
         from: doc.id,
         card: mine,
-        name: pagesName(doc.name),
-        type: PAGES_MIME,
+        name: documentName(doc.name, kind),
+        type: documentMime(doc.name, doc.type),
         size: doc.size || 0,
         modified: doc.modified || 0,
         existing: !!existing,
@@ -16948,7 +17054,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     });
   }
 
-  /** Разложить сами файлы Pages по только что созданным карточкам. */
+  /** Разложить сами документы по только что созданным карточкам. */
   function importDocs(links, docs, say, onDone, mode) {
     const all = links || [];
     if (mode === 'mirror') {
@@ -16969,17 +17075,19 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     let ok = 0;
     const finish = () => { save(); render(); if (onDone) onDone(ok); };
     if (!todo.length) { finish(); return; }
-    if (say) say('Переношу документы Pages: 0 из ' + todo.length + '…');
+    if (say) say('Переношу документы: 0 из ' + todo.length + '…');
     const step = (i) => {
       if (i >= todo.length) { finish(); return; }
       const link = todo[i];
       const cont = () => {
-        if (say) say('Переношу документы Pages: ' + (i + 1) + ' из '
+        if (say) say('Переношу документы: ' + (i + 1) + ' из '
           + todo.length + '…');
         step(i + 1);
       };
       const blob = AudioStore.fromText(docs[link.from]);
       if (!blob || !blob.size) { cont(); return; }
+      const kind = docKind(link.name, link.type);
+      if (!kind) { cont(); return; }
       const key = docKey();
       AudioStore.put(key, blob)
         .then(() => AudioStore.get(key))
@@ -16988,8 +17096,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           if (!Array.isArray(link.card.docs)) link.card.docs = [];
           link.card.docs.push({
             id: key,
-            name: pagesName(link.name),
-            type: PAGES_MIME,
+            name: documentName(link.name, kind),
+            type: documentMime(link.name, link.type),
             size: back.size,
             modified: link.modified || 0,
           });
