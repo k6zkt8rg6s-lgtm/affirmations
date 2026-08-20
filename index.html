@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-eC5+Nz7JUyJDSWIYa9P5yxBD5ogvesci9EM5XuuV51A=';
-               style-src 'sha256-XHA/ekrEyOJGFygW/D3fhdV+E9WvWslJ5y+W2tZf1R4=';
+               script-src 'sha256-uHa0T1ZTb1hYybFC3aO+CF/rhJGzZrWfnaDsOt/2hDY=';
+               style-src 'sha256-mmSYbQSPe/S7Jur5s7LfEkLwxyMg6AsdR7jtoEM90Pw=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1633,6 +1633,44 @@ body {
 .shot-cell.moving { z-index: 2; }
 .shot-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 
+/* Pages стоит в том же ряду и ровно того же размера, что фото. Цвет и
+   буква дают понять тип даже на маленьком экране, а короткое имя — какой
+   именно файл прикреплён. */
+.doc-cell {
+  display: grid;
+  grid-template-rows: 28px 1fr;
+  align-items: center;
+  justify-items: center;
+  padding: 3px 3px 2px;
+  background: rgba(255, 255, 255, .92);
+  border: 1px solid rgba(203, 98, 32, .28);
+  color: #74300E;
+}
+.doc-pages-icon {
+  width: 22px;
+  height: 27px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(145deg, #FFB04A, #E66E24);
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 800;
+  box-shadow: 0 1px 3px rgba(102, 43, 10, .22);
+}
+.doc-cell-name {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 7px;
+  line-height: 10px;
+  font-weight: 650;
+  text-align: center;
+}
+.doc-cell.took .doc-pages-icon { transform: scale(1.08); }
+
 /* Снимок на весь экран. Чёрный фон и ничего лишнего: смотреть так
    смотреть. Закрывается крестиком, нажатием мимо снимка и клавишей. */
 .shot-view {
@@ -1647,6 +1685,9 @@ body {
   /* Горизонталь забираем себе: по ней листают снимки. Всё остальное
      остаётся браузеру — увеличение двумя пальцами тут кстати. */
   touch-action: pan-y pinch-zoom;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 /* Каретка со снимками: в ней три места — предыдущий, текущий и
    следующий. Двигается только она, а снимки внутри стоят неподвижно.
@@ -1675,9 +1716,18 @@ body {
 }
 
 .shot-full {
-  max-width: 100%;
-  max-height: 100%;
+  /* Не max-width/max-height, а явная рамка текущего экрана. Safari
+     на iPhone после поворота иногда оставлял заменяемому img старый
+     внутренний размер, и фото выглядело зумированным. Эта рамка
+     пересчитывается сразу при смене ориентации; contain всегда показывает
+     все четыре края. */
+  width: calc(100% - 24px);
+  height: calc(100% - 24px);
+  max-width: none;
+  max-height: none;
   object-fit: contain;
+  object-position: center;
+  box-sizing: border-box;
   border-radius: 6px;
   /* Снимок тянут вбок, чтобы перейти к следующему. Браузер норовит
      вместо этого начать своё перетаскивание картинки — на компьютере
@@ -2910,7 +2960,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '16.08.2026, 23:06';
+  const BUILD = '20.08.2026, 18:56';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -4203,6 +4253,228 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // экрану сначала появиться светлым и только затем перекраситься.
   applyTheme();
 
+/* ─── 05d-docs-data.js ─────────────────────────────────────────────────
+ * Документы Pages, прикреплённые к отдельной стороне карточки
+ *
+ * Часть общего кода приложения. Собирается: python3 build.py
+ * Карта всех частей: КАРТА-ПРОЕКТА.md
+ * ───────────────────────────────────────────────────────────── */
+
+  // Сам файл лежит в том же IndexedDB, что звук и фото. В JSON
+  // карточки хранится только безопасное описание: ключ, имя,
+  // тип и размер. Так файл не может попасть в DOM или выполниться.
+  const DOCS_MAX = 20;
+  const DOC_MAX_MB = 50;
+  const PAGES_MIME = 'application/vnd.apple.pages';
+
+  /** Отдельный вид ключа, чтобы не спутать со звуком и снимками. */
+  const docKey = () => 'd-' + uid();
+
+  function pagesName(value) {
+    let name = String(value || '').replace(/[\u0000-\u001F\u007F]/g, '').trim();
+    if (!name) name = 'Документ.pages';
+    name = name.slice(0, 180);
+    if (!/\.pages$/i.test(name)) name += '.pages';
+    return name;
+  }
+
+  function isPagesFile(file) {
+    if (!file) return false;
+    const name = String(file.name || '');
+    const type = String(file.type || '').toLowerCase();
+    return /\.pages$/i.test(name) || type === PAGES_MIME
+      || type === 'application/x-iwork-pages-sffpages';
+  }
+
+  function cardDocs(card) {
+    const list = (card && Array.isArray(card.docs)) ? card.docs : [];
+    return list.filter((d) => d && typeof d.id === 'string' && d.id
+      && typeof d.name === 'string' && d.name);
+  }
+
+  function sanitizeDocs(value) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const raw of value) {
+      if (!raw || typeof raw !== 'object') continue;
+      const id = String(raw.id || '').slice(0, 64);
+      if (!id) continue;
+      const size = (typeof raw.size === 'number' && isFinite(raw.size) && raw.size > 0)
+        ? Math.min(200 * 1024 * 1024, Math.round(raw.size)) : 0;
+      const modified = (typeof raw.modified === 'number' && isFinite(raw.modified)
+        && raw.modified > 0) ? Math.round(raw.modified) : 0;
+      out.push({
+        id: id,
+        name: pagesName(raw.name),
+        type: PAGES_MIME,
+        size: size,
+        modified: modified,
+      });
+      if (out.length >= DOCS_MAX) break;
+    }
+    return out;
+  }
+
+  function docKeys(card) { return cardDocs(card).map((d) => d.id); }
+
+/* ─── 05e-note-paste.js ────────────────────────────────────────────────────
+ * Безопасная вставка оформленного текста в заметку
+ *
+ * Часть общего кода приложения. Собирается: python3 build.py
+ * ──────────────────────────────────────────────────────────── */
+
+  // Чужой HTML никогда не попадает в contenteditable. Мы читаем из
+  // буфера только текст и несколько разрешённых признаков. Скрипты,
+  // стили, картинки и всё остальное отбрасываются.
+
+  function decodePasteEntities(raw) {
+    return String(raw || '')
+      .replace(/&#(\d+);?/g, (all, n) => {
+        const cp = Number(n);
+        try { return cp > 0 && cp <= 0x10FFFF ? String.fromCodePoint(cp) : ''; }
+        catch (e) { return ''; }
+      })
+      .replace(/&#x([0-9a-f]+);?/gi, (all, n) => {
+        const cp = parseInt(n, 16);
+        try { return cp > 0 && cp <= 0x10FFFF ? String.fromCodePoint(cp) : ''; }
+        catch (e) { return ''; }
+      })
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'");
+  }
+
+  function pasteAddMark(cell, letter) {
+    const c = noteCell(cell);
+    if (c.m.indexOf(letter) < 0) c.m = (c.m + letter).split('').sort().join('');
+    return c;
+  }
+
+  function pasteAttribute(tag, name) {
+    const re = new RegExp('\\s' + name + '\\s*=\\s*(?:"([^"]*)"|\\\'([^\\\']*)\\\'|([^\\s>]+))', 'i');
+    const m = re.exec(tag);
+    return decodePasteEntities(m ? (m[1] || m[2] || m[3] || '') : '');
+  }
+
+  /** HTML буфера → текст и безопасное оформление каждой буквы. */
+  function notePasteFromHtml(html, base) {
+    const source = String(html || '');
+    if (!source || source.indexOf('<') < 0) return null;
+    const tokens = source.match(/<!--[\s\S]*?-->|<[^>]*>|[^<]+/g) || [];
+    const stack = [{ tag: '', style: noteCell(base) }];
+    const blockTags = { p: 1, div: 1, li: 1, h1: 1, h2: 1, h3: 1,
+      h4: 1, h5: 1, h6: 1, blockquote: 1, pre: 1, tr: 1 };
+    let text = '';
+    const cells = [];
+    let hidden = 0;
+
+    const put = (value, style) => {
+      value = String(value || '').replace(/\r\n?/g, '\n');
+      if (!value) return;
+      text += value;
+      for (let i = 0; i < value.length; i++) {
+        cells.push(value[i] === '\n' ? noteCell() : noteCell(style));
+      }
+    };
+    const newline = () => {
+      if (text && text[text.length - 1] !== '\n') put('\n', noteCell());
+    };
+
+    tokens.forEach((token) => {
+      if (token.slice(0, 4) === '<!--') return;
+      if (token[0] !== '<') {
+        if (!hidden) put(decodePasteEntities(token), stack[stack.length - 1].style);
+        return;
+      }
+      const close = /^\s*<\s*\//.test(token);
+      const m = /^\s*<\s*\/?\s*([a-z0-9]+)/i.exec(token);
+      if (!m) return;
+      const tag = m[1].toLowerCase();
+      if (tag === 'script' || tag === 'style' || tag === 'noscript') {
+        hidden += close ? -1 : 1; hidden = Math.max(0, hidden); return;
+      }
+      if (hidden) return;
+      if (tag === 'br' && !close) { put('\n', noteCell()); return; }
+      if (close) {
+        for (let i = stack.length - 1; i > 0; i--) {
+          const frame = stack.pop();
+          if (frame.tag === tag) break;
+        }
+        if (blockTags[tag]) newline();
+        return;
+      }
+      if (blockTags[tag]) newline();
+      let style = noteCell(stack[stack.length - 1].style);
+      if (tag === 'b' || tag === 'strong') style = pasteAddMark(style, 'b');
+      if (tag === 'i' || tag === 'em') style = pasteAddMark(style, 'i');
+      if (tag === 'u' || tag === 'ins') style = pasteAddMark(style, 'u');
+      if (tag === 's' || tag === 'strike' || tag === 'del') style = pasteAddMark(style, 's');
+      if (tag === 'a') style.link = sanitizeLink(pasteAttribute(token, 'href'));
+      const css = pasteAttribute(token, 'style').toLowerCase();
+      const weight = /font-weight\s*:\s*([^;]+)/.exec(css);
+      if (weight && (/bold|bolder/.test(weight[1]) || Number(weight[1]) >= 600)) {
+        style = pasteAddMark(style, 'b');
+      }
+      if (/font-style\s*:\s*(italic|oblique)/.test(css)) style = pasteAddMark(style, 'i');
+      const deco = /text-decoration(?:-line)?\s*:\s*([^;]+)/.exec(css);
+      if (deco && /underline/.test(deco[1])) style = pasteAddMark(style, 'u');
+      if (deco && /line-through/.test(deco[1])) style = pasteAddMark(style, 's');
+      if (!/\/\s*>$/.test(token) && !{ img: 1, meta: 1, link: 1, input: 1,
+        hr: 1, source: 1, wbr: 1 }[tag]) stack.push({ tag: tag, style: style });
+    });
+
+    // Разметка абзаца даёт служебный перевод строки в самом конце.
+    // Он не часть скопированного текста — убираем.
+    while (text.endsWith('\n')) { text = text.slice(0, -1); cells.pop(); }
+    return text ? { text: text, cells: cells } : null;
+  }
+
+  /**
+   * Запасной путь для приложений, которые кладут в буфер не HTML,
+   * а Markdown. Парные **звёздочки** и ~~знаки~~ не показываются
+   * как кавычки, а становятся оформлением.
+   */
+  function notePasteFromPlain(raw, base) {
+    const source = String(raw || '').replace(/\r\n?/g, '\n');
+    const pairs = [
+      { mark: '**', m: 'b' }, { mark: '__', m: 'b' }, { mark: '~~', m: 's' },
+    ];
+    let text = '';
+    const cells = [];
+    const stack = [];
+    let at = 0;
+    const styleNow = () => {
+      let style = noteCell(base);
+      stack.forEach((p) => { style = pasteAddMark(style, p.m); });
+      return style;
+    };
+    while (at < source.length) {
+      let pair = null;
+      for (const p of pairs) {
+        if (source.slice(at, at + p.mark.length) !== p.mark) continue;
+        const opened = stack.length && stack[stack.length - 1].mark === p.mark;
+        if (opened || source.indexOf(p.mark, at + p.mark.length) >= 0) { pair = p; break; }
+      }
+      if (pair) {
+        if (stack.length && stack[stack.length - 1].mark === pair.mark) stack.pop();
+        else stack.push(pair);
+        at += pair.mark.length;
+        continue;
+      }
+      text += source[at];
+      cells.push(source[at] === '\n' ? noteCell() : styleNow());
+      at++;
+    }
+    return { text: text, cells: cells };
+  }
+
+  function notePasteData(html, plain, base) {
+    return notePasteFromHtml(html, base) || notePasteFromPlain(plain, base);
+  }
+
 /* ─── 06-sides.js ──────────────────────────────────────────────────────
  * Две стороны карточки: лицо и оборот
  *
@@ -4281,6 +4553,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       inList: raw.inList === true,
       listAt: sanitizeListAt(raw.listAt),
       shots: sanitizeShots(raw.shots),
+      // Документы Pages у лица и оборота тоже разные.
+      docs: sanitizeDocs(raw.docs),
     };
     const noteDoc = sanitizeNoteDoc(raw.noteDoc, back.note);
     if (noteDoc) back.noteDoc = noteDoc;
@@ -4303,7 +4577,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         headAlign: ALIGN_DEFAULT, headInk: INK_DEFAULT,
         link: '', note: '',
         audio: false, audioLen: 0, parts: [], peaks: [], at: 0,
-        inList: false, listAt: 0, extra: [], shots: [],
+        inList: false, listAt: 0, extra: [], shots: [], docs: [],
       };
     }
     return card.back;
@@ -4352,6 +4626,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     if (String(b.link || '').trim()) return true;
     if (audioSlots(b).length) return true;
     if (cardShots(b).length) return true;
+    if (cardDocs(b).length) return true;
     return false;
   }
 
@@ -4375,6 +4650,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     b.parts = [];
     b.extra = [];
     b.shots = [];
+    b.docs = [];
     // Записи ещё нет — значит, и в очереди ей пока делать нечего.
     // Отметка вернётся вместе со звуком, когда он ляжет в хранилище.
     b.inList = false;
@@ -4402,6 +4678,13 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   function sidesShotKeys(card) {
     let out = [];
     cardSides(card).forEach((s) => { out = out.concat(shotKeys(s)); });
+    return out;
+  }
+
+  /** Все ключи документов Pages карточки — с обеих сторон. */
+  function sidesDocKeys(card) {
+    let out = [];
+    cardSides(card).forEach((s) => { out = out.concat(docKeys(s)); });
     return out;
   }
 /* ─── 06-store.js ──────────────────────────────────────────────────────
@@ -4485,6 +4768,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       // Снимки: только номера и размеры. Сами картинки лежат
       // в хранилище устройства, как и голос.
       shots: sanitizeShots(c.shots),
+      // Так же хранятся файлы Pages; здесь только их описания.
+      docs: sanitizeDocs(c.docs),
       // Какой стороной карточка лежит. Помнится вместе с ней: как
       // оставил, так в следующий раз и откроется.
       side: sanitizeSideNo(c.side),
@@ -8283,11 +8568,15 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     if (shotBefore) shotLine.appendChild(shotBefore);
     if (shotAfter) shotLine.appendChild(shotAfter);
     shotLine.appendChild(shotStrip);
-    // Место под ряд держим, если снимки есть хоть у одной из трёх: иначе
-    // на подъезде соседней экран подпрыгивал бы на высоту ряда.
-    const anyShots = [card, deck.cards[(i - 1 + total) % total],
-      deck.cards[(i + 1) % total]].some((c) => c && cardShots(faceOf(c)).length);
-    const shotDeck = el('div', { class: 'shot-deck' + (anyShots ? ' open' : '') },
+    // Место под ряд держим, если фотографии или Pages есть хоть у одной
+    // из трёх карточек: иначе на подъезде соседней экран подпрыгивал бы.
+    const anyAttachments = [card, deck.cards[(i - 1 + total) % total],
+      deck.cards[(i + 1) % total]].some((c) => {
+        if (!c) return false;
+        const f = faceOf(c);
+        return cardShots(f).length || cardDocs(f).length;
+      });
+    const shotDeck = el('div', { class: 'shot-deck' + (anyAttachments ? ' open' : '') },
       [shotLine]);
     if (before) track.appendChild(before);
     if (after) track.appendChild(after);
@@ -9752,6 +10041,57 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       renderEditor({ s: at, e: at }, true); commit();
     }
 
+    /**
+     * Вставить текст, у которого каждая буква уже имеет безопасное
+     * оформление. Это не HTML: к этому моменту от буфера остались
+     * только текст и noteCell. Переводы строк разбивают вставку на абзацы,
+     * как и обычный Enter.
+     */
+    function insertStyled(value, sourceCells) {
+      syncFromDom(); const range = selectionRange(); pushUndo();
+      const pos = deleteRange(range);
+      value = String(value || '').replace(/\r\n?/g, '\n');
+      const room = Math.max(0, LIMITS.note - flatText().length);
+      value = value.slice(0, room);
+      const cells = Array.isArray(sourceCells)
+        ? sourceCells.slice(0, value.length).map(noteCell) : [];
+      while (cells.length < value.length) cells.push(noteCell(typing));
+
+      const block = blocks[pos.block];
+      const before = block.text.slice(0, pos.at), after = block.text.slice(pos.at);
+      const beforeCells = block.cells.slice(0, pos.at), afterCells = block.cells.slice(pos.at);
+      const pieces = value.split('\n');
+      const made = [];
+      const continuationKind = ['bullet', 'number', 'check'].indexOf(block.kind) >= 0
+        ? block.kind : 'p';
+      let cellAt = 0;
+      pieces.forEach((piece, k) => {
+        const partCells = cells.slice(cellAt, cellAt + piece.length).map(noteCell);
+        cellAt += piece.length + (k < pieces.length - 1 ? 1 : 0);
+        const item = {
+          text: piece,
+          kind: k === 0 ? block.kind : continuationKind,
+          align: block.align,
+          checked: false,
+          cells: partCells,
+        };
+        if (k === 0) {
+          item.text = before + item.text;
+          item.cells = beforeCells.concat(item.cells);
+        }
+        if (k === pieces.length - 1) {
+          item.text += after;
+          item.cells = item.cells.concat(afterCells);
+        }
+        made.push(item);
+      });
+      blocks.splice(pos.block, 1, ...made);
+      const localAt = pieces.length === 1
+        ? before.length + pieces[0].length : pieces[pieces.length - 1].length;
+      const at = localToGlobal(pos.block + made.length - 1, localAt);
+      renderEditor({ s: at, e: at }, true); commit();
+    }
+
     function enter() {
       syncFromDom(); const range = selectionRange();
       const here = globalToLocal(range.s);
@@ -10071,8 +10411,10 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       const data = ev.clipboardData || (typeof window !== 'undefined' && window.clipboardData);
       if (!data || typeof data.getData !== 'function') return;
       const text = data.getData('text/plain');
+      const html = data.getData('text/html');
       if (ev.preventDefault) ev.preventDefault();
-      insertPlain(text, typing);
+      const pasted = notePasteData(html, text, typing);
+      insertStyled(pasted.text, pasted.cells);
     });
 
     // Нажатие по пустому месту листа означает «писать в конце». Safari и
@@ -10357,18 +10699,16 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // Записи хранятся на самом устройстве и целиком уезжают в файл обмена —
   // гигабайтный подкаст туда просто не пролезет. Отсюда и предел.
   //
-  // Было 25, стало 35: обычная лекция или разбор на сорок минут в 96
-  // кбит/с весит около тридцати, и в прежний предел такие файлы не
-  // помещались буквально на пару мегабайт.
+  // Предел 50 МБ нужен для длинных записей в хорошем качестве: файлы на
+  // 35–45 МБ больше не отбрасываются на входе.
   //
-  // Выше не поднимаем, и вот почему. В файле обмена запись лежит не как
-  // есть, а буквами (base64), и от этого прибавляет треть: тридцать пять
-  // мегабайт превращаются в сорок семь. Собирается такой файл целиком в
+  // В файле обмена запись лежит буквами (base64) и прибавляет примерно треть.
+  // Пятьдесят мегабайт превращаются примерно в шестьдесят семь. Файл собирается целиком в
   // памяти телефона, и несколько подобных записей рядом — это уже та
   // граница, за которой Safari на iPhone просто закрывает вкладку. При
   // приёме файла предел свой и куда больший (200 МБ), так что упереться
   // можно только здесь.
-  const PICK_MAX_MB = 35;
+  const PICK_MAX_MB = 50;
 
   /**
    * Узнать, играется ли файл здесь, и сколько он длится.
@@ -10453,7 +10793,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     });
 
     const NOT_OURS = 'Этот файл здесь не открывается. Подойдёт фотография '
-      + '(jpeg, png, heic) или запись «Диктофона» (m4a), а также mp3, wav и aac.';
+      + '(jpeg, png, heic), документ Pages (.pages) или запись «Диктофона» '
+      + '(m4a), а также mp3, wav и aac.';
 
     /**
      * Разобрать один выбранный файл.
@@ -10478,6 +10819,27 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         const looksImage = String(file.type || '').indexOf('image/') === 0;
         const looksAudio = String(file.type || '').indexOf('audio/') === 0;
         const named = /\.(m4a|mp3|wav|aac|caf|aiff?)$/i.test(file.name || '');
+
+        /** Взять Pages как отдельное вложение этой стороны. */
+        const asDoc = () => {
+          if (cardDocs(card).length >= DOCS_MAX) { done('docs-full'); return; }
+          const key = docKey();
+          AudioStore.put(key, file)
+            .then(() => AudioStore.get(key))
+            .then((back) => {
+              if (!back || !back.size) { done('store'); return; }
+              if (!Array.isArray(card.docs)) card.docs = [];
+              card.docs.push({
+                id: key,
+                name: pagesName(file.name),
+                type: PAGES_MIME,
+                size: file.size,
+                modified: Number(file.lastModified) || Date.now(),
+              });
+              save(); done('doc');
+            })
+            .catch(() => done('store'));
+        };
 
         /** Взять как фотографию. next — что делать, если не вышло. */
         const asShot = (next) => {
@@ -10536,6 +10898,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           }).catch(() => done('bad'));
         };
 
+        if (isPagesFile(file)) { asDoc(); return; }
         if (looksImage) { asShot(() => done('bad-image')); return; }
         if (!looksAudio && !named) { asShot(asAudio); return; }
         asAudio();
@@ -10554,12 +10917,12 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       }
 
       busy(true);
-      const got = { shot: 0, audio: 0 };
+      const got = { shot: 0, audio: 0, doc: 0 };
       const lost = [];
       const step = (i) => {
         if (i >= files.length) { finish(); return; }
         takeOne(files[i]).then((how) => {
-          if (how === 'shot' || how === 'audio') got[how]++;
+          if (how === 'shot' || how === 'audio' || how === 'doc') got[how]++;
           else lost.push(how);
           step(i + 1);
         });
@@ -10568,7 +10931,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       /** Один итог на всё: файлов бывает выбрано много. */
       const finish = () => {
         busy(false);
-        if (got.shot || got.audio) render();
+        if (got.shot || got.audio || got.doc) render();
         if (!lost.length) return;
         const one = files.length === 1;
         const why = lost[0];
@@ -10579,6 +10942,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
             : why === 'empty' ? 'Файл пустой.'
             : why === 'full' ? 'На карточке уже ' + SHOTS_MAX
                 + ' фотографий — больше не поместится.'
+            : why === 'docs-full' ? 'На этой стороне уже ' + DOCS_MAX
+                + ' документов Pages — больше не поместится.'
             : why === 'tracks' ? 'На карточке уже ' + TRACKS_MAX + ' записи — '
                 + 'больше не поместится. Удалите одну крестиком на её дорожке.'
             : why === 'store' ? 'Не удалось сохранить. Попробуйте ещё раз.'
@@ -10590,12 +10955,16 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         const lines = [];
         if (got.shot) lines.push('Добавлено фотографий: ' + got.shot + '.');
         if (got.audio) lines.push('Добавлено записей: ' + got.audio + '.');
+        if (got.doc) lines.push('Добавлено документов Pages: ' + got.doc + '.');
         lines.push('Не удалось взять: ' + lost.length + '.');
         if (lost.indexOf('big') >= 0) {
           lines.push('Часть файлов больше ' + PICK_MAX_MB + ' МБ.');
         }
         if (lost.indexOf('full') >= 0) {
           lines.push('На карточке уже ' + SHOTS_MAX + ' фотографий.');
+        }
+        if (lost.indexOf('docs-full') >= 0) {
+          lines.push('На стороне уже ' + DOCS_MAX + ' документов Pages.');
         }
         if (lost.indexOf('bad') >= 0 || lost.indexOf('bad-image') >= 0) {
           lines.push('Часть файлов здесь не открывается.');
@@ -10690,6 +11059,14 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           if (append) { redraw(); }
           return;
         }
+        // Один и тот же предел для загруженного и записанного звука. Пятиминутная
+        // запись обычно в десятки раз меньше, но проверка не даёт необычному
+        // формату молча сломать обмен между устройствами.
+        if (blob.size > PICK_MAX_MB * 1024 * 1024) {
+          alert('Запись больше ' + PICK_MAX_MB + ' МБ и не поместится в файле обмена.');
+          if (append) redraw();
+          return;
+        }
 
         // ---- дозапись: новый кусок в конец, всё остальное складываем
         if (append) {
@@ -10774,7 +11151,6 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   function stopRecording() {
     if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop();
   }
-
 /* ─── 17-wave.js ───────────────────────────────────────────────────────
  * Форма волны: столбики, лицо плеера, склейка кусков без стыка
  *
@@ -13436,6 +13812,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     sidesAudioKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
     // И снимки: они лежат там же и точно так же остались бы висеть
     sidesShotKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+    // Прикреплённые Pages тоже двоичные файлы в том же хранилище.
+    sidesDocKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
     deck.cards = deck.cards.filter((c) => c.id !== card.id);
     if (view.name === 'read') {
       if (deck.cards.length === 0) {
@@ -13942,6 +14320,147 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   }
 
   /**
+   * Отдать прикреплённый Pages системе.
+   *
+   * На iPhone это окно «Поделиться»: в нём можно сразу выбрать Pages.
+   * На компьютере браузер, который не умеет отдавать файлы приложениям,
+   * скачивает его под исходным именем. Это единственный путь, который Safari
+   * разрешает веб-приложению.
+   */
+  function openCardDoc(doc) {
+    return AudioStore.get(doc.id).then((blob) => {
+      if (!blob || !blob.size) { alert('Файл не найден в хранилище.'); return false; }
+      let file = null;
+      try { file = new File([blob], pagesName(doc.name), { type: PAGES_MIME }); }
+      catch (e) { file = null; }
+      if (file && typeof navigator !== 'undefined' && navigator.canShare
+          && navigator.share && navigator.canShare({ files: [file] })) {
+        return navigator.share({ files: [file] })
+          .then(() => true)
+          .catch(() => false);       // отмена не является ошибкой
+      }
+      let url = '';
+      try { url = URL.createObjectURL(blob); } catch (e) { url = ''; }
+      if (!url) { alert('Не удалось открыть файл.'); return false; }
+      const a = el('a', { attrs: { href: url, download: pagesName(doc.name) } });
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) { /* уже */ } }, 1000);
+      return true;
+    }).catch(() => { alert('Не удалось прочитать файл.'); return false; });
+  }
+
+  /** Вернуть отредактированную в Pages копию на то же место. */
+  function replaceCardDoc(doc, redraw) {
+    const input = el('input', { attrs: {
+      type: 'file', accept: '.pages,' + PAGES_MIME,
+    }, style: { display: 'none' } });
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (input.parentNode) input.parentNode.removeChild(input);
+      if (!file) return;
+      if (!isPagesFile(file)) {
+        alert('Выберите документ Pages с окончанием .pages.'); return;
+      }
+      if (file.size > DOC_MAX_MB * 1024 * 1024) {
+        alert('Документ больше ' + DOC_MAX_MB + ' МБ. Такой файл не поместится в обмене между устройствами.');
+        return;
+      }
+      AudioStore.put(doc.id, file).then(() => AudioStore.get(doc.id)).then((back) => {
+        if (!back || !back.size) { alert('Не удалось заменить файл.'); return; }
+        doc.name = pagesName(file.name);
+        doc.type = PAGES_MIME;
+        doc.size = file.size;
+        doc.modified = Number(file.lastModified) || Date.now();
+        save();
+        if (typeof redraw === 'function') redraw();
+      }).catch(() => alert('Не удалось заменить файл.'));
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  /** Меню Pages: открыть, вернуть обновлённую копию или удалить. */
+  function docMenu(card, doc, redraw) {
+    const wrap = el('div', { class: 'modal' });
+    const close = () => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    const item = (sign, name, action) => el('button', {
+      class: 'menu-item', attrs: { type: 'button' }, on: { click: action },
+    }, [
+      el('span', { class: 'menu-sign', text: sign }),
+      el('span', { class: 'menu-body' }, [el('span', { class: 'menu-name', text: name })]),
+    ]);
+    wrap.appendChild(el('div', { class: 'sheet' }, [
+      el('h3', { text: pagesName(doc.name) }),
+      el('div', { class: 'menu-list' }, [
+        item('↗', 'Открыть или передать в Pages', () => { close(); openCardDoc(doc); }),
+        item('↻', 'Заменить обновлённым файлом', () => { close(); replaceCardDoc(doc, redraw); }),
+        item('✕', 'Удалить файл', () => {
+          close();
+          if (!confirm('Удалить этот документ Pages с карточки?')) return;
+          AudioStore.del(doc.id).catch(() => {});
+          card.docs = cardDocs(card).filter((d) => d !== doc);
+          save(); if (typeof redraw === 'function') redraw();
+        }),
+      ]),
+      el('div', { class: 'sheet-actions' }, [
+        el('button', { class: 'btn sec', attrs: { type: 'button' }, text: 'Отмена',
+          on: { click: close } }),
+      ]),
+    ]));
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) close(); });
+    document.body.appendChild(wrap);
+    return wrap;
+  }
+
+  /** Квадрат Pages того же размера, что миниатюра фотографии. */
+  function pagesCell(card, doc, redraw, still) {
+    const icon = el('span', { class: 'doc-pages-icon', attrs: { 'aria-hidden': 'true' }, text: 'P' });
+    const name = el('span', { class: 'doc-cell-name', text: String(doc.name || '').replace(/\.pages$/i, '') });
+    const cell = el(still ? 'div' : 'button', {
+      class: 'shot-cell doc-cell',
+      attrs: still ? { 'aria-hidden': 'true' } : {
+        type: 'button', 'aria-label': 'Документ Pages ' + pagesName(doc.name)
+          + ': нажмите, чтобы открыть; удержите для меню',
+      },
+    }, [icon, name]);
+    if (still) return cell;
+
+    let timer = null, live = false, held = false, moved = false;
+    let x0 = 0, y0 = 0;
+    const stop = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    cell.addEventListener('pointerdown', (ev) => {
+      if (!ev.isPrimary) return;
+      live = true; held = false; moved = false; x0 = ev.clientX; y0 = ev.clientY;
+      stop();
+      timer = setTimeout(() => {
+        timer = null; held = true;
+        cell.className += ' took';
+      }, SHOT_HOLD);
+    });
+    cell.addEventListener('pointermove', (ev) => {
+      if (!live) return;
+      if (Math.abs(ev.clientX - x0) > SHOT_SLOP || Math.abs(ev.clientY - y0) > SHOT_SLOP) {
+        moved = true; if (!held) { stop(); live = false; }
+      }
+    });
+    cell.addEventListener('pointerup', () => {
+      stop(); if (!live) return; live = false;
+      cell.className = cell.className.replace(/ took\b/g, '');
+      if (held) { docMenu(card, doc, redraw); return; }
+      if (!moved) openCardDoc(doc);
+    });
+    cell.addEventListener('pointercancel', () => {
+      stop(); live = false; cell.className = cell.className.replace(/ took\b/g, '');
+    });
+    cell.addEventListener('contextmenu', (ev) => {
+      if (ev.preventDefault) ev.preventDefault();
+      stop(); live = false; docMenu(card, doc, redraw);
+    });
+    cell.addEventListener('click', (ev) => { if (ev.preventDefault) ev.preventDefault(); });
+    return cell;
+  }
+
+  /**
    * Снимок на весь экран — как в галерее.
    *
    * Устроено так же, как перелистывание карточек в колоде, и намеренно:
@@ -13969,10 +14488,18 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     const a1 = slide(), a2 = slide(), a3 = slide();
     let left = a1, mid = a2, right = a3;
     const track = el('div', { class: 'shot-track' }, many ? [a1, a2, a3] : [a2]);
+    let resizeHandler = null;
 
     const close = () => {
       if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
       if (keyHandler) document.removeEventListener('keydown', keyHandler);
+      if (resizeHandler && typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('resize', resizeHandler);
+        window.removeEventListener('orientationchange', resizeHandler);
+        if (window.visualViewport && window.visualViewport.removeEventListener) {
+          window.visualViewport.removeEventListener('resize', resizeHandler);
+        }
+      }
     };
 
     /**
@@ -14170,6 +14697,17 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     paint();
     place(0, 0);
     document.body.appendChild(wrap);
+    // При повороте iPhone Safari дважды меняет видимую область:
+    // сначала грубый viewport, затем visualViewport с учётом панелей. На оба
+    // события заново сажаем снимки по центру уже нового экрана.
+    resizeHandler = () => { place(0, 0); seat(); };
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('resize', resizeHandler);
+      window.addEventListener('orientationchange', resizeHandler);
+      if (window.visualViewport && window.visualViewport.addEventListener) {
+        window.visualViewport.addEventListener('resize', resizeHandler);
+      }
+    }
     // Со следующего кадра ширина окна известна — сажаем соседей точно
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(() => { seat(); });
@@ -14254,6 +14792,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       showShot(img, shot.id);
       strip.appendChild(cell);
     });
+    // Сначала фотографии, затем Pages — как и в живом ряду.
+    cardDocs(card).forEach((doc) => { strip.appendChild(pagesCell(card, doc, null, true)); });
   }
 
   /**
@@ -14414,8 +14954,13 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       });
       strip.appendChild(cell);
     });
-  }
 
+    // Файлы Pages стоят справа от фотографий. Они не участвуют в
+    // перестановке снимков: у них своё меню открытия/замены/удаления.
+    cardDocs(card).forEach((doc) => {
+      strip.appendChild(pagesCell(card, doc, again, false));
+    });
+  }
 /* ─── 24-pickers.js ────────────────────────────────────────────────────
  * Выбор карточки, окно напоминаний, окно обновления
  *
@@ -15295,6 +15840,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       if (withAudio.length) report('Собираю записи: 0 из ' + withAudio.length + '…', 'wait');
       const clips = {};
       const shots = {};
+      const docs = {};
       let done = 0;
 
       const next = (i) => {
@@ -15343,7 +15889,29 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         return one(0);
       };
 
-      return next(0).then(grabShots).then(() => {
+      // Pages не уменьшаются, поэтому идут после фотографий отдельным этапом.
+      // Ключи собираем с обеих сторон и из корзинки — точно как звук и снимки.
+      const grabDocs = () => {
+        const all = [];
+        everyCard().forEach((c) => sidesDocKeys(c).forEach((k) => all.push(k)));
+        if (!all.length) return Promise.resolve();
+        report('Собираю документы Pages: 0 из ' + all.length + '…', 'wait');
+        const one = (i) => {
+          if (i >= all.length) return Promise.resolve();
+          return AudioStore.get(all[i])
+            .then((blob) => (blob ? AudioStore.toText(blob) : null))
+            .then((text) => { if (text) docs[all[i]] = text; })
+            .catch(() => { /* потерянный файл не мешает остальным */ })
+            .then(() => {
+              report('Собираю документы Pages: ' + (i + 1) + ' из '
+                + all.length + '…', 'wait');
+              return one(i + 1);
+            });
+        };
+        return one(0);
+      };
+
+      return next(0).then(grabShots).then(grabDocs).then(() => {
         clear(status);
         // Помечаем файл: что это и сколько записей внутри. Иначе
         // резервную копию (только текст) не отличить от файла обмена —
@@ -15363,6 +15931,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           clipsExpected: withAudio.length,
           clips: clips,
           shots: shots,
+          docs: docs,
         }), null, 2);
       });
     }
@@ -15711,10 +16280,13 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         ? parsed.clips : {};
       const inShots = (parsed && typeof parsed.shots === 'object' && parsed.shots)
         ? parsed.shots : {};
+      const inDocs = (parsed && typeof parsed.docs === 'object' && parsed.docs)
+        ? parsed.docs : {};
       importClips(res.audioLinks, clips, {
         set text(v) { report(v, 'wait'); },
       }, res.added, (cards, clipsDone, info) => {
         importShots(res.shotLinks, inShots, (v) => report(v, 'wait'), (shotsDone) => {
+        importDocs(res.docLinks, inDocs, (v) => report(v, 'wait'), (docsDone) => {
         clear(sheet);
         sheet.appendChild(el('h3', { text: 'Готово' }));
         const lines = [];
@@ -15725,6 +16297,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         lines.push('Добавлено карточек: ' + cards);
         lines.push('Перенесено записей: ' + clipsDone);
         if (shotsDone) lines.push('Перенесено фотографий: ' + shotsDone);
+        if (docsDone) lines.push('Перенесено документов Pages: ' + docsDone);
         const inFile = (info && info.inFile) || 0;
         const kept = (info && info.kept) || 0;
         // Раньше итог сводился к «нового не оказалось», и было
@@ -15755,6 +16328,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           el('button', { class: 'btn', attrs: { type: 'button' }, text: 'Закрыть',
                          on: { click: () => { close(); render(); } } }),
         ]));
+        }, mode);
         }, mode);
       }, mode);
     }
@@ -15990,7 +16564,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     if (!c) return null;
     c.id = uid();
     c.audio = false; c.audioLen = 0; c.parts = [];
-    c.extra = []; c.shots = [];
+    c.extra = []; c.shots = []; c.docs = [];
     // Записи ещё нет — значит, и в очереди ей пока делать нечего
     c.inList = false; c.listAt = 0;
     const back = backFromFile(inCard.back);
@@ -16087,6 +16661,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
             if (keep.back) {
               audioSlots(keep.back).forEach((sl) => dropped.push(sl));
               shotKeys(keep.back).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+              docKeys(keep.back).forEach((k) => { AudioStore.del(k).catch(() => {}); });
             }
             const inBack = backFromFile(inCard.back);
             if (inBack) keep.back = inBack;
@@ -16108,6 +16683,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
                               ink: sanitizeInk(inCard.ink),
                               link: sanitizeLink(inCard.link),
                               note: clampStr(inCard.note, LIMITS.note),
+                              docs: [],
                               // Место под дополнительные дорожки есть у
                               // каждой карточки: без него один и тот же
                               // файл, применённый дважды, менял бы вид
@@ -16159,6 +16735,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     dropped.forEach((c) => {
       audioKeys(c).forEach((k) => { AudioStore.del(k).catch(() => {}); });
       shotKeys(c).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+      docKeys(c).forEach((k) => { AudioStore.del(k).catch(() => {}); });
     });
     return dropped.length;
   }
@@ -16173,6 +16750,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   function dropCardData(card, dropped) {
     sidesSlots(card).forEach((sl) => dropped.push(sl));
     sidesShotKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+    sidesDocKeys(card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
   }
 
   /**
@@ -16216,6 +16794,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       if (keep.back) {
         audioSlots(keep.back).forEach((sl) => dropped.push(sl));
         shotKeys(keep.back).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+        docKeys(keep.back).forEach((k) => { AudioStore.del(k).catch(() => {}); });
       }
       // Всё, кроме номера и своей первой записи, — из файла
       BIN_MIRRORED.forEach((f) => { keep[f] = fresh[f]; });
@@ -16344,12 +16923,90 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     step(0);
   }
 
+  /**
+   * Связать Pages из файла с нашей стороной карточки.
+   *
+   * Пустая связь тоже нужна: в режиме «как в файле» она говорит, что в
+   * файле на этой стороне документов нет и свои нужно убрать.
+   */
+  function linkDocs(inCard, mine, out, existing) {
+    const docs = cardDocs(inCard);
+    if (!docs.length) {
+      out.push({ from: '', card: mine, empty: true, existing: !!existing });
+      return;
+    }
+    docs.forEach((doc) => {
+      out.push({
+        from: doc.id,
+        card: mine,
+        name: pagesName(doc.name),
+        type: PAGES_MIME,
+        size: doc.size || 0,
+        modified: doc.modified || 0,
+        existing: !!existing,
+      });
+    });
+  }
+
+  /** Разложить сами файлы Pages по только что созданным карточкам. */
+  function importDocs(links, docs, say, onDone, mode) {
+    const all = links || [];
+    if (mode === 'mirror') {
+      const seen = [];
+      all.forEach((link) => {
+        if (!link.existing || seen.indexOf(link.card) >= 0) return;
+        seen.push(link.card);
+        docKeys(link.card).forEach((k) => { AudioStore.del(k).catch(() => {}); });
+        link.card.docs = [];
+      });
+    }
+    const todo = all.filter((link) => {
+      if (!link.from || typeof docs[link.from] !== 'string') return false;
+      // Обычное «добавить» не плодит одинаковые вложения при каждом обмене.
+      if (link.existing && mode !== 'mirror' && cardDocs(link.card).length) return false;
+      return true;
+    });
+    let ok = 0;
+    const finish = () => { save(); render(); if (onDone) onDone(ok); };
+    if (!todo.length) { finish(); return; }
+    if (say) say('Переношу документы Pages: 0 из ' + todo.length + '…');
+    const step = (i) => {
+      if (i >= todo.length) { finish(); return; }
+      const link = todo[i];
+      const cont = () => {
+        if (say) say('Переношу документы Pages: ' + (i + 1) + ' из '
+          + todo.length + '…');
+        step(i + 1);
+      };
+      const blob = AudioStore.fromText(docs[link.from]);
+      if (!blob || !blob.size) { cont(); return; }
+      const key = docKey();
+      AudioStore.put(key, blob)
+        .then(() => AudioStore.get(key))
+        .then((back) => {
+          if (!back || !back.size) { cont(); return; }
+          if (!Array.isArray(link.card.docs)) link.card.docs = [];
+          link.card.docs.push({
+            id: key,
+            name: pagesName(link.name),
+            type: PAGES_MIME,
+            size: back.size,
+            modified: link.modified || 0,
+          });
+          ok++; cont();
+        })
+        .catch(() => cont());
+    };
+    step(0);
+  }
+
   function mergeState(incoming) {
     let added = 0;
     // Пары «идентификатор в файле → карточка у нас»: по ним потом
     // разложим голосовые записи
     const audioLinks = [];
     const shotLinks = [];
+    const docLinks = [];
     for (const inSec of incoming.sections) {
       // В режиме «только добавить» несколько присланных свободных групп
       // можно безопасно собрать в одну: колоды всё равно останутся вне
@@ -16386,6 +17043,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
             // проверяется по самому хранилищу, а не по отметке.
             linkTracks(inCard, mine, audioLinks, true);
             linkShots(inCard, mine, shotLinks, true);
+            linkDocs(inCard, mine, docLinks, true);
             mergeNote(inCard, mine);
             // Оборот. Своего нет вовсе — берём из файла целиком: иначе
             // оборот, заведённый на телефоне, никогда бы не доехал до
@@ -16397,6 +17055,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
               mergeNote(inCard.back, myBack);
               linkTracks(inCard.back, myBack, audioLinks, true);
               linkShots(inCard.back, myBack, shotLinks, true);
+              linkDocs(inCard.back, myBack, docLinks, true);
             }
             continue;
           }
@@ -16424,6 +17083,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
                           ink: sanitizeInk(inCard.ink),
                           link: sanitizeLink(inCard.link),
                           note: clampStr(inCard.note, LIMITS.note),
+                          docs: [],
                           extra: [],
                           at: sanitizeAt(inCard.at),
                           inList: inCard.inList === true,
@@ -16441,16 +17101,19 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           added++;
           linkTracks(inCard, fresh, audioLinks, false);
           linkShots(inCard, fresh, shotLinks, false);
+          linkDocs(inCard, fresh, docLinks, false);
           if (freshBack) {
             linkTracks(inCard.back, freshBack, audioLinks, false);
             linkShots(inCard.back, freshBack, shotLinks, false);
+            linkDocs(inCard.back, freshBack, docLinks, false);
           }
         }
       }
     }
     // Корзинка — теми же правилами, но отдельно: она лежит вне разделов
-    added += mergeBin(incoming, audioLinks, shotLinks);
-    return { added: added, audioLinks: audioLinks, shotLinks: shotLinks };
+    added += mergeBin(incoming, audioLinks, shotLinks, docLinks);
+    return { added: added, audioLinks: audioLinks, shotLinks: shotLinks,
+             docLinks: docLinks };
   }
 
   /**
@@ -16459,7 +17122,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
    *
    * Возвращает, сколько карточек прибавилось.
    */
-  function mergeBin(incoming, audioLinks, shotLinks) {
+  function mergeBin(incoming, audioLinks, shotLinks, docLinks) {
     const inCards = binCardsOf(incoming);
     if (!inCards.length) return 0;
     const bin = binDeck();
@@ -16472,6 +17135,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       if (mine) {
         linkTracks(inCard, mine, audioLinks, true);
         linkShots(inCard, mine, shotLinks, true);
+        linkDocs(inCard, mine, docLinks, true);
         // Записка «откуда пришла» берётся из файла, только если своей
         // нет: на этом устройстве карточку могли убрать из другой
         // колоды, и её собственный адрес возврата вернее.
@@ -16486,6 +17150,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           mergeNote(inCard.back, myBack);
           linkTracks(inCard.back, myBack, audioLinks, true);
           linkShots(inCard.back, myBack, shotLinks, true);
+          linkDocs(inCard.back, myBack, docLinks, true);
         }
         continue;
       }
@@ -16501,9 +17166,11 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       added++;
       linkTracks(inCard, fresh, audioLinks, false);
       linkShots(inCard, fresh, shotLinks, false);
+      linkDocs(inCard, fresh, docLinks, false);
       if (fresh.back && inCard.back) {
         linkTracks(inCard.back, fresh.back, audioLinks, false);
         linkShots(inCard.back, fresh.back, shotLinks, false);
+        linkDocs(inCard.back, fresh.back, docLinks, false);
       }
     }
     return added;
