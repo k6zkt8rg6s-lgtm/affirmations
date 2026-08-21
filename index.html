@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-AS1QeWFOvgwVX5gPTbi9zZYOvkZOunSI8gprZCMeSu8=';
-               style-src 'sha256-ko3T3AAEIIsQsC+KmCWWdODHeKpfJ1CDi0Wx1j3iiEw=';
+               script-src 'sha256-MoELxW0MjbatPyIJt0IwjH0dHWDm47Al7tQha7UjUtQ=';
+               style-src 'sha256-5QNJ/nsoM8cguDtW2+59BwSbSkiADVR0Sm8bF5EOEDg=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -1635,10 +1635,17 @@ body {
    Ряд едет вбок, поэтому снимков может быть сколько угодно: не
    поместились — прокрутил пальцем. */
 /* Обёртка ряда: в ней едет каретка из трёх полос — предыдущей, текущей
-   и следующей. Место под ряд держится, пока снимки есть хоть у одной из
-   трёх карточек: иначе на подъезде соседней экран подпрыгивал бы. */
+   и следующей. Она лежит в верхнем свободном поле СЦЕНЫ, а не отдельной
+   строкой над сценой. Поэтому появление фотографии или документа больше
+   не отнимает 58 точек у сцены, не укорачивает карточку и не опускает её
+   верхнюю границу. В портрете ряд помещается в десятипроцентный воздух
+   над карточкой; сама карточка остаётся строго в центре экрана. */
 .shot-deck {
-  position: relative;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 3;
   height: 0;
   overflow: hidden;
   overflow: clip;
@@ -2051,6 +2058,10 @@ body {
 
 .stage {
   flex: 1;
+  /* Внешний размер карточки считается только от этой сцены. Вложенные
+     полосы лежат абсолютно и не должны заставлять flex-сцену расти или
+     сжиматься в Safari. */
+  min-height: 0;
   position: relative;
   touch-action: pan-y;
 }
@@ -2100,6 +2111,12 @@ body {
   width: 80%;
   max-width: 520px;
   height: 80%;
+  /* Safari иногда пытается учесть внутреннюю полосу аудио как
+     минимальную высоту flex-контейнера. Три одинаковых ограничения
+     делают внешний лист неизменным: текст, название, аудио и вложения
+     перераспределяют только место ВНУТРИ, но не размер самой карточки. */
+  min-height: 80%;
+  max-height: 80%;
   border-radius: 10px;
   background-color: var(--card-yellow);
   border: 1px solid var(--card-yellow-edge);
@@ -3078,7 +3095,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '21.08.2026, 18:35';
+  const BUILD = '21.08.2026, 19:24';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -8843,9 +8860,16 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         if (!c) return false;
         const f = faceOf(c);
         return cardShots(f).length || cardDocs(f).length;
-      });
+    });
     const shotDeck = el('div', { class: 'shot-deck' + (anyAttachments ? ' open' : '') },
       [shotLine]);
+    // Миниатюры живут внутри сцены абсолютным слоем в свободном поле над
+    // карточкой. Раньше shotDeck был отдельной строкой reader и при каждом
+    // появлении фотографии/документа отнимал у stage 58 точек. Поскольку
+    // высота карточки равна 80% stage, лист становился ниже примерно на
+    // 46 точек: верх опускался, низ почти не двигался. Внутри stage ряд не
+    // участвует в раскладке, поэтому геометрия карточек всегда одинакова.
+    stage.appendChild(shotDeck);
     if (before) track.appendChild(before);
     if (after) track.appendChild(after);
     track.appendChild(big);
@@ -9312,7 +9336,6 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         }),
       ]),
       linkRow,
-      shotDeck,
       // Какая карточка из скольких. Отдельной строкой и по центру —
       // прямо над серединой карточки, а не в ряду кнопок: там он стоял
       // между крестиком и кнопками и читался как ещё одна кнопка.
