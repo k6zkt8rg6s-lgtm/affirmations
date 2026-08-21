@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-6F8pKQU4GpVox0yWDnmFcc9gb4mlfD0VqKPbrZM7F2U=';
-               style-src 'sha256-pigooqK0u9kL9gQdbn2kCb42nD2F0EZAl7wuVVePiYE=';
+               script-src 'sha256-AS1QeWFOvgwVX5gPTbi9zZYOvkZOunSI8gprZCMeSu8=';
+               style-src 'sha256-ko3T3AAEIIsQsC+KmCWWdODHeKpfJ1CDi0Wx1j3iiEw=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -2584,11 +2584,10 @@ body {
 /* ------------------------------------------------------------------
    Полоска записи внизу экрана.
 
-   Появляется, когда человек ушёл с карточки, а запись играет дальше.
-   Внутри — та самая дорожка, что играла в карточке: не копия и не
-   картинка, а она сама, переставленная сюда вместе со всеми своими
-   обработчиками. Поэтому кнопка, волна и перемотка работают здесь
-   ровно так же.
+   Появляется сразу после Play. Пока карточка открыта, это синхронный
+   пульт одного и того же звука; после ухода сюда переезжает сама живая
+   дорожка. Поэтому пауза, волна и перемотка в обоих состояниях меняют
+   одно общее место воспроизведения.
 
    Стоит у нижнего края и не уезжает при прокрутке: на телефоне туда
    палец дотягивается легче всего. Отступ снизу — под домашнюю черту
@@ -2669,6 +2668,16 @@ body {
 /* Место под полоску, чтобы она не накрывала последнюю строку списка и
    кнопки внизу читалки. */
 .app.with-mini { padding-bottom: 96px; }
+
+/* На телефоне верхний ряд и нижние кнопки имеют разную высоту, поэтому
+   центр сцены лежит примерно на девять точек ниже физического центра
+   экрана. Компенсируем только телефонную ширину: размер карточки не
+   меняется, MacBook остаётся совершенно прежним. На iPhone 16 Pro
+   центр карточки теперь совпадает с половиной высоты экрана, а сверху
+   по-прежнему остаётся безопасный воздух до номера карточки. */
+@media (max-width: 600px) {
+  .bigcard { top: calc(50% - 9px); }
+}
 
 
 /* ------------------------------------------------------------------
@@ -3069,7 +3078,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '21.08.2026, 17:50';
+  const BUILD = '21.08.2026, 18:35';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -12262,6 +12271,10 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     const barBox = face.barBox, head = face.head, label = face.label;
     const total = face.total;
     let bars = face.bars;
+    // Пока запись находится на своей карточке, нижняя полоска показывает
+    // отдельное лицо того же проигрывателя. Звук по-прежнему один: копия
+    // содержит только кнопки, дорожку и время и управляет этим же api.
+    let miniFace = null, miniBox = null;
 
     // Куски записи. Снаружи это одна дорожка с одним временем, внутри —
     // несколько отдельных файлов, которые проигрываются подряд.
@@ -12355,6 +12368,25 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         if (bars[i].className !== want) bars[i].className = want;
       }
       setWaveClass(p);
+      // Нижняя копия и дорожка на карточке получают одну и ту же секунду
+      // в одном кадре. Поэтому они не могут разойтись даже при быстрой
+      // перемотке, паузе или переходе между кусками записи.
+      if (miniFace) {
+        miniFace.play.textContent = playing ? '❚❚' : '▶';
+        miniFace.head.style.setProperty('opacity', (playing || cur > 0) ? '1' : '0');
+        miniFace.label.textContent = dur
+          ? mmsscc(cur) + ' / ' + mmsscc(dur)
+          : mmsscc(cur);
+        miniFace.fill.style.setProperty('width', pct);
+        miniFace.head.style.setProperty('left', pct);
+        const miniUpto = Math.round(p * miniFace.bars.length);
+        for (let i = 0; i < miniFace.bars.length; i++) {
+          const want = i < miniUpto ? 'played' : '';
+          if (miniFace.bars[i].className !== want) miniFace.bars[i].className = want;
+        }
+        miniFace.wave.className = 'wave' + (playing ? ' playing' : '')
+          + (p >= 0.999 ? ' full' : '');
+      }
     };
 
     /** Пометки на дорожке: «играет» и «полон». */
@@ -12696,6 +12728,9 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
               if (!peaks || !peaks.length) return;
               card.peaks = peaks; save();
               bars = drawBars(barBox, peaks, bars.length);
+              if (miniFace) {
+                miniFace.bars = drawBars(miniFace.barBox, peaks, miniFace.bars.length);
+              }
               setTime(at());
             });
           }).catch(() => {});
@@ -12773,7 +12808,12 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       close: () => { rememberAt(); hush(); markStopped(); },
       // После переезда дорожка стала другой ширины — столбиков в неё
       // помещается другое число
-      refit: () => { if (face.refit()) { bars = face.bars; setTime(at()); } },
+      refit: () => {
+        let changed = false;
+        if (face.refit()) { bars = face.bars; changed = true; }
+        if (miniFace && miniFace.refit()) changed = true;
+        if (changed) setTime(at());
+      },
     };
 
     /**
@@ -13180,6 +13220,52 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         if (ahead.parentNode === audioRow) audioRow.removeChild(ahead);
       }
     };
+    /**
+     * Отдельное лицо нижнего проигрывателя, пока живая дорожка остаётся
+     * на карточке. Оно не создаёт второй Audio и не читает файл заново:
+     * play, пауза, перемотка и протягивание дорожки зовут функции этого
+     * же проигрывателя, а setTime одновременно красит оба лица.
+     */
+    api.miniBox = () => {
+      if (!miniBox) {
+        miniFace = playerFace(card);
+        miniFace.back.addEventListener('click', () => { skipBy(-5); });
+        miniFace.ahead.addEventListener('click', () => { skipBy(5); });
+        miniFace.play.addEventListener('click', togglePlay);
+
+        let miniSeeking = false;
+        const miniSeekTo = (clientX) => {
+          const box = miniFace.wave.getBoundingClientRect
+            ? miniFace.wave.getBoundingClientRect() : null;
+          if (!box || !box.width) return;
+          const p = Math.max(0, Math.min(1, (clientX - box.left) / box.width));
+          seekAt(p * duration());
+        };
+        miniFace.wave.addEventListener('pointerdown', (ev) => {
+          if (taping) return;
+          miniSeeking = true;
+          if (miniFace.wave.setPointerCapture) miniFace.wave.setPointerCapture(ev.pointerId);
+          miniSeekTo(ev.clientX);
+          if (ev.stopPropagation) ev.stopPropagation();
+        });
+        miniFace.wave.addEventListener('pointermove', (ev) => {
+          if (!miniSeeking) return;
+          miniSeekTo(ev.clientX);
+          if (ev.stopPropagation) ev.stopPropagation();
+        });
+        miniFace.wave.addEventListener('pointerup', () => { miniSeeking = false; });
+        miniFace.wave.addEventListener('pointercancel', () => { miniSeeking = false; });
+
+        miniBox = el('div', { class: 'track-box' }, [
+          el('div', { class: 'audio-row' }, [
+            miniFace.back, miniFace.play, miniFace.ahead, miniFace.wave,
+          ]),
+          miniFace.label,
+        ]);
+      }
+      setTime(at());
+      return miniBox;
+    };
     // Полоска, восстановленная после запуска приложения.
     //
     // Обычно проигрыватель попадает под опеку в тот миг, когда зазвучал.
@@ -13327,15 +13413,13 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       spot: opts.spot || { sectionId: view.sectionId, deckId: view.deckId,
                            index: view.index },
     };
-    // Запись пустила очередь: её узел никто в карточку не ставил, и
-    // показать полоску, кроме нас, некому. Звук трогается не сразу, а
-    // когда хранилище отдаст запись, — поэтому и полоска появляется
-    // здесь, а не в той отрисовке, из которой запись запустили.
-    if (!livePlay.home) {
-      miniShow();
-      // На экране списка отмечена играющая строка — она сменилась
-      if (view.name === 'list') render();
-    }
+    // Полоска появляется сразу после первого Play — даже пока человек
+    // остаётся на карточке. Там она является синхронным пультом, а сама
+    // дорожка остаётся на карточке. После ухода прежний живой узел, как
+    // и раньше, занимает её место и продолжает играть без перезапуска.
+    miniShow();
+    // На экране списка отмечена играющая строка — она сменилась
+    if (!livePlay.home && view.name === 'list') render();
   }
 
   /**
@@ -13612,11 +13696,12 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   }
 
   /**
-   * После перерисовки: узел вернулся в карточку — полоска не нужна;
-   * не вернулся — показываем полоску.
+   * После перерисовки полоска нужна всегда, пока проигрыватель открыт.
+   * На своей карточке она показывает синхронный пульт; вне карточки —
+   * сам живой узел дорожки, который продолжает играть без перезапуска.
    */
   function liveSettle() {
-    if (!livePlay || livePlay.home) { miniHide(); return; }
+    if (!livePlay) { miniHide(); return; }
     // Дорожки, висящей в полоске, могло уже и не стать: карточку удалили,
     // запись стёрли, устройство приняло чужой файл обмена. Раньше это
     // сходило с рук — молчащий проигрыватель забывался при первом же
@@ -13743,16 +13828,14 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     if (!id || livePlay) return false;
     const it = findTrack(id);
     if (!it) { rememberOpen(''); return false; }
-    // Экран уже открыт на той самой карточке — и её дорожка стоит в ней
-    // самой, настоящая и живая. Второй такой же в полоске означал бы два
-    // проигрывателя на одну запись: у каждого свой звук, и зазвучали бы
-    // они разом, друг поверх друга. Так и случалось при переходе из
-    // напоминания: оно открывает приложение сразу на нужной карточке.
-    if (view.name === 'read' && view.deckId === it.spot.deckId
-        && view.index === it.spot.index) {
-      rememberOpen('');
-      return false;
-    }
+    // Если приложение сразу открылось на этой же карточке (например, из
+    // напоминания), восстановленный проигрыватель надо поставить в уже
+    // нарисованную карточку и оставить внизу его синхронный пульт. Раньше
+    // полоска здесь намеренно забывалась ради защиты от двух звуков. Теперь
+    // интерфейсов действительно два, но Audio один — защиту обеспечивает
+    // liveHome при следующей отрисовке.
+    const alreadyHere = view.name === 'read' && view.deckId === it.spot.deckId
+      && view.index === it.spot.index;
     const box = el('div', { class: 'track-box' });
     buildPlayer(box, it.slot, {
       title: shortText(it.side.text) || shortText(it.card.text) || 'Запись',
@@ -13764,6 +13847,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       repaint: () => render(),
       gone: () => { dropTrack(it.side, it.slot); save(); liveDrop(); render(); },
     });
+    if (alreadyHere) render();
     return true;
   }
 
@@ -13771,9 +13855,9 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // Полоска внизу экрана.
   //
   // Стоит у нижнего края и никуда не уезжает: на телефоне туда палец
-  // дотягивается легче всего. Внутри — та самая дорожка, что играла в
-  // карточке, целиком: кнопка, волна, время. Она живая — можно
-  // остановить, продолжить и перемотать, не возвращаясь в карточку.
+  // дотягивается легче всего. Пока карточка открыта, внутри — синхронный
+  // пульт той же дорожки: отдельные кнопки и рисунок, но один звук и одно
+  // текущее время. После ухода сюда, как и раньше, переезжает живой узел.
   //
   // Сверху строка с началом текста карточки: нажатие на неё
   // возвращает туда, откуда играет. Крестик справа закрывает совсем.
@@ -13838,8 +13922,14 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       step(-1, '‹', 'Предыдущая запись'),
     ]);
     miniBar.appendChild(line);
-    if (livePlay.api.miniControls) livePlay.api.miniControls(true);
-    adopt(line, livePlay.box);
+    let soundBox = livePlay.box;
+    if (livePlay.home && livePlay.api.miniBox) {
+      if (livePlay.api.miniControls) livePlay.api.miniControls(false);
+      soundBox = livePlay.api.miniBox();
+    } else if (livePlay.api.miniControls) {
+      livePlay.api.miniControls(true);
+    }
+    adopt(line, soundBox);
     line.appendChild(step(1, '›', 'Следующая запись'));
     if (livePlay.api.refit) livePlay.api.refit();
     if (root && root.classList) root.classList.add('with-mini');
