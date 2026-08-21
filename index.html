@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-uNtywf8L4ibLdIJeBSH+teRw++Wo79NM23YfTVlsdqE=';
-               style-src 'sha256-tqjo818Blp8HWoegsj6Y7aNpn0k9LomELyPrEtUzEa4=';
+               script-src 'sha256-57Nc9aoamcahT81gWKP68K4+lN0pmeWQjrvq6oZhIGs=';
+               style-src 'sha256-Lxy2IuFeJUjG52T+WtlfcKc8tIEd1q5L9INU/wu1SHs=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -968,7 +968,25 @@ body {
    края: так дорожке достаётся вся оставшаяся ширина, а рука тянется к
    одному месту, а не к двум разным. */
 .audio-row { display: flex; align-items: center; gap: 8px; }
+.audio-transport { display: flex; align-items: center; gap: 4px; flex: none; }
 .audio-side { display: flex; align-items: center; gap: 0; flex: none; }
+.audio-skip {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .10);
+  color: #2B2408;
+  font: 600 12px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  flex: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.audio-skip:active { background: rgba(0, 0, 0, .22); }
+.audio-skip-back,
+.audio-skip-ahead { white-space: nowrap; }
 .audio-btn {
   min-width: 40px;
   min-height: 40px;
@@ -1115,7 +1133,10 @@ body {
   animation: pulse 1.1s infinite;
 }
 /* Пока пишем, слушать и удалять нечего */
-.audio-btn:disabled, .audio-del:disabled { opacity: .35; cursor: default; }
+.audio-btn:disabled, .audio-skip:disabled, .audio-del:disabled {
+  opacity: .35;
+  cursor: default;
+}
 
 /* Записей больше одной — строка становится ниже.
  *
@@ -1131,6 +1152,7 @@ body {
  * Правила стоят после основных, а не до: так видно, что это именно
  * поправка к готовому виду, а не отдельная его разновидность. */
 .track-row.many .audio-btn { min-width: 34px; min-height: 34px; font-size: 13px; }
+.track-row.many .audio-skip { min-width: 30px; min-height: 30px; font-size: 11px; }
 .track-row.many .wave { height: 26px; }
 .track-row.many .audio-label {
   margin-top: 1px;
@@ -2922,12 +2944,14 @@ html[data-theme="oled"] .mini-play {
   box-shadow: 0 -4px 18px rgba(0, 0, 0, .75);
 }
 html[data-theme="oled"] .mini-play .audio-btn,
+html[data-theme="oled"] .mini-play .audio-skip,
 html[data-theme="oled"] .mini-play .wave,
 html[data-theme="oled"] .mini-play .mini-play-step {
   background: rgba(255, 255, 255, .15);
   color: var(--ink);
 }
 html[data-theme="oled"] .mini-play .audio-btn:active,
+html[data-theme="oled"] .mini-play .audio-skip:active,
 html[data-theme="oled"] .mini-play .mini-play-step:active {
   background: rgba(255, 255, 255, .25);
 }
@@ -2983,7 +3007,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '20.08.2026, 19:31';
+  const BUILD = '21.08.2026, 17:02';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -6698,17 +6722,21 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
    * не лезет. Появилась ссылка — становится красным, и по нему сразу
    * видно, что за карточкой что-то есть.
    *
-   * Нажатие открывает одну строку под кнопками: поле с адресом и рядом
-   * «Открыть», «ОК», «Удалить». Отдельного окна нет намеренно — ради
-   * одной строки закрывать собой карточку незачем.
+   * Короткое нажатие по готовой ссылке сразу открывает её. Удержание
+   * открывает строку правки. Так случайное касание клавиатуры не может
+   * испортить адрес: поле не получает курсор, пока его не коснутся.
    */
   function makeLinkButton(card, row) {
     const btn = el('button', {
       class: 'iconbtn ghost link' + (card.link ? ' on' : ''),
       attrs: {
         type: 'button',
-        'aria-label': card.link ? 'Ссылка карточки' : 'Добавить ссылку',
-        title: card.link ? 'Ссылка карточки' : 'Добавить ссылку',
+        'aria-label': card.link
+          ? 'Открыть ссылку; удерживайте для изменения'
+          : 'Удерживайте, чтобы добавить ссылку',
+        title: card.link
+          ? 'Открыть ссылку (удерживать — изменить)'
+          : 'Удерживать — добавить ссылку',
         'aria-pressed': 'false',
       },
     }, [el('span', { class: 'link-mark' })]);
@@ -6716,9 +6744,12 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     /** Перерисовать саму кнопку под нынешнее состояние карточки. */
     const dress = () => {
       btn.className = 'iconbtn ghost link' + (card.link ? ' on' : '');
-      const name = card.link ? 'Ссылка карточки' : 'Добавить ссылку';
-      btn.setAttribute('aria-label', name);
-      btn.setAttribute('title', name);
+      btn.setAttribute('aria-label', card.link
+        ? 'Открыть ссылку; удерживайте для изменения'
+        : 'Удерживайте, чтобы добавить ссылку');
+      btn.setAttribute('title', card.link
+        ? 'Открыть ссылку (удерживать — изменить)'
+        : 'Удерживать — добавить ссылку');
     };
 
     // Что сделать с набранным, когда строку закрывают значком
@@ -6790,7 +6821,6 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
           save();
           dress();
           fill();
-          if (field.focus) field.focus();
         } },
       });
 
@@ -6827,17 +6857,85 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       });
       // Строку закрывает значок наверху — но набранное перед этим берём
       rowCommit = () => { commit(false); };
-      if (field.focus) field.focus();
     };
 
-    btn.addEventListener('click', () => {
+    // Удержание одинаково работает пальцем и левой кнопкой мыши.
+    // Небольшой сдвиг отменяет его, чтобы свайп карточки не открывал
+    // редактор ссылки.
+    const HOLD_MS = 560;
+    const MOVE_PX = 12;
+    let holdTimer = null, holdId = null, holdX = 0, holdY = 0;
+    let held = false, swallowClick = false;
+    const cancelHold = () => {
+      if (holdTimer !== null) clearTimeout(holdTimer);
+      holdTimer = null; holdId = null;
+    };
+    btn.addEventListener('pointerdown', (ev) => {
+      if (ev.isPrimary === false || (ev.button !== undefined && ev.button !== 0)) return;
+      cancelHold();
+      held = false;
+      // Safari иногда не присылает click после долгого касания. Тогда
+      // старая отметка не должна съесть уже следующее, короткое касание.
+      swallowClick = false;
+      holdId = ev.pointerId;
+      holdX = Number(ev.clientX) || 0;
+      holdY = Number(ev.clientY) || 0;
+      holdTimer = setTimeout(() => {
+        holdTimer = null;
+        held = true;
+        swallowClick = true;
+        openRow();
+      }, HOLD_MS);
+    });
+    btn.addEventListener('pointermove', (ev) => {
+      if (holdId === null || ev.pointerId !== holdId) return;
+      const dx = (Number(ev.clientX) || 0) - holdX;
+      const dy = (Number(ev.clientY) || 0) - holdY;
+      if (Math.sqrt(dx * dx + dy * dy) > MOVE_PX) cancelHold();
+    });
+    btn.addEventListener('pointerup', () => { cancelHold(); });
+    btn.addEventListener('pointercancel', () => { cancelHold(); });
+    btn.addEventListener('contextmenu', (ev) => {
+      if (ev.preventDefault) ev.preventDefault();
+      cancelHold(); held = true; swallowClick = true; openRow();
+    });
+
+    btn.addEventListener('click', (ev) => {
+      if (swallowClick || held) {
+        swallowClick = false; held = false;
+        if (ev.preventDefault) ev.preventDefault();
+        if (ev.stopPropagation) ev.stopPropagation();
+        return;
+      }
       if (row.className.indexOf('on') >= 0) {
         if (rowCommit) rowCommit();
         shut();
         return;
       }
-      openRow();
+      if (card.link) openLink(card.link);
     });
+
+    // Нажатие в любом месте вне строки правки закрывает её. Сам адрес
+    // при этом не меняется, если человек ничего не вводил.
+    const inside = (node, root) => {
+      for (let n = node; n; n = n.parentNode) if (n === root) return true;
+      return false;
+    };
+    const outside = (ev) => {
+      if (row.className.indexOf('on') < 0) return;
+      if (inside(ev.target, row) || inside(ev.target, btn)) return;
+      if (rowCommit) rowCommit();
+      shut();
+    };
+    if (document && document.addEventListener) {
+      document.addEventListener('pointerdown', outside, true);
+      onCleanup(() => {
+        cancelHold();
+        if (document.removeEventListener) {
+          document.removeEventListener('pointerdown', outside, true);
+        }
+      });
+    }
     return btn;
   }
 
@@ -6889,7 +6987,6 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     if (align === 'justify') justifyLater(node);
     return node;
   }
-
 /* ─── 11b-justify.js ───────────────────────────────────────────────────
  * Выравнивание по ширине: язык переносов и защита от дыр между словами
  *
@@ -11302,9 +11399,21 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
    * должна в точности так же, иначе в момент подмены она бы дёрнулась.
    */
   function playerFace(card) {
+    const back = el('button', {
+      class: 'audio-skip audio-skip-back',
+      attrs: { type: 'button', 'aria-label': 'Назад на 5 секунд',
+               title: 'Назад на 5 секунд' },
+      text: '−5',
+    });
     const play = el('button', {
       class: 'audio-btn', attrs: { type: 'button', 'aria-label': 'Прослушать запись' },
       text: '▶',
+    });
+    const ahead = el('button', {
+      class: 'audio-skip audio-skip-ahead',
+      attrs: { type: 'button', 'aria-label': 'Вперёд на 5 секунд',
+               title: 'Вперёд на 5 секунд' },
+      text: '+5',
     });
     // Дорожка сделана как сосуд: пустая полоса, которая по мере
     // проигрывания наполняется слева направо. Столбики громкости лежат
@@ -11323,7 +11432,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       text: total ? '00:00,00 / ' + mmsscc(total) : 'Запись',
     });
 
-    const face = { play, wave, fill, barBox, head, label, total,
+    const face = { back, play, ahead, wave, fill, barBox, head, label, total,
                    bars: drawBars(barBox, card.peaks) };
 
     /**
@@ -11359,7 +11468,9 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
    */
   function stillPlayer(bar, card) {
     const face = playerFace(card);
+    face.back.setAttribute('tabindex', '-1');
     face.play.setAttribute('tabindex', '-1');
+    face.ahead.setAttribute('tabindex', '-1');
     const more = el('button', {
       class: 'audio-more',
       attrs: { type: 'button', 'aria-label': 'Дописать к записи', tabindex: '-1' },
@@ -11370,7 +11481,9 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       attrs: { type: 'button', 'aria-label': 'Удалить запись', tabindex: '-1' },
       text: '✕',
     });
-    bar.appendChild(el('div', { class: 'audio-row' }, [face.play, face.wave,
+    const transport = el('div', { class: 'audio-transport' },
+      [face.back, face.play, face.ahead]);
+    bar.appendChild(el('div', { class: 'audio-row' }, [transport, face.wave,
       el('div', { class: 'audio-side' }, [more, del])]));
     bar.appendChild(face.label);
   }
@@ -11673,7 +11786,6 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     };
     return api;
   }
-
 /* ─── 18-tracks.js ─────────────────────────────────────────────────────
  * Дорожки: отрисовка, перенос между карточками, захват пальцем
  *
@@ -12061,7 +12173,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     // экрана её уборку не выполняет — проигрыватель переезжает целым.
     const token = {};
     const face = playerFace(card);
-    const play = face.play, wave = face.wave, fill = face.fill;
+    const back = face.back, play = face.play, ahead = face.ahead;
+    const wave = face.wave, fill = face.fill;
     const barBox = face.barBox, head = face.head, label = face.label;
     const total = face.total;
     let bars = face.bars;
@@ -12122,7 +12235,12 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     //
     // После первого же звука resumeAt обнуляется, и оба ответа снова
     // ноль, как и были.
+    let seekWanted = null;
     const at = () => {
+      // Несколько быстрых нажатий «−5» / «+5» приходят раньше,
+      // чем браузер успевает переставить звуковой элемент. Считать надо
+      // от уже выбранного человеком места, а не от ещё старого времени.
+      if (seekWanted !== null) return seekWanted;
       if (owner === 'smooth') return seamless() ? smooth.time() : resumeAt;
       if (!audio) return resumeAt;
       const back = heads[idx] || 0;
@@ -12837,6 +12955,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       more.textContent = on ? '■' : '●';
       more.setAttribute('aria-label', on ? 'Остановить дозапись' : 'Дописать к записи');
       play.disabled = on;
+      back.disabled = on;
+      ahead.disabled = on;
       del.disabled = on;
     };
     more.addEventListener('click', () => {
@@ -12862,26 +12982,42 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       }, true, opts && opts.repaint);
     });
 
-    // Перемотка нажатием и протягиванием по дорожке
-    const seekTo = (clientX) => {
-      const box = wave.getBoundingClientRect ? wave.getBoundingClientRect() : null;
-      if (!box || !box.width) return;
-      const p = Math.max(0, Math.min(1, (clientX - box.left) / box.width));
+    // Одно место для всех способов перемотки: по дорожке и кнопками
+    // «−5» / «+5». Оно сохраняет состояние проигрывателя:
+    // звучавшая запись продолжает звучать, пауза остаётся паузой.
+    const seekAt = (place) => {
       const dur = duration();
       if (!dur) return;
-      const t = p * dur;
-      resumeAt = 0;          // человек сам выбрал место — прошлое ни к чему
+      const t = Math.max(0, Math.min(dur, Number(place) || 0));
+      // Пока файл ещё достаётся из хранилища, at() должен уже отвечать
+      // новым местом. Если нажали несколько раз быстро, применится
+      // последнее, а не первое значение.
+      resumeAt = t;
+      seekWanted = t;
       setTime(t);
       // Бесшовный путь перематывает сам: куски заново выкладываются на
       // шкалу от нужной секунды, без всякой догрузки
-      if (owner === 'smooth' && seamless()) { smooth.seek(t); return; }
+      if (owner === 'smooth') {
+        if (seamless()) {
+          smooth.seek(t); resumeAt = 0;
+        }
+        // Если склейка ещё разбирается, оставляем выбранное место в
+        // resumeAt. Как только движок будет готов, первый play начнётся
+        // именно оттуда. Запасной звуковой элемент здесь заводить рано.
+        seekWanted = null;
+        return;
+      }
       ensureAudio().then((a) => {
         if (!a) return;
-        if (!many) { a.currentTime = t; return; }
+        const next = seekWanted;
+        if (next === null) return;
+        seekWanted = null;
+        resumeAt = 0;
+        if (!many) { a.currentTime = next; return; }
         // Найти кусок, в который попала точка, и перемотать внутри него
         let i = 0;
-        while (i + 1 < list.length && t >= offs[i + 1]) i++;
-        const local = Math.max(0, t - offs[i]);
+        while (i + 1 < list.length && next >= offs[i + 1]) i++;
+        const local = Math.max(0, next - offs[i]);
         if (i === idx) {
           try { a.currentTime = local; } catch (e) { /* не принял */ }
           return;
@@ -12890,6 +13026,20 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         goPart(i, !a.paused);
       }).catch(() => {});
     };
+    // Перемотка нажатием и протягиванием по дорожке
+    const seekTo = (clientX) => {
+      const box = wave.getBoundingClientRect ? wave.getBoundingClientRect() : null;
+      if (!box || !box.width) return;
+      const p = Math.max(0, Math.min(1, (clientX - box.left) / box.width));
+      seekAt(p * duration());
+    };
+    const skipBy = (delta) => {
+      if (taping) return;
+      seekAt(at() + delta);
+    };
+    back.addEventListener('click', () => { skipBy(-5); });
+    ahead.addEventListener('click', () => { skipBy(5); });
+    api.seekBy = skipBy;
     let seeking = false;
     wave.addEventListener('pointerdown', (ev) => {
       if (taping) return;              // во время дозаписи перематывать нечего
@@ -12927,7 +13077,8 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       urls.forEach((u) => { if (u) URL.revokeObjectURL(u); });
     }, token);
 
-    bar.appendChild(el('div', { class: 'audio-row' }, [play, wave,
+    const transport = el('div', { class: 'audio-transport' }, [back, play, ahead]);
+    bar.appendChild(el('div', { class: 'audio-row' }, [transport, wave,
       el('div', { class: 'audio-side' }, [more, del])]));
     bar.appendChild(label);
     // Полоска, восстановленная после запуска приложения.
@@ -12941,7 +13092,6 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   }
 
   let audioCleanup = [];
-
 /* ─── 19b-live-play.js ─────────────────────────────────────────────────
  * Запись, которая играет дальше при переходах, и полоска внизу экрана
  *
