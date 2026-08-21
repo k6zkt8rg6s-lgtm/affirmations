@@ -27,8 +27,8 @@
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               script-src 'sha256-57Nc9aoamcahT81gWKP68K4+lN0pmeWQjrvq6oZhIGs=';
-               style-src 'sha256-Lxy2IuFeJUjG52T+WtlfcKc8tIEd1q5L9INU/wu1SHs=';
+               script-src 'sha256-6F8pKQU4GpVox0yWDnmFcc9gb4mlfD0VqKPbrZM7F2U=';
+               style-src 'sha256-pigooqK0u9kL9gQdbn2kCb42nD2F0EZAl7wuVVePiYE=';
                img-src 'self' data: blob:;
                media-src blob:;
                worker-src 'self';
@@ -968,25 +968,82 @@ body {
    края: так дорожке достаётся вся оставшаяся ширина, а рука тянется к
    одному месту, а не к двум разным. */
 .audio-row { display: flex; align-items: center; gap: 8px; }
-.audio-transport { display: flex; align-items: center; gap: 4px; flex: none; }
 .audio-side { display: flex; align-items: center; gap: 0; flex: none; }
 .audio-skip {
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 40px;
+  min-height: 40px;
   padding: 0;
   border: 0;
   border-radius: 50%;
   background: rgba(0, 0, 0, .10);
   color: #2B2408;
-  font: 600 12px/1 -apple-system, BlinkMacSystemFont, sans-serif;
-  font-variant-numeric: tabular-nums;
   cursor: pointer;
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   -webkit-tap-highlight-color: transparent;
 }
 .audio-skip:active { background: rgba(0, 0, 0, .22); }
 .audio-skip-back,
 .audio-skip-ahead { white-space: nowrap; }
+/* Знакомый знак «5 секунд»: число внутри почти полного круга, у которого
+   конец превращается в стрелку. Рисуется своим CSS, поэтому одинаково
+   чёток офлайн, на iPhone и на Mac и не зависит от установленного шрифта. */
+.audio-skip-mark {
+  position: relative;
+  display: block;
+  width: 25px;
+  height: 25px;
+  pointer-events: none;
+}
+.audio-skip-mark::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 15px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+.audio-skip-mark::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+.audio-skip-mark-back::before {
+  border-right-color: transparent;
+  transform: rotate(18deg);
+}
+.audio-skip-mark-back::after {
+  left: 1px;
+  border-right: 6px solid currentColor;
+  transform: rotate(-34deg);
+}
+.audio-skip-mark-ahead::before {
+  border-left-color: transparent;
+  transform: rotate(-18deg);
+}
+.audio-skip-mark-ahead::after {
+  right: 1px;
+  border-left: 6px solid currentColor;
+  transform: rotate(34deg);
+}
+.audio-skip-five {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 1px;
+  font: 700 10px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
 .audio-btn {
   min-width: 40px;
   min-height: 40px;
@@ -1152,7 +1209,6 @@ body {
  * Правила стоят после основных, а не до: так видно, что это именно
  * поправка к готовому виду, а не отдельная его разновидность. */
 .track-row.many .audio-btn { min-width: 34px; min-height: 34px; font-size: 13px; }
-.track-row.many .audio-skip { min-width: 30px; min-height: 30px; font-size: 11px; }
 .track-row.many .wave { height: 26px; }
 .track-row.many .audio-label {
   margin-top: 1px;
@@ -1915,7 +1971,13 @@ body {
      каждую строку отдельно. Ряд честно вставал в две строки на всех
      телефонах, включая широкие, — вместо одной сжатой. */
   flex-wrap: nowrap;
+  /* На iPhone долгое касание принадлежит кнопкам приложения. Safari не
+     должен выделять крестик или подпись рядом и показывать своё меню. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
+.reader-bar .iconbtn.link { touch-action: manipulation; }
 /* Кнопок в ряду стало девять — прибавилась заметка. Девять кружков по
    44 точки это 396, и ни на один телефон они уже не помещаются. Поэтому
    ряд сжимается: сперва просвет между кнопками, потом сами кнопки — до
@@ -3007,7 +3069,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   // устройстве можно было своими глазами убедиться, какая версия
   // открыта: иначе «на телефоне работает, на компьютере нет» проверить
   // нечем — а чаще всего это просто старый файл на одном из них.
-  const BUILD = '21.08.2026, 17:02';
+  const BUILD = '21.08.2026, 17:50';
   const buildLabel = () => (BUILD.indexOf('#') >= 0
     ? 'версия для разработки' : 'версия от ' + BUILD);
 
@@ -6866,6 +6928,16 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     const MOVE_PX = 12;
     let holdTimer = null, holdId = null, holdX = 0, holdY = 0;
     let held = false, swallowClick = false;
+    // На iPhone долгое касание по кнопке иногда успевает включить
+    // системное выделение соседнего текста и меню «Скопировать / Найти».
+    // У значка своё действие, поэтому перед удержанием снимаем любое
+    // случайное выделение. CSS ниже дополнительно запрещает callout.
+    const clearNativeSelection = () => {
+      try {
+        const sel = window && window.getSelection ? window.getSelection() : null;
+        if (sel && sel.removeAllRanges) sel.removeAllRanges();
+      } catch (e) { /* Safari не дал доступ — удержание всё равно работает */ }
+    };
     const cancelHold = () => {
       if (holdTimer !== null) clearTimeout(holdTimer);
       holdTimer = null; holdId = null;
@@ -6873,6 +6945,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     btn.addEventListener('pointerdown', (ev) => {
       if (ev.isPrimary === false || (ev.button !== undefined && ev.button !== 0)) return;
       cancelHold();
+      clearNativeSelection();
       held = false;
       // Safari иногда не присылает click после долгого касания. Тогда
       // старая отметка не должна съесть уже следующее, короткое касание.
@@ -6884,6 +6957,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
         holdTimer = null;
         held = true;
         swallowClick = true;
+        clearNativeSelection();
         openRow();
       }, HOLD_MS);
     });
@@ -6895,8 +6969,16 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
     });
     btn.addEventListener('pointerup', () => { cancelHold(); });
     btn.addEventListener('pointercancel', () => { cancelHold(); });
+    btn.addEventListener('selectstart', (ev) => {
+      if (ev.preventDefault) ev.preventDefault();
+      clearNativeSelection();
+    });
+    btn.addEventListener('dragstart', (ev) => {
+      if (ev.preventDefault) ev.preventDefault();
+    });
     btn.addEventListener('contextmenu', (ev) => {
       if (ev.preventDefault) ev.preventDefault();
+      clearNativeSelection();
       cancelHold(); held = true; swallowClick = true; openRow();
     });
 
@@ -11398,13 +11480,19 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
    * карточкам в читалке. Там дорожка только показывается — но выглядеть
    * должна в точности так же, иначе в момент подмены она бы дёрнулась.
    */
+  function skipMark(kind) {
+    return el('span', {
+      class: 'audio-skip-mark audio-skip-mark-' + kind,
+      attrs: { 'aria-hidden': 'true' },
+    }, [el('span', { class: 'audio-skip-five', text: '5' })]);
+  }
+
   function playerFace(card) {
     const back = el('button', {
       class: 'audio-skip audio-skip-back',
       attrs: { type: 'button', 'aria-label': 'Назад на 5 секунд',
                title: 'Назад на 5 секунд' },
-      text: '−5',
-    });
+    }, [skipMark('back')]);
     const play = el('button', {
       class: 'audio-btn', attrs: { type: 'button', 'aria-label': 'Прослушать запись' },
       text: '▶',
@@ -11413,8 +11501,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       class: 'audio-skip audio-skip-ahead',
       attrs: { type: 'button', 'aria-label': 'Вперёд на 5 секунд',
                title: 'Вперёд на 5 секунд' },
-      text: '+5',
-    });
+    }, [skipMark('ahead')]);
     // Дорожка сделана как сосуд: пустая полоса, которая по мере
     // проигрывания наполняется слева направо. Столбики громкости лежат
     // поверх заливки, чтобы было видно, где голос, а где тишина.
@@ -11464,13 +11551,12 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
    *
    * Кнопки на месте, но выключены: карточка помечена aria-hidden, и в
    * обход по Tab они попадать не должны. Кнопку удаления рисуем тоже —
-   * без неё сосуд оказался бы шире, и при подмене он бы сжался.
+   * без неё сосуд оказался бы шире, и при подмене он бы сжался. Кнопок
+   * перемотки здесь нет: они принадлежат только нижнему проигрывателю.
    */
   function stillPlayer(bar, card) {
     const face = playerFace(card);
-    face.back.setAttribute('tabindex', '-1');
     face.play.setAttribute('tabindex', '-1');
-    face.ahead.setAttribute('tabindex', '-1');
     const more = el('button', {
       class: 'audio-more',
       attrs: { type: 'button', 'aria-label': 'Дописать к записи', tabindex: '-1' },
@@ -11481,9 +11567,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       attrs: { type: 'button', 'aria-label': 'Удалить запись', tabindex: '-1' },
       text: '✕',
     });
-    const transport = el('div', { class: 'audio-transport' },
-      [face.back, face.play, face.ahead]);
-    bar.appendChild(el('div', { class: 'audio-row' }, [transport, face.wave,
+    bar.appendChild(el('div', { class: 'audio-row' }, [face.play, face.wave,
       el('div', { class: 'audio-side' }, [more, del])]));
     bar.appendChild(face.label);
   }
@@ -12955,8 +13039,6 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       more.textContent = on ? '■' : '●';
       more.setAttribute('aria-label', on ? 'Остановить дозапись' : 'Дописать к записи');
       play.disabled = on;
-      back.disabled = on;
-      ahead.disabled = on;
       del.disabled = on;
     };
     more.addEventListener('click', () => {
@@ -13077,10 +13159,27 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       urls.forEach((u) => { if (u) URL.revokeObjectURL(u); });
     }, token);
 
-    const transport = el('div', { class: 'audio-transport' }, [back, play, ahead]);
-    bar.appendChild(el('div', { class: 'audio-row' }, [transport, wave,
-      el('div', { class: 'audio-side' }, [more, del])]));
+    const audioRow = el('div', { class: 'audio-row' }, [play, wave,
+      el('div', { class: 'audio-side' }, [more, del])]);
+    bar.appendChild(audioRow);
     bar.appendChild(label);
+    /**
+     * Перемотка нужна только в нижнем проигрывателе.
+     *
+     * Живая дорожка переезжает из карточки вниз одним и тем же узлом.
+     * Поэтому кнопки не прячем стилями, а действительно вставляем при
+     * переезде и снимаем при возвращении: на карточке остаётся прежняя
+     * длинная дорожка без двух лишних органов управления.
+     */
+    api.miniControls = (on) => {
+      if (on) {
+        if (back.parentNode !== audioRow) audioRow.insertBefore(back, play);
+        if (ahead.parentNode !== audioRow) audioRow.insertBefore(ahead, wave);
+      } else {
+        if (back.parentNode === audioRow) audioRow.removeChild(back);
+        if (ahead.parentNode === audioRow) audioRow.removeChild(ahead);
+      }
+    };
     // Полоска, восстановленная после запуска приложения.
     //
     // Обычно проигрыватель попадает под опеку в тот миг, когда зазвучал.
@@ -13539,6 +13638,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
   function liveHome(row, opts) {
     if (!livePlay) return;
     livePlay.home = true;
+    if (livePlay.api.miniControls) livePlay.api.miniControls(false);
     if (opts) {
       livePlay.opts.repaint = opts.repaint;
       livePlay.opts.gone = opts.gone;
@@ -13738,6 +13838,7 @@ html[data-theme="oled"] .mini-play .audio-label { color: var(--ink-soft); }
       step(-1, '‹', 'Предыдущая запись'),
     ]);
     miniBar.appendChild(line);
+    if (livePlay.api.miniControls) livePlay.api.miniControls(true);
     adopt(line, livePlay.box);
     line.appendChild(step(1, '›', 'Следующая запись'));
     if (livePlay.api.refit) livePlay.api.refit();
